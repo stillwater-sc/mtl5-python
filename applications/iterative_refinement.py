@@ -146,12 +146,24 @@ def compare_with_full_precision(A: np.ndarray, b: np.ndarray, x_refined: np.ndar
         rel_err = np.linalg.norm(x_sol - x_exact) / np.linalg.norm(x_exact)
         print(f"  {name:<30s}  {rel_err:26.6e}")
 
-    # Verify refinement achieved near-f64 accuracy
-    err_refined = np.linalg.norm(x_refined - x_exact) / np.linalg.norm(x_exact)
-    err_fp16 = np.linalg.norm(x_fp16_only - x_exact) / np.linalg.norm(x_exact)
+    # Summarize: compare absolute errors to avoid division-by-zero artifacts
+    eps = np.finfo(np.float64).eps * np.linalg.norm(x_exact)
+    abs_err_fp16 = np.linalg.norm(x_fp16_only - x_exact)
+    abs_err_refined = np.linalg.norm(x_refined - x_exact)
+    abs_err_f64 = np.linalg.norm(x_f64 - x_exact)
 
-    improvement = err_fp16 / max(err_refined, 1e-16)
-    print(f"\n  Refinement improved fp16 accuracy by {improvement:.0f}×")
+    print(f"\n  fp16-only absolute error:   {abs_err_fp16:.6e}")
+    print(f"  Refined absolute error:     {abs_err_refined:.6e}")
+    print(f"  f64 solve absolute error:   {abs_err_f64:.6e}")
+    print(f"  Machine epsilon × ||x||:    {eps:.6e}")
+
+    if abs_err_refined < eps:
+        print("\n  Refinement recovered full f64 machine precision from fp16.")
+    elif abs_err_fp16 > 0:
+        improvement = abs_err_fp16 / abs_err_refined
+        digits = np.log10(improvement)
+        print(f"\n  Refinement improved accuracy by {improvement:.1f}x"
+              f" ({digits:.1f} decimal digits)")
 
 
 def main():
