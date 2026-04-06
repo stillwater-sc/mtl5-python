@@ -119,38 +119,79 @@ m.def("vector", [](nb::ndarray<int32_t, nb::ndim<1>, ...> a) { ... });
 
 nanobind inspects the incoming NumPy array's dtype and dispatches to the matching overload. If no overload matches, it raises a `TypeError` with a clear message listing the supported types.
 
-### Adding a new type
+### Two registration paths
 
-Adding a new scalar type requires exactly three things:
+There are two kinds of scalar types, each with a different registration pattern:
+
+#### Native C++ types (float, double, int32_t, int64_t)
+
+These have corresponding NumPy dtypes. nanobind's `nb::ndarray<T, ...>` dispatches based on the incoming array's dtype automatically:
+
+```cpp
+register_native_with_solve<float>(m);   // f32
+register_native_with_solve<double>(m);  // f64
+register_native<int32_t>(m);           // i32
+```
+
+Users call `mtl5.vector(np_array)` and the right overload is selected by dtype.
+
+#### Universal number types (fp8, fp16, posit, cfloat, etc.)
+
+These have no NumPy dtype equivalent. They use **named factory functions** that accept float64 arrays and convert:
+
+```cpp
+// 1. type_suffix specialization
+template <> constexpr const char* type_suffix<fp16>() { return "fp16"; }
+
+// 2. One registration call — generates DenseVector_fp16, DenseMatrix_fp16,
+//    vector_fp16(), matrix_fp16(), norm/dot/solve on typed objects
+register_universal<fp16>(m, "vector_fp16", "matrix_fp16");
+```
+
+Users call `mtl5.vector_fp16(np_array)` to create fp16 vectors. Operations like `norm()`, `dot()`, and `solve()` accept the typed objects directly:
+
+```python
+v = mtl5.vector_fp16(np.array([3.0, 4.0]))
+print(mtl5.norm(v))      # works — overloaded on DenseVector_fp16
+print(mtl5.dot(v, v))    # works — overloaded on DenseVector_fp16
+
+A = mtl5.matrix_fp16(np.eye(3))
+b = mtl5.vector_fp16(np.ones(3))
+x = mtl5.solve(A, b)     # returns DenseVector_fp16
+```
+
+The `to_numpy()` method converts back to float64 for interop with the NumPy ecosystem.
+
+### Adding a new Universal type
+
+Adding a new type from the Stillwater Universal library requires exactly two things:
 
 ```cpp
 // 1. type_suffix specialization
 template <> constexpr const char* type_suffix<posit<16,2>>() { return "posit16"; }
 
-// 2. numpy_dtype specialization (once the custom dtype is registered with NumPy)
-template <> struct numpy_dtype<posit<16,2>> {
-    static constexpr auto value = nb::dtype<posit<16,2>>();
-};
-
-// 3. One registration call in NB_MODULE
-register_all_with_solve<posit<16,2>>(m);   // posit16
+// 2. One registration call in NB_MODULE
+register_universal<posit<16,2>>(m, "vector_posit16", "matrix_posit16");
 ```
 
-This generates: `DenseVector_posit16`, `DenseMatrix_posit16`, and typed overloads for `vector()`, `matrix()`, `norm()`, `dot()`, `solve()`.
+This generates: `DenseVector_posit16`, `DenseMatrix_posit16`, `vector_posit16()`, `matrix_posit16()`, and overloaded `norm()`, `dot()`, `solve()` on the typed objects.
 
-### Planned type roadmap
+### Type roadmap
 
-| Priority | Type | Suffix | C++ type | Notes |
+| Priority | Type | Suffix | C++ type | Status |
 |---|---|---|---|---|
-| Current | IEEE single | `f32` | `float` | Done |
-| Current | IEEE double | `f64` | `double` | Done |
-| Current | 32-bit int | `i32` | `int32_t` | Done |
-| Current | 64-bit int | `i64` | `int64_t` | Done |
-| Next | posit16 | `posit16` | `posit<16,2>` | Requires custom dtype (#5) |
-| Next | posit32 | `posit32` | `posit<32,2>` | Requires custom dtype (#5) |
-| Future | fp8 | `fp8` | `cfloat<8,2>` | ML inference workloads |
-| Future | fp16 | `fp16` | `cfloat<16,5>` or `half` | Standard half-precision |
-| Future | fp128 | `fp128` | `cfloat<128,15>` | Extended precision |
+| Current | IEEE single | `f32` | `float` | Done — native dtype dispatch |
+| Current | IEEE double | `f64` | `double` | Done — native dtype dispatch |
+| Current | 32-bit int | `i32` | `int32_t` | Done — native dtype dispatch |
+| Current | 64-bit int | `i64` | `int64_t` | Done — native dtype dispatch |
+| Current | IEEE fp8 | `fp8` | `sw::universal::fp8` (`cfloat<8,2>`) | Done — named factory |
+| Current | IEEE fp16 | `fp16` | `sw::universal::fp16` (`cfloat<16,5>`) | Done — named factory |
+| Next | bfloat16 | `bf16` | `sw::universal::bfloat_t` (`cfloat<16,8>`) | Named factory |
+| Next | fp8e4m3 | `fp8e4m3` | `sw::universal::fp8e4m3` (`cfloat<8,4>`) | Named factory (NVIDIA) |
+| Next | fp8e5m2 | `fp8e5m2` | `sw::universal::fp8e5m2` (`cfloat<8,5>`) | Named factory (ARM/AMD) |
+| Next | posit16 | `posit16` | `posit<16,2>` | Named factory |
+| Next | posit32 | `posit32` | `posit<32,2>` | Named factory |
+| Future | fp128 | `fp128` | `sw::universal::fp128` (`cfloat<128,15>`) | Named factory |
 
 ### Interaction with KPU dispatch
 
@@ -167,3 +208,11 @@ The typed-class approach is also the pattern used by PyTorch (`torch.float32`, `
 **Why overloaded functions instead of runtime dtype inspection?**
 
 nanobind's overload resolution is implemented in C++ and runs at function-call entry, before any Python-level dispatch. This is faster than inspecting `array.dtype` in a Python `if/elif` chain or a C++ `switch` on dtype codes. It also produces better error messages when an unsupported dtype is passed.
+
+**Why named factories for Universal types (`vector_fp16`) instead of overloading `vector()`?**
+
+nanobind's `nb::ndarray<T, ...>` can only dispatch on types that have a NumPy dtype code (float32, float64, int32, etc.). Universal types like `cfloat<16,5>` have no NumPy dtype until custom dtype registration is implemented (issue #5). Named factories make the type explicit in the call and avoid ambiguity. Once custom dtypes are registered, `vector()` overloads can be added alongside the named factories.
+
+### Dependencies
+
+The Universal number types come from the [Stillwater Universal](https://github.com/stillwater-sc/universal) library, a separate header-only C++ library. It is fetched via CMake FetchContent alongside MTL5. The `config/TestMatrixDataDirConfig.hpp.in` stub is required because Universal's CMakeLists.txt references `CMAKE_SOURCE_DIR` for test matrix data paths, which resolves to the parent project when used via FetchContent.

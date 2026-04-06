@@ -1,0 +1,4 @@
+// TestMatrixDataDirConfig.hpp.in
+// Stub for Universal library FetchContent compatibility
+#pragma once
+#define TEST_MATRIX_DATA_DIRECTORY ""

@@ -18,15 +18,21 @@ def test_public_api():
 
 
 def test_typed_vector_classes():
-    for suffix in ["f32", "f64", "i32", "i64"]:
+    for suffix in ["f32", "f64", "fp8", "fp16", "i32", "i64"]:
         name = f"DenseVector_{suffix}"
         assert hasattr(mtl5, name), f"mtl5.{name} not found"
 
 
 def test_typed_matrix_classes():
-    for suffix in ["f32", "f64", "i32", "i64"]:
+    for suffix in ["f32", "f64", "fp8", "fp16", "i32", "i64"]:
         name = f"DenseMatrix_{suffix}"
         assert hasattr(mtl5, name), f"mtl5.{name} not found"
+
+
+def test_universal_factories():
+    for suffix in ["fp8", "fp16"]:
+        assert hasattr(mtl5, f"vector_{suffix}"), f"mtl5.vector_{suffix} not found"
+        assert hasattr(mtl5, f"matrix_{suffix}"), f"mtl5.matrix_{suffix} not found"
 
 
 def test_default_aliases():

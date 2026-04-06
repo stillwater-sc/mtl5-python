@@ -18,7 +18,7 @@ nanobind_add_module(_core src/mtl5_module.cpp)
 
 # Use namespaced target — works for both find_package and FetchContent
 # (FetchContent creates both 'mtl5' and 'MTL5::mtl5' alias)
-target_link_libraries(_core PRIVATE MTL5::mtl5)
+target_link_libraries(_core PRIVATE MTL5::mtl5 universal)
 
 # Install the extension module into the mtl5 package directory
 install(TARGETS _core DESTINATION mtl5)

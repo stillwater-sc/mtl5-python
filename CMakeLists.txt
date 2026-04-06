@@ -24,6 +24,34 @@ if(NOT MTL5_FOUND)
     FetchContent_MakeAvailable(mtl5)
 endif()
 
+# --- Universal number library (header-only) ---
+# Provides cfloat<nbits,es>, posit<nbits,es>, and other custom number types
+find_package(universal QUIET)
+if(NOT universal_FOUND)
+    include(FetchContent)
+    set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_DEMONSTRATION OFF CACHE BOOL "" FORCE)
+    set(BUILD_NUMBERS OFF CACHE BOOL "" FORCE)
+    set(BUILD_NUMERICS OFF CACHE BOOL "" FORCE)
+    set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(BUILD_REGRESSION_SUITES OFF CACHE BOOL "" FORCE)
+    set(BUILD_CMD_LINE_TOOLS OFF CACHE BOOL "" FORCE)
+    set(BUILD_EDUCATION OFF CACHE BOOL "" FORCE)
+    set(BUILD_APPLICATIONS OFF CACHE BOOL "" FORCE)
+    set(BUILD_PLAYGROUND OFF CACHE BOOL "" FORCE)
+    set(BUILD_VALIDATION_HW OFF CACHE BOOL "" FORCE)
+    set(BUILD_C_API_LIB OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        universal
+        GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
+        GIT_TAG        main
+        GIT_SHALLOW    TRUE
+        EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(universal)
+endif()
+
 if(MTL5_ENABLE_PYTHON)
     add_subdirectory(python)
 endif()
