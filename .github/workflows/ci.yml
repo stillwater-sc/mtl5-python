@@ -37,9 +37,9 @@ jobs:
             python: "3.12"
             compiler: clang
           # macOS
-          - os: macos-13
-            python: "3.10"
           - os: macos-14
+            python: "3.10"
+          - os: macos-15
             python: "3.12"
           # Windows
           - os: windows-2022

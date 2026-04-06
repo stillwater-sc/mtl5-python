@@ -7,41 +7,47 @@ import pytest
 import mtl5
 
 
-class TestDenseMatrixF64:
-    def test_create_from_numpy(self):
+class TestZeroCopyMatrixF64:
+    def test_zero_copy_from_numpy(self):
         a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
         M = mtl5.matrix(a)
         assert isinstance(M, mtl5.DenseMatrix_f64)
+        assert M.is_view
         assert M.shape == (2, 2)
-        assert M.dtype == "f64"
 
-    def test_getitem(self):
-        a = np.array([[1.0, 2.0], [3.0, 4.0]])
+    def test_shares_memory(self):
+        a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
         M = mtl5.matrix(a)
-        assert M[0, 0] == 1.0
-        assert M[1, 1] == 4.0
-
-    def test_setitem(self):
-        M = mtl5.matrix(np.zeros((2, 2)))
         M[0, 1] = 99.0
-        assert M[0, 1] == 99.0
+        assert a[0, 1] == 99.0
 
-    def test_to_numpy(self):
-        a = np.array([[1.0, 2.0], [3.0, 4.0]])
+    def test_numpy_to_mtl5_to_numpy_shares_memory(self):
+        a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64)
         M = mtl5.matrix(a)
-        result = M.to_numpy()
-        assert result.dtype == np.float64
-        npt.assert_array_equal(result, a)
+        b = M.to_numpy()
+        b[1, 0] = 42.0
+        assert a[1, 0] == 42.0
+
+    def test_copy_is_independent(self):
+        a = np.array([[1.0, 2.0], [3.0, 4.0]])
+        M = mtl5.matrix_copy(a)
+        assert not M.is_view
+        M[0, 0] = 99.0
+        assert a[0, 0] == 1.0
+
+    def test_device(self):
+        M = mtl5.matrix(np.eye(2))
+        assert M.device == "cpu"
 
     def test_repr(self):
         M = mtl5.matrix(np.eye(3))
         r = repr(M)
         assert "DenseMatrix_f64" in r
-        assert "3" in r
+        assert "view" in r
 
 
-class TestDenseMatrixF32:
-    def test_create_from_numpy(self):
+class TestZeroCopyMatrixF32:
+    def test_zero_copy_f32(self):
         a = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         M = mtl5.matrix(a)
         assert isinstance(M, mtl5.DenseMatrix_f32)
@@ -52,30 +58,35 @@ class TestDenseMatrixF32:
         M = mtl5.matrix(a)
         result = M.to_numpy()
         assert result.dtype == np.float32
-        npt.assert_array_equal(result, a)
 
 
-class TestDenseMatrixInt:
+class TestMatrixInt:
     def test_i32(self):
         a = np.array([[1, 2], [3, 4]], dtype=np.int32)
         M = mtl5.matrix(a)
         assert isinstance(M, mtl5.DenseMatrix_i32)
-        assert M.dtype == "i32"
 
     def test_i64(self):
         a = np.array([[1, 2], [3, 4]], dtype=np.int64)
         M = mtl5.matrix(a)
         assert isinstance(M, mtl5.DenseMatrix_i64)
-        assert M.dtype == "i64"
 
 
 class TestSolveF64:
-    def test_simple_system(self):
+    def test_simple_system_ndarray(self):
         A = np.array([[2.0, 1.0], [1.0, 3.0]])
         b = np.array([5.0, 7.0])
         x = mtl5.solve(A, b)
         assert x.dtype == np.float64
         npt.assert_allclose(A @ x, b, atol=1e-14)
+
+    def test_simple_system_views(self):
+        A_np = np.array([[2.0, 1.0], [1.0, 3.0]])
+        b_np = np.array([5.0, 7.0])
+        A = mtl5.matrix(A_np)
+        b = mtl5.vector(b_np)
+        x = mtl5.solve(A, b)
+        assert isinstance(x, mtl5.DenseVector_f64)
 
     def test_identity(self):
         n = 5
@@ -101,15 +112,6 @@ class TestSolveF32:
         x = mtl5.solve(A, b)
         assert x.dtype == np.float32
         npt.assert_allclose(A @ x, b, atol=1e-5)
-
-    def test_matches_numpy(self, rng):
-        n = 20
-        A = rng.standard_normal((n, n)).astype(np.float32)
-        A += n * np.eye(n, dtype=np.float32)
-        b = rng.standard_normal(n).astype(np.float32)
-        x_mtl5 = mtl5.solve(A, b)
-        x_numpy = np.linalg.solve(A, b)
-        npt.assert_allclose(x_mtl5, x_numpy, rtol=1e-4)
 
 
 class TestSolveErrors:

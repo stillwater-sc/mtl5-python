@@ -1,10 +1,10 @@
 """MTL5 Python bindings — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch."""
 
 from mtl5._core import (
-    # Native IEEE types
+    # Native IEEE types (zero-copy views)
     DenseMatrix_f32,
     DenseMatrix_f64,
-    # Universal number types
+    # Universal number types (copy-converting)
     DenseMatrix_fp8,
     DenseMatrix_fp16,
     DenseMatrix_i32,
@@ -16,14 +16,18 @@ from mtl5._core import (
     DenseVector_i32,
     DenseVector_i64,
     __version__,
+    # Device management
+    devices,
     # Operations (auto-dispatch on input dtype for native types)
     dot,
     matrix,
+    matrix_copy,
     matrix_fp8,
     matrix_fp16,
     norm,
     solve,
     vector,
+    vector_copy,
     vector_fp8,
     vector_fp16,
 )
@@ -50,14 +54,18 @@ __all__ = [
     "DenseMatrix_fp16",
     "DenseMatrix_i32",
     "DenseMatrix_i64",
+    # Device management
+    "devices",
     # Operations
     "dot",
     "matrix",
+    "matrix_copy",
     "matrix_fp8",
     "matrix_fp16",
     "norm",
     "solve",
     "vector",
+    "vector_copy",
     "vector_fp8",
     "vector_fp16",
 ]

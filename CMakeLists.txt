@@ -4,6 +4,12 @@ project(mtl5_python CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# MSVC: report correct __cplusplus value so that C++20 headers like <bit>
+# are properly detected by Universal's bit_cast.hpp
+if(MSVC)
+    add_compile_options(/Zc:__cplusplus)
+endif()
+
 option(MTL5_ENABLE_PYTHON "Build Python bindings" ON)
 
 # --- MTL5 (header-only) ---
