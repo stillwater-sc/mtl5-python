@@ -13,5 +13,22 @@ def test_version_string():
 
 
 def test_public_api():
-    for name in ["vector", "matrix", "norm", "dot", "solve", "DenseVector", "DenseMatrix"]:
+    for name in ["vector", "matrix", "norm", "dot", "solve"]:
         assert hasattr(mtl5, name), f"mtl5.{name} not found"
+
+
+def test_typed_vector_classes():
+    for suffix in ["f32", "f64", "i32", "i64"]:
+        name = f"DenseVector_{suffix}"
+        assert hasattr(mtl5, name), f"mtl5.{name} not found"
+
+
+def test_typed_matrix_classes():
+    for suffix in ["f32", "f64", "i32", "i64"]:
+        name = f"DenseMatrix_{suffix}"
+        assert hasattr(mtl5, name), f"mtl5.{name} not found"
+
+
+def test_default_aliases():
+    assert mtl5.DenseVector is mtl5.DenseVector_f64
+    assert mtl5.DenseMatrix is mtl5.DenseMatrix_f64
