@@ -39,3 +39,25 @@
 
 # debug information files
 *.dwo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+wheelhouse/
+*.whl
+.eggs/
+
+# Build directories
+_skbuild/
+_cmake_test_compile/
+
+# IDE
+.vscode/
+.idea/
+
+# Virtual environments
+.venv/
+venv/

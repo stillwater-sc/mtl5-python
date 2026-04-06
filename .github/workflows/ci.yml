@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-22.04
+            python: "3.10"
+            compiler: gcc
+          - os: ubuntu-22.04
+            python: "3.11"
+            compiler: gcc
+          - os: ubuntu-22.04
+            python: "3.12"
+            compiler: gcc
+          - os: ubuntu-22.04
+            python: "3.12"
+            compiler: clang
+          # macOS
+          - os: macos-13
+            python: "3.10"
+          - os: macos-14
+            python: "3.12"
+          # Windows
+          - os: windows-2022
+            python: "3.10"
+          - os: windows-2022
+            python: "3.12"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Clang (Linux)
+        if: matrix.compiler == 'clang'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-15
+          echo "CC=clang-15" >> $GITHUB_ENV
+          echo "CXX=clang++-15" >> $GITHUB_ENV
+
+      - name: Install package
+        run: pip install ".[dev]" -v
+
+      - name: Run tests
+        run: pytest -v
+
+  ecosystem-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with all optional dependencies
+        run: |
+          pip install ".[dev]" -v
+          pip install pandas scikit-learn
+          # torch and jax are large; install CPU-only variants
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install "jax[cpu]"
+      - name: Run all tests
+        run: pytest -v
