@@ -16,6 +16,9 @@
 
 // Universal number types
 #include <universal/number/cfloat/cfloat.hpp>
+#include <universal/number/posit/posit.hpp>
+#include <universal/number/fixpnt/fixpnt.hpp>
+#include <universal/number/lns/lns.hpp>
 
 #include <cstddef>
 #include <vector>
@@ -27,8 +30,24 @@ namespace nb = nanobind;
 using namespace nb::literals;
 
 // Universal type aliases
-using fp8  = sw::universal::fp8;
-using fp16 = sw::universal::fp16;
+using fp8     = sw::universal::fp8;
+using fp16    = sw::universal::fp16;
+
+// Posit types — tapered precision floats with two exponent bits
+using posit8  = sw::universal::posit<8, 2>;
+using posit16 = sw::universal::posit<16, 2>;
+using posit32 = sw::universal::posit<32, 2>;
+using posit64 = sw::universal::posit<64, 2>;
+
+// Fixed-point types — saturating arithmetic for bounded precision
+// fixpnt8<8,4>: range [-8, 8) with 4 fractional bits (resolution 1/16)
+// fixpnt16<16,8>: range [-128, 128) with 8 fractional bits (resolution 1/256)
+using fixpnt8  = sw::universal::fixpnt<8, 4, sw::universal::Saturate>;
+using fixpnt16 = sw::universal::fixpnt<16, 8, sw::universal::Saturate>;
+
+// Logarithmic number system — multiplications become additions
+using lns16 = sw::universal::lns<16, 8>;
+using lns32 = sw::universal::lns<32, 16>;
 
 // ===========================================================================
 // Human-readable suffix for Python class names
@@ -40,6 +59,14 @@ template <> constexpr const char* type_suffix<int32_t>() { return "i32"; }
 template <> constexpr const char* type_suffix<int64_t>() { return "i64"; }
 template <> constexpr const char* type_suffix<fp8>()     { return "fp8"; }
 template <> constexpr const char* type_suffix<fp16>()    { return "fp16"; }
+template <> constexpr const char* type_suffix<posit8>()  { return "posit8"; }
+template <> constexpr const char* type_suffix<posit16>() { return "posit16"; }
+template <> constexpr const char* type_suffix<posit32>() { return "posit32"; }
+template <> constexpr const char* type_suffix<posit64>() { return "posit64"; }
+template <> constexpr const char* type_suffix<fixpnt8>() { return "fixpnt8"; }
+template <> constexpr const char* type_suffix<fixpnt16>(){ return "fixpnt16"; }
+template <> constexpr const char* type_suffix<lns16>()   { return "lns16"; }
+template <> constexpr const char* type_suffix<lns32>()   { return "lns32"; }
 
 // ===========================================================================
 // VectorView<T> — zero-copy wrapper around dense_vector<T>
@@ -941,6 +968,21 @@ NB_MODULE(_core, m) {
     register_native<int64_t>(m);              // i64
 
     // ----- Universal number types (copy-converting from float64) -------------
+    // Standard IEEE-style cfloat configurations
     register_universal<fp8>(m, "vector_fp8", "matrix_fp8");
     register_universal<fp16>(m, "vector_fp16", "matrix_fp16");
+
+    // Posit types — tapered precision, ideal for ML on KPU
+    register_universal<posit8>(m, "vector_posit8", "matrix_posit8");
+    register_universal<posit16>(m, "vector_posit16", "matrix_posit16");
+    register_universal<posit32>(m, "vector_posit32", "matrix_posit32");
+    register_universal<posit64>(m, "vector_posit64", "matrix_posit64");
+
+    // Fixed-point types
+    register_universal<fixpnt8>(m, "vector_fixpnt8", "matrix_fixpnt8");
+    register_universal<fixpnt16>(m, "vector_fixpnt16", "matrix_fixpnt16");
+
+    // Logarithmic number system
+    register_universal<lns16>(m, "vector_lns16", "matrix_lns16");
+    register_universal<lns32>(m, "vector_lns32", "matrix_lns32");
 }
