@@ -849,6 +849,33 @@ void register_universal_dot(nb::module_& m) {
 }
 
 template <typename T>
+void register_universal_matvec(nb::module_& m) {
+    using Mat = mtl::mat::dense2D<T>;
+    using Vec = mtl::vec::dense_vector<T>;
+    m.def("matvec", [](const Mat& A, const Vec& x) {
+        if (A.num_cols() != x.size())
+            throw std::invalid_argument("matvec: A.num_cols must equal len(x)");
+        Vec y(A.num_rows());
+        mtl::mult(A, x, y);
+        return y;
+    }, "A"_a, "x"_a,
+       "Matrix-vector multiplication: y = A @ x");
+}
+
+template <typename T>
+void register_universal_matmul(nb::module_& m) {
+    using Mat = mtl::mat::dense2D<T>;
+    m.def("matmul", [](const Mat& A, const Mat& B) {
+        if (A.num_cols() != B.num_rows())
+            throw std::invalid_argument("matmul: A.num_cols must equal B.num_rows");
+        Mat C(A.num_rows(), B.num_cols());
+        mtl::mult(A, B, C);
+        return C;
+    }, "A"_a, "B"_a,
+       "Matrix-matrix multiplication: C = A @ B");
+}
+
+template <typename T>
 void register_universal_solve(nb::module_& m) {
     using Mat = mtl::mat::dense2D<T>;
     using Vec = mtl::vec::dense_vector<T>;
@@ -909,6 +936,8 @@ void register_universal(nb::module_& m, const char* vec_factory, const char* mat
     register_universal_matrix_factory<T>(m, mat_factory);
     register_universal_norm<T>(m);
     register_universal_dot<T>(m);
+    register_universal_matvec<T>(m);
+    register_universal_matmul<T>(m);
     register_universal_solve<T>(m);
 }
 
