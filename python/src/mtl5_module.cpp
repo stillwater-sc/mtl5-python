@@ -10,6 +10,9 @@
 #include <mtl/operation/dot.hpp>
 #include <mtl/operation/operators.hpp>
 #include <mtl/operation/lu.hpp>
+#include <mtl/operation/cholesky.hpp>
+#include <mtl/operation/mult.hpp>
+#include <mtl/operation/inv.hpp>
 
 // Universal number types
 #include <universal/number/cfloat/cfloat.hpp>
@@ -104,13 +107,16 @@ void register_native_vector(nb::module_& m) {
         .def_prop_ro("dtype", [](const VV&) { return type_suffix<T>(); })
         .def_prop_ro("device", [](const VV& vv) { return vv.device_name; })
         .def_prop_ro("is_view", [](const VV& vv) { return vv.is_view(); })
-        .def("to_numpy", [](VV& vv) {
-            // Zero-copy: return a NumPy array that shares memory with this vector
+        .def("to_numpy", [](nb::handle self) {
+            // Zero-copy: return a NumPy array that shares memory with this vector.
+            // Use nb::handle to get the actual Python wrapper object as the
+            // keep-alive owner — nb::cast(vv) on a C++ reference creates a
+            // separate copy whose data() differs from the source, causing
+            // use-after-free on chained calls like solve(b).to_numpy().
+            VV& vv = nb::cast<VV&>(self);
             std::size_t shape[1] = { vv.vec.size() };
-            // The capsule prevents this VectorView from being GC'd while
-            // the NumPy array exists, keeping the memory alive
             return nb::ndarray<nb::numpy, T, nb::ndim<1>>(
-                vv.vec.data(), 1, shape, nb::cast(vv));
+                vv.vec.data(), 1, shape, self);
         }, "Return a zero-copy NumPy array view of this vector")
         .def("copy", [](const VV& vv) {
             auto owned = mtl::vec::dense_vector<T>(vv.vec.size());
@@ -171,12 +177,49 @@ void register_native_matrix(nb::module_& m) {
                 throw nb::index_error();
             mv.mat(idx.first, idx.second) = val;
         })
-        .def("to_numpy", [](MV& mv) {
-            // Zero-copy: return a NumPy array that shares memory
+        .def("to_numpy", [](nb::handle self) {
+            // Use nb::handle for keep-alive — see VectorView::to_numpy comment.
+            MV& mv = nb::cast<MV&>(self);
             std::size_t shape[2] = { mv.mat.num_rows(), mv.mat.num_cols() };
             return nb::ndarray<nb::numpy, T, nb::ndim<2>>(
-                mv.mat.data(), 2, shape, nb::cast(mv));
+                mv.mat.data(), 2, shape, self);
         }, "Return a zero-copy NumPy array view of this matrix")
+        .def_prop_ro("T", [](const MV& mv) {
+            std::size_t r = mv.mat.num_rows(), c = mv.mat.num_cols();
+            mtl::mat::dense2D<T> AT(c, r);
+            for (std::size_t i = 0; i < r; ++i)
+                for (std::size_t j = 0; j < c; ++j)
+                    AT(j, i) = mv.mat(i, j);
+            return MV(std::move(AT));
+        })
+        .def("__matmul__", [](const MV& A, const MV& B) {
+            if (A.mat.num_cols() != B.mat.num_rows())
+                throw std::invalid_argument("matmul: A.num_cols != B.num_rows");
+            mtl::mat::dense2D<T> Ac(A.mat.num_rows(), A.mat.num_cols());
+            for (std::size_t i = 0; i < A.mat.num_rows(); ++i)
+                for (std::size_t j = 0; j < A.mat.num_cols(); ++j)
+                    Ac(i, j) = A.mat(i, j);
+            mtl::mat::dense2D<T> Bc(B.mat.num_rows(), B.mat.num_cols());
+            for (std::size_t i = 0; i < B.mat.num_rows(); ++i)
+                for (std::size_t j = 0; j < B.mat.num_cols(); ++j)
+                    Bc(i, j) = B.mat(i, j);
+            mtl::mat::dense2D<T> C(Ac.num_rows(), Bc.num_cols());
+            mtl::mult(Ac, Bc, C);
+            return MV(std::move(C));
+        })
+        .def("__matmul__", [](const MV& A, const VectorView<T>& x) {
+            if (A.mat.num_cols() != x.vec.size())
+                throw std::invalid_argument("matmul: A.num_cols != len(x)");
+            mtl::mat::dense2D<T> Ac(A.mat.num_rows(), A.mat.num_cols());
+            for (std::size_t i = 0; i < A.mat.num_rows(); ++i)
+                for (std::size_t j = 0; j < A.mat.num_cols(); ++j)
+                    Ac(i, j) = A.mat(i, j);
+            mtl::vec::dense_vector<T> xc(x.vec.size());
+            for (std::size_t i = 0; i < x.vec.size(); ++i) xc[i] = x.vec[i];
+            mtl::vec::dense_vector<T> y(A.mat.num_rows());
+            mtl::mult(Ac, xc, y);
+            return VectorView<T>(std::move(y));
+        })
         .def("copy", [](const MV& mv) {
             auto owned = mtl::mat::dense2D<T>(mv.mat.num_rows(), mv.mat.num_cols());
             for (std::size_t r = 0; r < mv.mat.num_rows(); ++r)
@@ -371,6 +414,277 @@ void register_native_solve(nb::module_& m) {
 }
 
 // ===========================================================================
+// LUFactor<T> — wraps an LU factorization (LU matrix + pivot vector)
+// Returned by mtl5.lu(A); supports .solve(b) for repeated solves.
+// ===========================================================================
+template <typename T>
+struct LUFactor {
+    mtl::mat::dense2D<T> LU;
+    std::vector<std::size_t> pivot;
+    std::size_t n;
+
+    LUFactor(const mtl::mat::dense2D<T>& A)
+        : LU(A.num_rows(), A.num_cols()), n(A.num_rows())
+    {
+        // Copy A into LU (lu_factor is in-place)
+        for (std::size_t r = 0; r < n; ++r)
+            for (std::size_t c = 0; c < n; ++c)
+                LU(r, c) = A(r, c);
+        int info = mtl::lu_factor(LU, pivot);
+        if (info != 0)
+            throw std::runtime_error("lu: singular matrix (zero pivot at row " +
+                                     std::to_string(info - 1) + ")");
+    }
+};
+
+// ===========================================================================
+// CholeskyFactor<T> — wraps a Cholesky factorization (lower triangular L)
+// Returned by mtl5.cholesky(A); supports .solve(b) for repeated SPD solves.
+// ===========================================================================
+template <typename T>
+struct CholeskyFactor {
+    mtl::mat::dense2D<T> L;
+    std::size_t n;
+
+    CholeskyFactor(const mtl::mat::dense2D<T>& A)
+        : L(A.num_rows(), A.num_cols()), n(A.num_rows())
+    {
+        for (std::size_t r = 0; r < n; ++r)
+            for (std::size_t c = 0; c < n; ++c)
+                L(r, c) = A(r, c);
+        int info = mtl::cholesky_factor(L);
+        if (info != 0)
+            throw std::runtime_error(
+                "cholesky: matrix is not symmetric positive definite "
+                "(failure at row " + std::to_string(info - 1) + ")");
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Helpers to copy a MatrixView/ndarray into an owning dense2D
+// ---------------------------------------------------------------------------
+template <typename T>
+mtl::mat::dense2D<T> copy_to_dense(const MatrixView<T>& mv) {
+    std::size_t r = mv.mat.num_rows(), c = mv.mat.num_cols();
+    mtl::mat::dense2D<T> out(r, c);
+    for (std::size_t i = 0; i < r; ++i)
+        for (std::size_t j = 0; j < c; ++j)
+            out(i, j) = mv.mat(i, j);
+    return out;
+}
+
+template <typename T>
+mtl::mat::dense2D<T> copy_ndarray_to_dense(
+    nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a)
+{
+    std::size_t r = a.shape(0), c = a.shape(1);
+    mtl::mat::dense2D<T> out(r, c);
+    const T* src = a.data();
+    for (std::size_t i = 0; i < r; ++i)
+        for (std::size_t j = 0; j < c; ++j)
+            out(i, j) = src[i * c + j];
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// register_native_dense_ops<T> — matmul, transpose, det, inv, lu, cholesky
+// ---------------------------------------------------------------------------
+template <typename T>
+    requires std::is_floating_point_v<T>
+void register_native_dense_ops(nb::module_& m) {
+    using Mat = mtl::mat::dense2D<T>;
+    using Vec = mtl::vec::dense_vector<T>;
+    using MV  = MatrixView<T>;
+    using VV  = VectorView<T>;
+
+    // -- matmul (matrix × matrix) -----------------------------------------
+    m.def("matmul", [](const MV& A_mv, const MV& B_mv) {
+        if (A_mv.mat.num_cols() != B_mv.mat.num_rows())
+            throw std::invalid_argument(
+                "matmul: A.num_cols must equal B.num_rows");
+        Mat A = copy_to_dense(A_mv);
+        Mat B = copy_to_dense(B_mv);
+        Mat C(A.num_rows(), B.num_cols());
+        mtl::mult(A, B, C);
+        return MV(std::move(C));
+    }, "A"_a, "B"_a, "Matrix-matrix multiplication: C = A @ B");
+
+    // matmul accepting ndarray inputs
+    m.def("matmul",
+          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
+             nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> B_np) {
+        if (A_np.shape(1) != B_np.shape(0))
+            throw std::invalid_argument(
+                "matmul: A.num_cols must equal B.num_rows");
+        Mat A = copy_ndarray_to_dense<T>(A_np);
+        Mat B = copy_ndarray_to_dense<T>(B_np);
+        Mat C(A.num_rows(), B.num_cols());
+        mtl::mult(A, B, C);
+        return MV(std::move(C));
+    }, "A"_a, "B"_a);
+
+    // matrix-vector multiplication
+    m.def("matvec", [](const MV& A_mv, const VV& x_vv) {
+        if (A_mv.mat.num_cols() != x_vv.vec.size())
+            throw std::invalid_argument(
+                "matvec: A.num_cols must equal len(x)");
+        Mat A = copy_to_dense(A_mv);
+        Vec x(x_vv.vec.size());
+        for (std::size_t i = 0; i < x_vv.vec.size(); ++i) x[i] = x_vv.vec[i];
+        Vec y(A.num_rows());
+        mtl::mult(A, x, y);
+        return VV(std::move(y));
+    }, "A"_a, "x"_a, "Matrix-vector multiplication: y = A @ x");
+
+    // -- transpose (out-of-place copy for now) ----------------------------
+    m.def("transpose", [](const MV& A_mv) {
+        std::size_t r = A_mv.mat.num_rows(), c = A_mv.mat.num_cols();
+        Mat AT(c, r);
+        for (std::size_t i = 0; i < r; ++i)
+            for (std::size_t j = 0; j < c; ++j)
+                AT(j, i) = A_mv.mat(i, j);
+        return MV(std::move(AT));
+    }, "A"_a, "Return the transpose of A");
+
+    // -- det (via LU factorization) ---------------------------------------
+    auto compute_det = [](Mat&& LU) -> double {
+        std::size_t n = LU.num_rows();
+        std::vector<std::size_t> pivot;
+        int info = mtl::lu_factor(LU, pivot);
+        if (info != 0)
+            return 0.0;
+        double d = 1.0;
+        std::size_t swaps = 0;
+        for (std::size_t i = 0; i < n; ++i) {
+            d *= static_cast<double>(LU(i, i));
+            if (pivot[i] != i) ++swaps;
+        }
+        if (swaps % 2 == 1) d = -d;
+        return d;
+    };
+
+    m.def("det", [compute_det](const MV& A_mv) -> double {
+        if (A_mv.mat.num_cols() != A_mv.mat.num_rows())
+            throw std::invalid_argument("det: A must be square");
+        return compute_det(copy_to_dense(A_mv));
+    }, "A"_a, "Compute determinant via LU factorization");
+
+    m.def("det",
+          [compute_det](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np)
+          -> double {
+        if (A_np.shape(0) != A_np.shape(1))
+            throw std::invalid_argument("det: A must be square");
+        return compute_det(copy_ndarray_to_dense<T>(A_np));
+    }, "A"_a);
+
+    // -- inv (matrix inverse) ---------------------------------------------
+    m.def("inv", [](const MV& A_mv) {
+        if (A_mv.mat.num_cols() != A_mv.mat.num_rows())
+            throw std::invalid_argument("inv: A must be square");
+        Mat A = copy_to_dense(A_mv);
+        auto Ainv = mtl::inv(A);
+        return MV(std::move(Ainv));
+    }, "A"_a, "Compute matrix inverse via LU factorization");
+
+    m.def("inv",
+          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
+        if (A_np.shape(0) != A_np.shape(1))
+            throw std::invalid_argument("inv: A must be square");
+        Mat A = copy_ndarray_to_dense<T>(A_np);
+        auto Ainv = mtl::inv(A);
+        return MV(std::move(Ainv));
+    }, "A"_a);
+
+    // -- LU factorization object ------------------------------------------
+    using LUF = LUFactor<T>;
+    std::string lu_name = std::string("LUFactor_") + type_suffix<T>();
+    nb::class_<LUF>(m, lu_name.c_str())
+        .def("solve", [](const LUF& self, const VV& b_vv) {
+            if (b_vv.vec.size() != self.n)
+                throw std::invalid_argument("LU.solve: dimension mismatch");
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_vv.vec[i];
+            Vec x(self.n);
+            mtl::lu_solve(self.LU, self.pivot, x, b);
+            return VV(std::move(x));
+        }, "b"_a, "Solve LUx = b for the previously factored A")
+        .def("solve",
+             [](const LUF& self,
+                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+            if (b_np.shape(0) != self.n)
+                throw std::invalid_argument("LU.solve: dimension mismatch");
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_np.data()[i];
+            Vec x(self.n);
+            mtl::lu_solve(self.LU, self.pivot, x, b);
+            return VV(std::move(x));
+        }, "b"_a)
+        .def_prop_ro("n", [](const LUF& self) { return self.n; })
+        .def("__repr__", [](const LUF& self) {
+            return std::string("mtl5.LUFactor_") + type_suffix<T>() +
+                   "(n=" + std::to_string(self.n) + ")";
+        });
+
+    m.def("lu", [](const MV& A_mv) {
+        if (A_mv.mat.num_cols() != A_mv.mat.num_rows())
+            throw std::invalid_argument("lu: A must be square");
+        return LUF(A_mv.mat);
+    }, "A"_a, "Return LU factorization of A");
+
+    m.def("lu",
+          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
+        if (A_np.shape(0) != A_np.shape(1))
+            throw std::invalid_argument("lu: A must be square");
+        Mat A = copy_ndarray_to_dense<T>(A_np);
+        return LUF(A);
+    }, "A"_a);
+
+    // -- Cholesky factorization object ------------------------------------
+    using CF = CholeskyFactor<T>;
+    std::string ch_name = std::string("CholeskyFactor_") + type_suffix<T>();
+    nb::class_<CF>(m, ch_name.c_str())
+        .def("solve", [](const CF& self, const VV& b_vv) {
+            if (b_vv.vec.size() != self.n)
+                throw std::invalid_argument("cholesky.solve: dimension mismatch");
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_vv.vec[i];
+            Vec x(self.n);
+            mtl::cholesky_solve(self.L, x, b);
+            return VV(std::move(x));
+        }, "b"_a, "Solve A·x = b using the Cholesky factor")
+        .def("solve",
+             [](const CF& self,
+                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+            if (b_np.shape(0) != self.n)
+                throw std::invalid_argument("cholesky.solve: dimension mismatch");
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_np.data()[i];
+            Vec x(self.n);
+            mtl::cholesky_solve(self.L, x, b);
+            return VV(std::move(x));
+        }, "b"_a)
+        .def_prop_ro("n", [](const CF& self) { return self.n; })
+        .def("__repr__", [](const CF& self) {
+            return std::string("mtl5.CholeskyFactor_") + type_suffix<T>() +
+                   "(n=" + std::to_string(self.n) + ")";
+        });
+
+    m.def("cholesky", [](const MV& A_mv) {
+        if (A_mv.mat.num_cols() != A_mv.mat.num_rows())
+            throw std::invalid_argument("cholesky: A must be square");
+        return CF(A_mv.mat);
+    }, "A"_a, "Return Cholesky factorization of an SPD matrix A");
+
+    m.def("cholesky",
+          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
+        if (A_np.shape(0) != A_np.shape(1))
+            throw std::invalid_argument("cholesky: A must be square");
+        Mat A = copy_ndarray_to_dense<T>(A_np);
+        return CF(A);
+    }, "A"_a);
+}
+
+// ===========================================================================
 // Registration for Universal types (fp8, fp16, posit, etc.)
 // These always copy (no NumPy dtype), but get device stubs
 // ===========================================================================
@@ -557,6 +871,7 @@ template <typename T>
 void register_native_with_solve(nb::module_& m) {
     register_native<T>(m);
     register_native_solve<T>(m);
+    register_native_dense_ops<T>(m);
 }
 
 template <typename T>
@@ -578,11 +893,46 @@ NB_MODULE(_core, m) {
 
     m.attr("__version__") = "0.1.0";
 
-    // ----- Device management -------------------------------------------------
+    // ----- Device & backend management ---------------------------------------
     m.def("devices", []() {
         return std::vector<std::string>{"cpu"};
-        // Future: enumerate KPU devices, BLAS backends
+        // Future: enumerate KPU devices
     }, "List available execution devices");
+
+    m.def("backends", []() {
+        // Reports the dispatch hierarchy from highest to lowest preference.
+        // KPU is the principal target; CPU reference is the portable fallback.
+        std::vector<std::string> b;
+#ifdef MTL5_HAS_KPU
+        b.push_back("kpu");
+#endif
+#ifdef MTL5_HAS_BLAS
+        b.push_back("blas");
+#endif
+        b.push_back("reference");
+        return b;
+    }, "List available compute backends in dispatch order (KPU > BLAS > reference)");
+
+    m.def("get_backend", []() {
+#ifdef MTL5_HAS_KPU
+        return std::string("kpu");
+#elif defined(MTL5_HAS_BLAS)
+        return std::string("blas");
+#else
+        return std::string("reference");
+#endif
+    }, "Return the currently active compute backend");
+
+    m.def("set_backend", [](const std::string& name) {
+        // Stub: backend selection is currently compile-time only
+        if (name != "cpu" && name != "reference" && name != "blas" && name != "kpu")
+            throw std::runtime_error("Unknown backend: '" + name +
+                                     "'. Valid: cpu, reference, blas, kpu");
+        if (name == "kpu")
+            throw std::runtime_error("KPU backend not yet available. "
+                                     "Hardware support is in development.");
+        // No-op for cpu/reference/blas — selected at compile time
+    }, "name"_a, "Set the active compute backend (currently compile-time only)");
 
     // ----- Native C++ types (zero-copy via nb::ndarray) ----------------------
     register_native_with_solve<float>(m);     // f32
