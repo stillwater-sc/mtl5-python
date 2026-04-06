@@ -1,9 +1,9 @@
 """MTL5 Python bindings — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch."""
 
 from mtl5._core import (
-    __version__,
     DenseMatrix,
     DenseVector,
+    __version__,
     dot,
     matrix,
     norm,
