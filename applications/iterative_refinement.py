@@ -162,8 +162,9 @@ def compare_with_full_precision(A: np.ndarray, b: np.ndarray, x_refined: np.ndar
     elif abs_err_fp16 > 0:
         improvement = abs_err_fp16 / abs_err_refined
         digits = np.log10(improvement)
-        print(f"\n  Refinement improved accuracy by {improvement:.1f}x"
-              f" ({digits:.1f} decimal digits)")
+        print(
+            f"\n  Refinement improved accuracy by {improvement:.1f}x ({digits:.1f} decimal digits)"
+        )
 
 
 def main():
