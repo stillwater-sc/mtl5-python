@@ -1146,7 +1146,20 @@ void register_sparse_solvers(nb::module_& m) {
 // ===========================================================================
 // Preconditioner bindings — wrap ILU(0) and IC(0) as Python objects with
 // .solve(b) so they can be used both standalone and as scipy LinearOperators.
+//
+// Python-side wrappers store the factor dimension (n) alongside the
+// underlying preconditioner so that mismatched RHS lengths fail with a clean
+// Python ValueError before reaching the native implementation.
 // ===========================================================================
+template <typename PC, typename T>
+struct PreconditionerWrapper {
+    PC pc;
+    std::size_t n;
+
+    PreconditionerWrapper(const mtl::mat::compressed2D<T>& A)
+        : pc(A), n(A.num_rows()) {}
+};
+
 template <typename T>
     requires std::is_floating_point_v<T>
 void register_preconditioners(nb::module_& m) {
@@ -1155,59 +1168,81 @@ void register_preconditioners(nb::module_& m) {
     using VV   = VectorView<T>;
 
     // ----- ILU(0) -------------------------------------------------------
-    using ILU = mtl::itl::pc::ilu_0<T>;
+    using ILUWrap = PreconditionerWrapper<mtl::itl::pc::ilu_0<T>, T>;
     std::string ilu_name = std::string("ILU0_") + type_suffix<T>();
-    nb::class_<ILU>(m, ilu_name.c_str())
-        .def("__init__", [](ILU* self, const SMat& A) {
-            new (self) ILU(A);
-        }, "A"_a, "Construct ILU(0) preconditioner from a CSR matrix")
-        .def("solve", [](const ILU& self, const VV& b_vv) {
-            Vec x(b_vv.vec.size());
-            Vec b(b_vv.vec.size());
-            for (std::size_t i = 0; i < b_vv.vec.size(); ++i) b[i] = b_vv.vec[i];
-            self.solve(x, b);
+    nb::class_<ILUWrap>(m, ilu_name.c_str())
+        .def("__init__", [](ILUWrap* self, const SMat& A) {
+            if (A.num_rows() != A.num_cols())
+                throw std::invalid_argument("ILU0: matrix must be square");
+            new (self) ILUWrap(A);
+        }, "A"_a, "Construct ILU(0) preconditioner from a square CSR matrix")
+        .def_prop_ro("n", [](const ILUWrap& self) { return self.n; })
+        .def("solve", [](const ILUWrap& self, const VV& b_vv) {
+            if (b_vv.vec.size() != self.n)
+                throw std::invalid_argument(
+                    "ILU0.solve: RHS length " + std::to_string(b_vv.vec.size()) +
+                    " does not match factor size " + std::to_string(self.n));
+            Vec x(self.n);
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_vv.vec[i];
+            self.pc.solve(x, b);
             return VV(std::move(x));
         }, "b"_a, "Apply preconditioner: solve (LU)·x = b")
         .def("solve",
-             [](const ILU& self,
+             [](const ILUWrap& self,
                 nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
-            std::size_t n = b_np.shape(0);
-            Vec x(n);
-            Vec b(n);
-            for (std::size_t i = 0; i < n; ++i) b[i] = b_np.data()[i];
-            self.solve(x, b);
+            if (b_np.shape(0) != self.n)
+                throw std::invalid_argument(
+                    "ILU0.solve: RHS length " + std::to_string(b_np.shape(0)) +
+                    " does not match factor size " + std::to_string(self.n));
+            Vec x(self.n);
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_np.data()[i];
+            self.pc.solve(x, b);
             return VV(std::move(x));
         }, "b"_a)
-        .def("__repr__", [ilu_name](const ILU&) {
-            return std::string("mtl5.sparse.") + ilu_name + "()";
+        .def("__repr__", [ilu_name](const ILUWrap& self) {
+            return std::string("mtl5.sparse.") + ilu_name +
+                   "(n=" + std::to_string(self.n) + ")";
         });
 
     // ----- IC(0) --------------------------------------------------------
-    using IC = mtl::itl::pc::ic_0<T>;
+    using ICWrap = PreconditionerWrapper<mtl::itl::pc::ic_0<T>, T>;
     std::string ic_name = std::string("IC0_") + type_suffix<T>();
-    nb::class_<IC>(m, ic_name.c_str())
-        .def("__init__", [](IC* self, const SMat& A) {
-            new (self) IC(A);
-        }, "A"_a, "Construct IC(0) preconditioner from an SPD CSR matrix")
-        .def("solve", [](const IC& self, const VV& b_vv) {
-            Vec x(b_vv.vec.size());
-            Vec b(b_vv.vec.size());
-            for (std::size_t i = 0; i < b_vv.vec.size(); ++i) b[i] = b_vv.vec[i];
-            self.solve(x, b);
+    nb::class_<ICWrap>(m, ic_name.c_str())
+        .def("__init__", [](ICWrap* self, const SMat& A) {
+            if (A.num_rows() != A.num_cols())
+                throw std::invalid_argument("IC0: matrix must be square");
+            new (self) ICWrap(A);
+        }, "A"_a, "Construct IC(0) preconditioner from a square SPD CSR matrix")
+        .def_prop_ro("n", [](const ICWrap& self) { return self.n; })
+        .def("solve", [](const ICWrap& self, const VV& b_vv) {
+            if (b_vv.vec.size() != self.n)
+                throw std::invalid_argument(
+                    "IC0.solve: RHS length " + std::to_string(b_vv.vec.size()) +
+                    " does not match factor size " + std::to_string(self.n));
+            Vec x(self.n);
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_vv.vec[i];
+            self.pc.solve(x, b);
             return VV(std::move(x));
         }, "b"_a, "Apply preconditioner: solve (L·L^T)·x = b")
         .def("solve",
-             [](const IC& self,
+             [](const ICWrap& self,
                 nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
-            std::size_t n = b_np.shape(0);
-            Vec x(n);
-            Vec b(n);
-            for (std::size_t i = 0; i < n; ++i) b[i] = b_np.data()[i];
-            self.solve(x, b);
+            if (b_np.shape(0) != self.n)
+                throw std::invalid_argument(
+                    "IC0.solve: RHS length " + std::to_string(b_np.shape(0)) +
+                    " does not match factor size " + std::to_string(self.n));
+            Vec x(self.n);
+            Vec b(self.n);
+            for (std::size_t i = 0; i < self.n; ++i) b[i] = b_np.data()[i];
+            self.pc.solve(x, b);
             return VV(std::move(x));
         }, "b"_a)
-        .def("__repr__", [ic_name](const IC&) {
-            return std::string("mtl5.sparse.") + ic_name + "()";
+        .def("__repr__", [ic_name](const ICWrap& self) {
+            return std::string("mtl5.sparse.") + ic_name +
+                   "(n=" + std::to_string(self.n) + ")";
         });
 }
 

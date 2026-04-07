@@ -148,6 +148,21 @@ class TestPreconditionedScipyCG:
         residual = np.linalg.norm(spd_poisson_1d @ x - b)
         assert residual < 1e-6
 
+    def test_ilu0_f32_as_M_in_scipy_cg(self, spd_poisson_1d):
+        """Exercise the float32 preconditioner path end-to-end."""
+        A_f32 = spd_poisson_1d.astype(np.float32)
+        n = A_f32.shape[0]
+        precond = msp.ilu0(A_f32)
+        # dtype is inferred from the preconditioner type
+        M = msp.as_preconditioner_lo(precond, n)
+        assert M.dtype == np.float32
+
+        b = np.ones(n, dtype=np.float32)
+        x, info = scipy_cg(A_f32, b, M=M, rtol=1e-6, maxiter=200)
+        assert info == 0
+        residual = np.linalg.norm(A_f32 @ x - b)
+        assert residual < 1e-3
+
 
 class TestSolverErrors:
     def test_cg_non_square_raises(self):
