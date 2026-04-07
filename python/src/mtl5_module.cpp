@@ -3,6 +3,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/pair.h>
+#include <nanobind/stl/tuple.h>
 
 #include <mtl/vec/dense_vector.hpp>
 #include <mtl/mat/dense2D.hpp>
@@ -13,6 +14,7 @@
 #include <mtl/operation/cholesky.hpp>
 #include <mtl/operation/mult.hpp>
 #include <mtl/operation/inv.hpp>
+#include <mtl/mat/compressed2D.hpp>
 
 // Universal number types
 #include <universal/number/cfloat/cfloat.hpp>
@@ -942,6 +944,110 @@ void register_universal(nb::module_& m, const char* vec_factory, const char* mat
 }
 
 // ===========================================================================
+// Sparse matrix bindings — compressed2D (CSR) for f32/f64
+//
+// Wraps mtl::mat::compressed2D<T> with constructors that accept the three
+// CSR arrays (indptr, indices, data) from scipy.sparse.csr_matrix, and an
+// extractor that returns them back. Provides matvec(x) for SpMV.
+//
+// MTL5's compressed2D uses size_type = std::size_t (uint64), so scipy
+// matrices with int32 indices need to be converted on the boundary —
+// scipy uses int32 indices by default for matrices below ~2 billion nnz.
+// ===========================================================================
+template <typename T>
+    requires std::is_floating_point_v<T>
+void register_sparse_matrix(nb::module_& m) {
+    using SMat = mtl::mat::compressed2D<T>;
+    using size_type = typename SMat::size_type;
+    using VV = VectorView<T>;
+    std::string name = std::string("SparseMatrix_") + type_suffix<T>();
+
+    nb::class_<SMat>(m, name.c_str())
+        .def("__init__", [](SMat* self, std::size_t nrows, std::size_t ncols,
+                            nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> indptr,
+                            nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> indices,
+                            nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> data) {
+            // CSR layout: indptr.size() == nrows + 1, indices.size() == data.size() == nnz
+            if (indptr.shape(0) != nrows + 1)
+                throw std::invalid_argument("indptr length must be nrows + 1");
+            if (indices.shape(0) != data.shape(0))
+                throw std::invalid_argument("indices and data must have the same length");
+
+            std::size_t nnz = data.shape(0);
+
+            // Convert int64 indices/indptr to size_type (the existing constructor copies)
+            std::vector<size_type> starts(nrows + 1);
+            for (std::size_t i = 0; i <= nrows; ++i)
+                starts[i] = static_cast<size_type>(indptr.data()[i]);
+            std::vector<size_type> idx(nnz);
+            for (std::size_t i = 0; i < nnz; ++i)
+                idx[i] = static_cast<size_type>(indices.data()[i]);
+
+            new (self) SMat(nrows, ncols, nnz, starts.data(), idx.data(), data.data());
+        }, "nrows"_a, "ncols"_a, "indptr"_a, "indices"_a, "data"_a,
+           "Construct a CSR sparse matrix from scipy-style arrays")
+        .def_prop_ro("num_rows", &SMat::num_rows)
+        .def_prop_ro("num_cols", &SMat::num_cols)
+        .def_prop_ro("nnz", &SMat::nnz)
+        .def_prop_ro("dtype", [](const SMat&) { return type_suffix<T>(); })
+        .def_prop_ro("shape", [](const SMat& A) {
+            return std::pair<std::size_t, std::size_t>(A.num_rows(), A.num_cols());
+        })
+        .def("to_csr_arrays", [](const SMat& A) {
+            // Return (indptr, indices, data) as int64 + T NumPy arrays.
+            // We allocate fresh buffers and let NumPy own them via capsule.
+            std::size_t nrows = A.num_rows();
+            std::size_t nnz = A.nnz();
+
+            int64_t* ip = new int64_t[nrows + 1];
+            for (std::size_t i = 0; i <= nrows; ++i)
+                ip[i] = static_cast<int64_t>(A.ref_major()[i]);
+            int64_t* ix = new int64_t[nnz];
+            for (std::size_t i = 0; i < nnz; ++i)
+                ix[i] = static_cast<int64_t>(A.ref_minor()[i]);
+            T* dt = new T[nnz];
+            for (std::size_t i = 0; i < nnz; ++i)
+                dt[i] = A.ref_data()[i];
+
+            std::size_t shape_ip[1] = { nrows + 1 };
+            std::size_t shape_ix[1] = { nnz };
+            std::size_t shape_dt[1] = { nnz };
+            nb::capsule own_ip(ip, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+            nb::capsule own_ix(ix, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+            nb::capsule own_dt(dt, [](void* p) noexcept { delete[] static_cast<T*>(p); });
+
+            auto a_ip = nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(ip, 1, shape_ip, own_ip);
+            auto a_ix = nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(ix, 1, shape_ix, own_ix);
+            auto a_dt = nb::ndarray<nb::numpy, T, nb::ndim<1>>(dt, 1, shape_dt, own_dt);
+            return std::make_tuple(a_ip, a_ix, a_dt);
+        }, "Return (indptr, indices, data) as NumPy arrays — scipy CSR layout")
+        .def("matvec", [](const SMat& A, const VV& x) {
+            if (A.num_cols() != x.vec.size())
+                throw std::invalid_argument("matvec: A.num_cols must equal len(x)");
+            mtl::vec::dense_vector<T> y(A.num_rows());
+            mtl::mult(A, x.vec, y);
+            return VV(std::move(y));
+        }, "x"_a, "Sparse matrix-vector product: y = A @ x")
+        .def("matvec", [](const SMat& A,
+                          nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
+            if (A.num_cols() != x_np.shape(0))
+                throw std::invalid_argument("matvec: A.num_cols must equal len(x)");
+            mtl::vec::dense_vector<T> x(x_np.shape(0));
+            for (std::size_t i = 0; i < x_np.shape(0); ++i) x[i] = x_np.data()[i];
+            mtl::vec::dense_vector<T> y(A.num_rows());
+            mtl::mult(A, x, y);
+            return VV(std::move(y));
+        }, "x"_a)
+        .def("__repr__", [](const SMat& A) {
+            std::ostringstream os;
+            os << "mtl5.SparseMatrix_" << type_suffix<T>()
+               << "(shape=(" << A.num_rows() << ", " << A.num_cols() << ")"
+               << ", nnz=" << A.nnz() << ")";
+            return os.str();
+        });
+}
+
+// ===========================================================================
 // Module definition
 // ===========================================================================
 NB_MODULE(_core, m) {
@@ -995,6 +1101,10 @@ NB_MODULE(_core, m) {
     register_native_with_solve<double>(m);    // f64
     register_native<int32_t>(m);              // i32
     register_native<int64_t>(m);              // i64
+
+    // ----- Sparse matrices (CSR via mtl::compressed2D) -----------------------
+    register_sparse_matrix<float>(m);
+    register_sparse_matrix<double>(m);
 
     // ----- Universal number types (copy-converting from float64) -------------
     // Standard IEEE-style cfloat configurations
