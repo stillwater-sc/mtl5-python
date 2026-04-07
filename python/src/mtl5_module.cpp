@@ -22,7 +22,6 @@
 #include <mtl/itl/krylov/bicgstab.hpp>
 #include <mtl/itl/iteration/basic_iteration.hpp>
 #include <mtl/itl/pc/identity.hpp>
-#include <mtl/itl/pc/diagonal.hpp>
 #include <mtl/itl/pc/ilu_0.hpp>
 #include <mtl/itl/pc/ic_0.hpp>
 
