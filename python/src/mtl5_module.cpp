@@ -16,6 +16,16 @@
 #include <mtl/operation/inv.hpp>
 #include <mtl/mat/compressed2D.hpp>
 
+// Iterative solvers and preconditioners
+#include <mtl/itl/krylov/cg.hpp>
+#include <mtl/itl/krylov/gmres.hpp>
+#include <mtl/itl/krylov/bicgstab.hpp>
+#include <mtl/itl/iteration/basic_iteration.hpp>
+#include <mtl/itl/pc/identity.hpp>
+#include <mtl/itl/pc/diagonal.hpp>
+#include <mtl/itl/pc/ilu_0.hpp>
+#include <mtl/itl/pc/ic_0.hpp>
+
 // Universal number types
 #include <universal/number/cfloat/cfloat.hpp>
 #include <universal/number/posit/posit.hpp>
@@ -1048,6 +1058,160 @@ void register_sparse_matrix(nb::module_& m) {
 }
 
 // ===========================================================================
+// Iterative solvers and preconditioners
+//
+// Binds MTL5's CG, GMRES, BiCGSTAB along with ILU(0) and IC(0) preconditioners
+// for compressed2D sparse matrices. All solvers return (x, info) following
+// SciPy convention: info=0 on convergence, info=1 if max_iter exceeded.
+//
+// Optional callback receives the iteration number and current residual.
+// Preconditioners expose .solve(b) for direct application and integrate
+// with scipy via mtl5.sparse.as_linear_operator() on the Python side.
+// ===========================================================================
+template <typename T>
+    requires std::is_floating_point_v<T>
+void register_sparse_solvers(nb::module_& m) {
+    using SMat = mtl::mat::compressed2D<T>;
+    using Vec  = mtl::vec::dense_vector<T>;
+    using VV   = VectorView<T>;
+    using BasicIter = mtl::itl::basic_iteration<T>;
+
+    // Helper: extract a fresh dense_vector copy from a VectorView or ndarray
+    auto vec_from_view = [](const VV& v) {
+        Vec out(v.vec.size());
+        for (std::size_t i = 0; i < v.vec.size(); ++i) out[i] = v.vec[i];
+        return out;
+    };
+
+    // ----- Conjugate Gradient -------------------------------------------
+    m.def("_sparse_cg",
+          [vec_from_view](const SMat& A, const VV& b_vv, T rtol, int maxiter) {
+        if (A.num_rows() != A.num_cols())
+            throw std::invalid_argument("cg: A must be square");
+        if (A.num_rows() != b_vv.vec.size())
+            throw std::invalid_argument("cg: A.num_rows must equal len(b)");
+
+        Vec b = vec_from_view(b_vv);
+        Vec x(A.num_rows(), T{0});  // initial guess: zero
+        // Compute r0 = b - A*0 = b for the iteration controller
+        BasicIter iter(b, maxiter, rtol);
+        mtl::itl::pc::identity<SMat> M(A);
+        int info = mtl::itl::cg(A, x, b, M, iter);
+
+        return std::make_tuple(VV(std::move(x)), info, iter.iterations(),
+                               static_cast<double>(iter.resid()));
+    }, "A"_a, "b"_a, "rtol"_a, "maxiter"_a,
+       "Internal CG kernel — use mtl5.sparse.cg() for the public API");
+
+    // ----- GMRES --------------------------------------------------------
+    m.def("_sparse_gmres",
+          [vec_from_view](const SMat& A, const VV& b_vv,
+                          T rtol, int maxiter, int restart) {
+        if (A.num_rows() != A.num_cols())
+            throw std::invalid_argument("gmres: A must be square");
+        if (A.num_rows() != b_vv.vec.size())
+            throw std::invalid_argument("gmres: A.num_rows must equal len(b)");
+
+        Vec b = vec_from_view(b_vv);
+        Vec x(A.num_rows(), T{0});
+        BasicIter iter(b, maxiter, rtol);
+        mtl::itl::pc::identity<SMat> M(A);
+        int info = mtl::itl::gmres(A, x, b, M, iter, restart);
+
+        return std::make_tuple(VV(std::move(x)), info, iter.iterations(),
+                               static_cast<double>(iter.resid()));
+    }, "A"_a, "b"_a, "rtol"_a, "maxiter"_a, "restart"_a,
+       "Internal GMRES kernel — use mtl5.sparse.gmres() for the public API");
+
+    // ----- BiCGSTAB -----------------------------------------------------
+    m.def("_sparse_bicgstab",
+          [vec_from_view](const SMat& A, const VV& b_vv, T rtol, int maxiter) {
+        if (A.num_rows() != A.num_cols())
+            throw std::invalid_argument("bicgstab: A must be square");
+        if (A.num_rows() != b_vv.vec.size())
+            throw std::invalid_argument("bicgstab: A.num_rows must equal len(b)");
+
+        Vec b = vec_from_view(b_vv);
+        Vec x(A.num_rows(), T{0});
+        BasicIter iter(b, maxiter, rtol);
+        mtl::itl::pc::identity<SMat> M(A);
+        int info = mtl::itl::bicgstab(A, x, b, M, iter);
+
+        return std::make_tuple(VV(std::move(x)), info, iter.iterations(),
+                               static_cast<double>(iter.resid()));
+    }, "A"_a, "b"_a, "rtol"_a, "maxiter"_a,
+       "Internal BiCGSTAB kernel — use mtl5.sparse.bicgstab() for the public API");
+}
+
+// ===========================================================================
+// Preconditioner bindings — wrap ILU(0) and IC(0) as Python objects with
+// .solve(b) so they can be used both standalone and as scipy LinearOperators.
+// ===========================================================================
+template <typename T>
+    requires std::is_floating_point_v<T>
+void register_preconditioners(nb::module_& m) {
+    using SMat = mtl::mat::compressed2D<T>;
+    using Vec  = mtl::vec::dense_vector<T>;
+    using VV   = VectorView<T>;
+
+    // ----- ILU(0) -------------------------------------------------------
+    using ILU = mtl::itl::pc::ilu_0<T>;
+    std::string ilu_name = std::string("ILU0_") + type_suffix<T>();
+    nb::class_<ILU>(m, ilu_name.c_str())
+        .def("__init__", [](ILU* self, const SMat& A) {
+            new (self) ILU(A);
+        }, "A"_a, "Construct ILU(0) preconditioner from a CSR matrix")
+        .def("solve", [](const ILU& self, const VV& b_vv) {
+            Vec x(b_vv.vec.size());
+            Vec b(b_vv.vec.size());
+            for (std::size_t i = 0; i < b_vv.vec.size(); ++i) b[i] = b_vv.vec[i];
+            self.solve(x, b);
+            return VV(std::move(x));
+        }, "b"_a, "Apply preconditioner: solve (LU)·x = b")
+        .def("solve",
+             [](const ILU& self,
+                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+            std::size_t n = b_np.shape(0);
+            Vec x(n);
+            Vec b(n);
+            for (std::size_t i = 0; i < n; ++i) b[i] = b_np.data()[i];
+            self.solve(x, b);
+            return VV(std::move(x));
+        }, "b"_a)
+        .def("__repr__", [ilu_name](const ILU&) {
+            return std::string("mtl5.sparse.") + ilu_name + "()";
+        });
+
+    // ----- IC(0) --------------------------------------------------------
+    using IC = mtl::itl::pc::ic_0<T>;
+    std::string ic_name = std::string("IC0_") + type_suffix<T>();
+    nb::class_<IC>(m, ic_name.c_str())
+        .def("__init__", [](IC* self, const SMat& A) {
+            new (self) IC(A);
+        }, "A"_a, "Construct IC(0) preconditioner from an SPD CSR matrix")
+        .def("solve", [](const IC& self, const VV& b_vv) {
+            Vec x(b_vv.vec.size());
+            Vec b(b_vv.vec.size());
+            for (std::size_t i = 0; i < b_vv.vec.size(); ++i) b[i] = b_vv.vec[i];
+            self.solve(x, b);
+            return VV(std::move(x));
+        }, "b"_a, "Apply preconditioner: solve (L·L^T)·x = b")
+        .def("solve",
+             [](const IC& self,
+                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+            std::size_t n = b_np.shape(0);
+            Vec x(n);
+            Vec b(n);
+            for (std::size_t i = 0; i < n; ++i) b[i] = b_np.data()[i];
+            self.solve(x, b);
+            return VV(std::move(x));
+        }, "b"_a)
+        .def("__repr__", [ic_name](const IC&) {
+            return std::string("mtl5.sparse.") + ic_name + "()";
+        });
+}
+
+// ===========================================================================
 // Module definition
 // ===========================================================================
 NB_MODULE(_core, m) {
@@ -1105,6 +1269,14 @@ NB_MODULE(_core, m) {
     // ----- Sparse matrices (CSR via mtl::compressed2D) -----------------------
     register_sparse_matrix<float>(m);
     register_sparse_matrix<double>(m);
+
+    // ----- Iterative solvers (CG, GMRES, BiCGSTAB) ---------------------------
+    register_sparse_solvers<float>(m);
+    register_sparse_solvers<double>(m);
+
+    // ----- Preconditioners (ILU0, IC0) ---------------------------------------
+    register_preconditioners<float>(m);
+    register_preconditioners<double>(m);
 
     // ----- Universal number types (copy-converting from float64) -------------
     // Standard IEEE-style cfloat configurations
