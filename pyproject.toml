@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "mtl5"
-version = "0.1.0"
+version = "5.2.0"
 description = "Python bindings for MTL5 — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch"
 readme = "README.md"
 license = {text = "MIT"}
@@ -36,3 +36,36 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
+
+# ---------------------------------------------------------------------------
+# python-semantic-release configuration
+#
+# mtl5-python follows MTL5's major.minor version. Semantic-release manages
+# only the PATCH component based on conventional commit messages:
+#   feat: → patch bump (NOT minor — minor tracks MTL5 upstream)
+#   fix:  → patch bump
+#   breaking change → manual intervention (must align with MTL5 major bump)
+#
+# When MTL5 upstream releases a new major.minor (e.g. 5.3.0), manually set
+# the version in pyproject.toml to match, then let semantic-release resume
+# patch management from there.
+# ---------------------------------------------------------------------------
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+tag_format = "v{version}"
+commit_message = "chore(release): v{version}"
+major_on_zero = false
+branch = "main"
+
+[tool.semantic_release.commit_parser_options]
+# Override: treat feat as patch (not minor) since minor tracks MTL5 upstream.
+# Only an explicit "BREAKING CHANGE" footer triggers a minor bump here — but
+# in practice, minor/major bumps are manual to align with MTL5.
+minor_types = []
+patch_types = ["feat", "fix", "perf", "refactor"]
+
+[tool.semantic_release.changelog]
+changelog_file = "CHANGELOG.md"
+
+[tool.semantic_release.publish]
+upload_to_pypi = false

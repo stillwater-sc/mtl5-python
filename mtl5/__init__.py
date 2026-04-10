@@ -1,5 +1,11 @@
 """MTL5 Python bindings — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch."""
 
+from importlib.metadata import version as _pkg_version
+
+# Single source of truth: pyproject.toml → installed package metadata.
+# The C++ module also reads this at build time via CMake.
+__version__ = _pkg_version("mtl5")
+
 from mtl5._core import (
     # Cholesky factorization objects
     CholeskyFactor_f32,
@@ -40,7 +46,6 @@ from mtl5._core import (
     # LU factorization objects
     LUFactor_f32,
     LUFactor_f64,
-    __version__,
     # Backend management
     backends,
     cholesky,

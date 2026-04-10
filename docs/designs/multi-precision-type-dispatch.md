@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented (v0.1.0) for IEEE types. Universal number types pending custom dtype registration (#5).
+Implemented for IEEE types. Universal number types added as named factories (issue #5 Phase 1).
 
 ## Need
 

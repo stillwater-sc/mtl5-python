@@ -1251,7 +1251,12 @@ void register_preconditioners(nb::module_& m) {
 NB_MODULE(_core, m) {
     m.doc() = "MTL5 Python bindings — nanobind core module";
 
-    m.attr("__version__") = "0.1.0";
+    // Version injected from pyproject.toml via CMake compile definition
+#ifdef MTL5PY_VERSION
+    m.attr("__version__") = MTL5PY_VERSION;
+#else
+    m.attr("__version__") = "0.0.0-dev";
+#endif
 
     // ----- Device & backend management ---------------------------------------
     m.def("devices", []() {
