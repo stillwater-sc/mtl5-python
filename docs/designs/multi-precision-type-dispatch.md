@@ -2,7 +2,9 @@
 
 ## Status
 
-Implemented for IEEE types. Universal number types added as named factories (issue #5 Phase 1).
+**IEEE types** (f32, f64, i32, i64): fully implemented with automatic dtype dispatch via `nb::ndarray` — `mtl5.vector(np_array)` selects the right type based on the input dtype.
+
+**Universal types** (posit8/16/32/64, fixpnt8/16, lns16/32, fp8, fp16): available via named factory functions (`mtl5.vector_posit16(np_array)`, `mtl5.matrix_fp8(np_array)`, etc.). Automatic `vector()` dtype dispatch for Universal types requires custom NumPy dtype registration (issue #14, Phase 2).
 
 ## Need
 

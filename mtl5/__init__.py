@@ -1,10 +1,19 @@
 """MTL5 Python bindings — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch."""
 
+from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 # Single source of truth: pyproject.toml → installed package metadata.
 # The C++ module also reads this at build time via CMake.
-__version__ = _pkg_version("mtl5")
+# Falls back to the C++ extension's version when running from a source tree
+# without installed metadata (e.g. an in-place build without pip install).
+try:
+    __version__ = _pkg_version("mtl5")
+except PackageNotFoundError:
+    try:
+        from mtl5._core import __version__  # noqa: F811
+    except ImportError:
+        __version__ = "0.0.0-dev"
 
 from mtl5._core import (
     # Cholesky factorization objects

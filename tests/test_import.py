@@ -15,6 +15,16 @@ def test_version_string():
     assert all(p.isdigit() for p in parts[:3])
 
 
+def test_version_sync():
+    """Python package version must match the C++ extension module version."""
+    import mtl5._core as _core
+
+    assert mtl5.__version__ == _core.__version__, (
+        f"Version mismatch: mtl5.__version__={mtl5.__version__!r} "
+        f"vs _core.__version__={_core.__version__!r}"
+    )
+
+
 def test_public_api():
     for name in ["vector", "vector_copy", "matrix", "matrix_copy", "norm", "dot", "solve"]:
         assert hasattr(mtl5, name), f"mtl5.{name} not found"

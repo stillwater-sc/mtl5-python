@@ -43,7 +43,7 @@ jobs:
       - name: Run semantic-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: semantic-release version --no-push --no-vcs-release --skip-build || true
+        run: semantic-release version --no-push --no-vcs-release --skip-build
 
       - name: Check if version was bumped
         id: check

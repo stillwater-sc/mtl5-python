@@ -18,11 +18,14 @@ nanobind_add_module(_core src/mtl5_module.cpp)
 
 # Inject the package version from pyproject.toml into the C++ module via a
 # compile definition. scikit-build-core sets SKBUILD_PROJECT_VERSION; fall back
-# to the CMake project version if building outside of pip.
-if(DEFINED SKBUILD_PROJECT_VERSION)
+# to the CMake project version, then to "0.0.0-dev" if neither is available
+# (e.g. standalone cmake invocation without scikit-build or project VERSION).
+if(DEFINED SKBUILD_PROJECT_VERSION AND NOT "${SKBUILD_PROJECT_VERSION}" STREQUAL "")
     set(_MTL5PY_VERSION "${SKBUILD_PROJECT_VERSION}")
-else()
+elseif(DEFINED CMAKE_PROJECT_VERSION AND NOT "${CMAKE_PROJECT_VERSION}" STREQUAL "")
     set(_MTL5PY_VERSION "${CMAKE_PROJECT_VERSION}")
+else()
+    set(_MTL5PY_VERSION "0.0.0-dev")
 endif()
 target_compile_definitions(_core PRIVATE MTL5PY_VERSION="${_MTL5PY_VERSION}")
 
