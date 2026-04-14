@@ -9,7 +9,20 @@ def test_import():
 
 def test_version_string():
     assert isinstance(mtl5.__version__, str)
-    assert mtl5.__version__ == "0.1.0"
+    # Version must be a valid semver (major.minor.patch)
+    parts = mtl5.__version__.split(".")
+    assert len(parts) >= 3, f"Expected semver, got '{mtl5.__version__}'"
+    assert all(p.isdigit() for p in parts[:3])
+
+
+def test_version_sync():
+    """Python package version must match the C++ extension module version."""
+    import mtl5._core as _core
+
+    assert mtl5.__version__ == _core.__version__, (
+        f"Version mismatch: mtl5.__version__={mtl5.__version__!r} "
+        f"vs _core.__version__={_core.__version__!r}"
+    )
 
 
 def test_public_api():

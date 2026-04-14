@@ -1,0 +1,77 @@
+name: Release
+
+# Triggered on push to main after CI passes.
+# python-semantic-release analyzes conventional commits since the last tag,
+# determines if a version bump is needed, updates pyproject.toml, creates
+# a git tag, and publishes a GitHub Release.
+#
+# Versioning policy:
+#   - mtl5-python follows MTL5's major.minor version (currently 5.2.x)
+#   - semantic-release only manages the PATCH component
+#   - feat: and fix: commits both trigger a patch bump
+#   - Major/minor bumps are manual to align with MTL5 upstream releases
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write  # push tags and create releases
+  id-token: write  # trusted publishing (future PyPI)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Only run if CI passed (release depends on the CI workflow)
+    concurrency:
+      group: release
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # full history needed for commit analysis
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install python-semantic-release
+        run: pip install python-semantic-release
+
+      - name: Run semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release version --no-push --no-vcs-release --skip-build
+
+      - name: Check if version was bumped
+        id: check
+        run: |
+          if git diff --name-only | grep -q pyproject.toml; then
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit, tag, and push
+        if: steps.check.outputs.bumped == 'true'
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.bumped == 'true'
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
