@@ -1,0 +1,290 @@
+# GAP Analysis — mtl5-python bindings vs. MTL5 `main` (2026-08-01)
+
+**Analyst:** automated survey of `mtl5-python@968c602` against `mtl5@c6ff006`
+**Bindings source of truth:** `python/src/mtl5_module.cpp` (1338 LOC), `mtl5/__init__.py`, `mtl5/sparse/__init__.py`, `mtl5/pandas_ext.py`
+**MTL5 source of truth:** `include/mtl/**` at `main`, `CHANGELOG.md`, `git tag`
+
+---
+
+## 1. Executive summary
+
+The bindings were last extended on **2026-04-14** against MTL5 as of **2026-04-06**
+(`build/_deps/mtl5-src` is pinned at `67d81d7`). Since then MTL5 has landed **165 commits
+and five minor releases** (`v5.2.1` → `v5.7.0`). `pyproject.toml` still declares
+`version = "5.2.0"`, and the project's own versioning policy says the minor component
+tracks MTL5 upstream — so the declared version is **five minor releases stale**.
+
+Three findings, in order of impact:
+
+1. **No API breakage.** `mtl5_module.cpp` still compiles clean (`g++ -std=c++20 -fsyntax-only`,
+   exit 0, warnings only about symbol visibility) against today's MTL5 headers. The gap is
+   **entirely unexposed surface**, not drift. Catching up is additive work with no migration cost.
+
+2. **The strategic differentiator is 0% exposed.** MTL5's mixed-precision layer — epic #157's
+   `accumulator_traits`, `mtl::convert`, the accumulator policies on `dot`/`gemm`/`gemv`/norms,
+   `lu_iterative_refine`, `normwise_backward_error`, and `sparse::iterative_refine` — has **no
+   Python surface at all**. The bindings' Universal path is copy-convert only: a `posit32`
+   matrix is stored *and* accumulated in `posit32`, so the quire/wide-accumulator accuracy
+   result that motivates the number systems is unreachable from Python. This is the single
+   largest gap relative to the project's purpose.
+
+3. **The wheel ships MTL5's slowest configuration.** `python/CMakeLists.txt` links `MTL5::mtl5`
+   without enabling any acceleration option. All of `MTL5_NATIVE_FAST_GEMM`, `MTL5_WITH_BLAS`,
+   `MTL5_WITH_LAPACK`, and `MTL5_WITH_HIGHWAY` default to `OFF` in MTL5's CMakeLists
+   (lines 47–53), so:
+   - `mtl::mult` never reaches the blocked GEMM / SIMD path (`operation/mult.hpp:17,217,278,345`
+     are all `#ifdef MTL5_NATIVE_FAST_GEMM`) — the entire #82/#99–#107 GEMM epic, and the
+     10–16× SIMD-widening GEMM from #176, are compiled out.
+   - `get_backend()` can only ever return `"reference"`; the `MTL5_HAS_BLAS` / `MTL5_HAS_KPU`
+     branches in `mtl5_module.cpp:1267–1290` are dead code as built.
+   - Threading *is* available (runtime-gated on `MTL5_NUM_THREADS`, `detail/thread_pool.hpp:36`)
+     but is undocumented and unexposed in Python, and no binding releases the GIL
+     (zero `nb::gil_scoped_release` in the module), so threaded kernels cannot overlap with
+     the interpreter and any long solve freezes it.
+
+---
+
+## 2. What is bound today
+
+| Area | Bound |
+|---|---|
+| Dense containers | `dense_vector<T>`, `dense2D<T>` for f32/f64/i32/i64 |
+| Universal containers | fp8, fp16, posit8/16/32/64, fixpnt8/16, lns16/32 (copy-converting) |
+| Sparse containers | `compressed2D<T>` CSR only, f32/f64 |
+| Dense ops | `norm` (1/2/inf), `dot`, `matmul`, `matvec`, `transpose`, `det`, `inv`, `solve`, `lu`, `cholesky` |
+| Sparse ops | `matvec`, `to_csr_arrays`, SciPy `from_scipy`/`to_scipy`/`as_linear_operator` |
+| Krylov | `cg`, `gmres`, `bicgstab` |
+| Preconditioners | `ilu0`, `ic0` |
+| Ecosystem | pandas `ExtensionDtype` for posit16 |
+| Infra | `devices`, `backends`, `get_backend`, `set_backend` (stubs) |
+
+That is roughly **14 numerical entry points** plus containers.
+
+---
+
+## 3. Gap inventory
+
+### 3.1 Mixed precision — P0, 0 of ~10 exposed
+
+The differentiator. `mtl/math/accumulator_traits.hpp`, `operation/convert.hpp`,
+`operation/lu_iterative_refine.hpp`, `operation/backward_error.hpp`, `sparse/iterative_refine.hpp`.
+
+| MTL5 | Status |
+|---|---|
+| `math::accumulator_traits<Acc, Value>` — element / accumulate / result precision triple | unbound |
+| accumulator policy on `dot`, `dot_real` (#159) | unbound |
+| accumulator policy on `mult`/`gemm`, result type from `C` (#161) | unbound |
+| accumulator policy on `gemv` (#160), `two_norm`/`frobenius_norm` (#162) | unbound |
+| `math::fma_accumulator` (#259) | unbound |
+| `mtl::convert` — element-wise re-quantization (#164) | unbound |
+| `lu_iterative_refine<Working>(A, b, x, opt)` (#273) | unbound |
+| `normwise_backward_error(A, x, b)` (#273) | unbound |
+| `sparse::iterative_refine` — refinement through any factorization (#119, #167) | unbound |
+| `cg` accumulator policy — posit32+quire accuracy gain (#238) | unbound |
+
+**Consequence:** the headline claim `mult<float>(A_bf16, B_bf16, C_bf16)` (store narrow,
+accumulate wide) has no Python equivalent. So does `posit32`+quire in CG.
+
+### 3.2 Sparse direct solvers — P0, 0 of ~9 exposed
+
+`mtl/sparse/factorization/*`. Python users must round-trip to SciPy's SuperLU/UMFPACK,
+which cannot do mixed precision.
+
+`sparse_lu_{symbolic,numeric,solve,refactor}`, `sparse_cholesky_*`, `sparse_ldlt_*`,
+`sparse_qr_*`, `supernodal_lu_{symbolic_analyze,numeric,refactor,solve,solve_refined}`,
+`supernodal_ldlt_*`, `native_klu_{factor,refactor,solve}`, `triangular_solve`,
+`level_schedule` — all unbound.
+
+The **analyze/factor/refactor** split (#153/#154/#184, 1.9–3.2× on same-pattern refactor) is
+exactly the SPICE-transient workflow, and it is the one thing SciPy structurally cannot offer.
+
+**Orderings and analysis, also unbound:** `amd`, `colamd`, `rcm`, `minimum_degree`,
+`dulmage_mendelsohn` / `block_triangular_form`, `elimination_tree`, `column_elimination_tree`,
+`tree_postorder`, `find_supernodes`.
+
+### 3.3 Eigenvalue / SVD — P1, 0 of ~10 exposed
+
+Nothing in the eigen/SVD family reaches Python, despite epic #202 completing in July.
+
+`eigenvalue`, `eigen`, `eigenvalue_symmetric`, `eigen_symmetric`,
+`eigenvalue_symmetric_generic`, `svd`, `singular_values`;
+matrix-free `itl::power_iteration`, `itl::lanczos`, `itl::arnoldi`;
+`sparse_eigs`, `sparse_eigs_shift_invert`, `shift_invert_operator`.
+
+This is a natural `numpy.linalg` / `scipy.sparse.linalg.eigs` mapping and the absence is
+conspicuous for any ecosystem-facing package.
+
+### 3.4 Dense factorizations beyond LU/Cholesky — P1, 0 of ~8 exposed
+
+`qr_factor`/`qr_solve`, `lq_factor`, `ldlt_factor`/`ldlt_solve`,
+`ldlt_bk_factor`/`ldlt_bk_solve` (Bunch–Kaufman, for indefinite systems),
+`hessenberg`/`hessenberg_factor`/`tridiagonalize`, `householder`, Givens rotations.
+
+Note: open issue #18 (mixed-precision UKF, Cholesky vs LDLᵀ) is **blocked** on `ldlt` bindings.
+
+### 3.5 BLAS Level 2/3 and elementwise — P1, ~2 of ~22 exposed
+
+Only GEMM (`matmul`) and GEMV (`matvec`) are bound. Missing, all landed in #229–#232:
+`ger`, `symv`, `trmv`, `trsv`, `trmm`, `trsm`, `symm`, `syrk`, `syr2k`.
+Also unbound: `axpy`, `scale`, `sum`, `product`, `min`, `max`, `trace`, `kron`,
+`diag`/`diagonal`, `reorder`/`reorder_rows`/`reorder_cols`, `fill`, `set_to_zero`,
+`random_matrix`/`random_vector`, `project_onto`/`embed_into`/`saturating_cast`,
+and the transcendental family (`exp`, `log`, `sqrt`, `sin`, … ~25 functions).
+
+### 3.6 Property predicates — P1, 0 of ~30 exposed
+
+The whole #244 module (`matrix_properties.hpp`, `vector_properties.hpp`,
+`factorization_properties.hpp`, `spectral_properties.hpp`, `tensor/properties.hpp`):
+
+`is_square`, `is_empty`, `is_symmetric`, `is_hermitian`, `is_upper/lower_triangular`,
+`is_triangular`, `is_diagonal`, `is_banded`, `is_diagonally_dominant`, `is_orthogonal`,
+`is_unitary`, `is_normal`; `is_zero`, `is_finite`, `has_nan`, `has_inf`, `is_normalized`,
+`is_unit`, `is_orthogonal_to`; `is_spd`, `is_positive_definite`, `is_singular`,
+`is_nonsingular`, `is_invertible`, `determinant`; `spectral_radius`, `condition_number`,
+`rcond`, `numerical_rank`, `nullity`, `inertia`, `is_indefinite`.
+
+Cheap to bind, and `condition_number`/`rcond`/`numerical_rank` map directly onto
+`np.linalg.cond` / `np.linalg.matrix_rank` expectations.
+
+### 3.7 Iterative solvers — P2, 3 of 10 Krylov, 2 of 9 preconditioners
+
+**Missing Krylov:** `bicg`, `bicgstab_ell`, `cgs`, `idr_s`, `minres`, `qmr`, `tfqmr`.
+**Missing preconditioners:** `diagonal` (Jacobi), `block_diagonal`, `ildl`, `ilut`, `ssor`.
+**Missing smoothers (entire module):** `jacobi`, `gauss_seidel` + backward/symmetric,
+`sor` + backward/symmetric.
+**Missing multigrid (entire module):** `multigrid`, `prolongation`, `restriction`.
+
+Also note the Krylov solvers are exposed as private `_sparse_cg`/`_sparse_gmres`/`_sparse_bicgstab`
+with a Python wrapper — a pattern that will not scale to 10 solvers × 9 preconditioners; a
+policy-object dispatch is warranted before expanding.
+
+### 3.8 Containers, views, expressions — P2, 0 of ~20 exposed
+
+**Matrix/vector types:** `coordinate2D` (COO), `ell_matrix` (ELL), `block_diagonal2D`,
+`identity2D`, `permutation_matrix`, `sparse_vector`, `unit_vector`, `strided_vector_ref`,
+and the inserter API (`compressed2D_inserter`, `shifted_inserter`).
+
+**Views:** `transposed_view`, `lower_view`, `upper_view`, `strict_lower_view`,
+`strict_upper_view`, `banded_view`, `hermitian_view`, `map_view`.
+
+**Notable:** `compressed2D` is templated on orientation (`tag::row_major` | `tag::col_major`,
+`mat/parameter.hpp:14`) but the bindings instantiate **row-major only** — so
+`scipy.sparse.csc_matrix` has no zero-copy path and must be converted.
+
+**Also unsupported anywhere:** complex scalars, despite `eigenvalue` returning complex and
+`hermitian_view` existing.
+
+### 3.9 Tensor / N-D array layer — P2, 0 exposed
+
+`mtl/tensor/*` (rank-N `tensor`, `Index`/`contract`/`outer`/`bind`, metric raise/lower,
+symmetric/antisymmetric storage) and `mtl/array/*` (`ndarray`, `shape`, `slice`, `broadcast`,
+`interop`: `as_matrix`/`as_vector`/`flatten`/`reduce`/`transform`, and `sum`/`mean`/`min`/`max`/`prod`).
+
+This is the natural home for real NumPy N-D interop, and it is entirely unbound — today's
+bindings are 1-D and 2-D only. `mtl/array/interop.hpp` reads like it was designed for exactly
+this purpose.
+
+### 3.10 I/O — P2, 0 exposed
+
+`io::mm_read`/`mm_write` (Matrix Market, with gzip and direct-CRS large-file loading, #197),
+`read_el`/`write_el`, and the visualization stack `spy`/`spy_density`/`spy_magnitude`/`spy_grid`
+plus the from-scratch PNG writer (#252/#253/#257).
+
+`spy` → PNG with no matplotlib dependency is a genuinely attractive Python feature.
+
+### 3.11 Test-matrix generators — P2, 0 of ~28 exposed
+
+`clement`, `companion`, `forsythe`, `frank`, `hilbert`, `kahan`, `laplacian_1d/2d`, `lehmer`,
+`lotkin`, `magic`, `minij`, `moler`, `ones`, `pascal`, `poisson2d_dirichlet`, `randorth`,
+`randspd`, `randsvd`, `randsym`, `rosser`, `vandermonde`, `wilkinson`; the `testsuite` catalog
+(`by_name`, `names`, `kappa_table`); and the range family `arange`/`linspace`/`logspace`/`geomspace`.
+
+Lowest effort-to-value ratio in this document: pure factory functions, no lifetime concerns,
+and they immediately improve the bindings' own test suite (which currently hand-rolls matrices).
+
+### 3.12 Build, threading, and dispatch — P0 (config), P1 (surface)
+
+| Issue | Evidence |
+|---|---|
+| No acceleration options enabled in the wheel | `python/CMakeLists.txt` — no `MTL5_WITH_*`, no `MTL5_NATIVE_FAST_GEMM` |
+| `get_backend()` structurally cannot report anything but `"reference"` | `mtl5_module.cpp:1281–1290` vs. MTL5 `CMakeLists.txt:125–135` |
+| `set_backend()` is a no-op stub | `mtl5_module.cpp:1291` |
+| Threading unexposed and undocumented | `MTL5_NUM_THREADS` read in `detail/thread_pool.hpp:36`; no Python accessor |
+| GIL never released | zero `nb::gil_scoped_release` in the module |
+| External solver interfaces unbound | `interface/{umfpack,superlu,klu,cholmod,spqr,blas,lapack}.hpp` |
+
+The GIL point compounds the threading point: even after #221/#297 made every substantial
+kernel parallel, a Python caller gets serial execution *and* a blocked interpreter.
+
+---
+
+## 4. Coverage scorecard
+
+| Module | Exposed | Available | Coverage |
+|---|---|---|---|
+| Dense containers | 2 | 2 | ✅ full (f32/f64/i32/i64) |
+| Universal number types | 12 | 12 | ✅ full (storage only) |
+| Mixed-precision / accumulator | 0 | ~10 | ❌ 0% |
+| Dense factorizations | 2 | 10 | ⚠️ 20% |
+| Eigen / SVD | 0 | ~10 | ❌ 0% |
+| BLAS L2/L3 + elementwise | 2 | ~22 | ⚠️ 9% |
+| Property predicates | 0 | ~30 | ❌ 0% |
+| Sparse containers | 1 | 6 | ⚠️ 17% (CSR only) |
+| Sparse direct solvers | 0 | ~9 | ❌ 0% |
+| Sparse ordering / analysis | 0 | ~9 | ❌ 0% |
+| Krylov solvers | 3 | 10 | ⚠️ 30% |
+| Preconditioners | 2 | 9 | ⚠️ 22% |
+| Smoothers / multigrid | 0 | 6 | ❌ 0% |
+| Views / expressions | 0 | ~8 | ❌ 0% |
+| Tensor / ndarray | 0 | ~15 | ❌ 0% |
+| I/O | 0 | ~8 | ❌ 0% |
+| Generators | 0 | ~28 | ❌ 0% |
+| Build acceleration | 0 | 5 options | ❌ 0% |
+
+---
+
+## 5. Recommended sequencing
+
+**Phase 0 — build configuration (days, no new bindings)**
+Turn on `MTL5_NATIVE_FAST_GEMM`; add opt-in `MTL5_WITH_BLAS`/`WITH_LAPACK`/`WITH_HIGHWAY`
+via `[tool.scikit-build.cmake.define]`; make `get_backend()` truthful; expose
+`set_num_threads()`/`get_num_threads()`; release the GIL around every kernel that can run
+longer than a few microseconds. Sync `pyproject.toml` to `5.7.x`. This is the highest
+performance-per-hour item in the document — MTL5's entire 2026 performance program is
+currently compiled out of the wheel.
+
+**Phase 1 — mixed precision (the differentiator)**
+`convert`, an accumulator-policy parameter on `dot`/`matmul`/`matvec`/`norm`,
+`lu_iterative_refine` + `normwise_backward_error`, `sparse::iterative_refine`.
+This is what makes the package worth using over NumPy/SciPy.
+
+**Phase 2 — sparse direct solvers**
+`sparse_lu` and `native_klu` with the analyze/factor/refactor split exposed as a Python
+factorization object; then supernodal LU/LDLᵀ, `sparse_cholesky`, `sparse_qr`, and orderings.
+Pair with mixed-precision refinement from Phase 1 — that combination has no SciPy equivalent.
+
+**Phase 3 — dense completeness**
+QR/LQ/LDLᵀ/Bunch–Kaufman (unblocks #18), eigen/SVD family, BLAS L2/L3, property predicates.
+
+**Phase 4 — ecosystem depth**
+Generators + `linspace` family (quick win, improves own tests), Matrix Market I/O, `spy`
+visualization, CSC/COO/ELL containers, complex scalar support, the `mtl/array` N-D layer.
+
+**Cross-cutting:** refactor the Krylov binding pattern to a solver/preconditioner dispatch
+before expanding from 3×2 to 10×9 combinations.
+
+---
+
+## 6. Method and caveats
+
+- Coverage determined by enumerating `nb::class_` / `m.def` in `mtl5_module.cpp` and the
+  `__all__` lists in `mtl5/__init__.py` and `mtl5/sparse/__init__.py`, then diffing against
+  namespace-scope function declarations across `include/mtl/**`.
+- Compile check: `g++ -std=c++20 -fsyntax-only` on `mtl5_module.cpp` against
+  `include/mtl` at `c6ff006`, with nanobind and Universal headers from the existing
+  `build/_deps` tree. Exit 0; only `-Wattributes` visibility warnings. It was run **without**
+  MTL5's optional feature macros, so LAPACK/BLAS/Highway-gated code paths were not compiled;
+  enabling those in Phase 0 needs its own build validation.
+- "Available" counts are namespace-scope public functions; internal `detail::` helpers are
+  excluded but the counts are approximate and intended for proportion, not precision.
+- Issue numbers in parentheses refer to **MTL5** issues unless stated as mtl5-python.
