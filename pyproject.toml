@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "mtl5"
-version = "5.2.0"
+version = "5.7.0"
 description = "Python bindings for MTL5 — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch"
 readme = "README.md"
 license = {text = "MIT"}
@@ -26,6 +26,23 @@ cmake.args = ["-DMTL5_ENABLE_PYTHON=ON"]
 
 [tool.scikit-build.cmake.define]
 MTL5_ENABLE_PYTHON = "ON"
+
+# Route mtl::mult through MTL5's blocked GEMM / SIMD GEMV, vectorised by
+# Google Highway. These two belong together: the blocked kernel is ~3.4x SLOWER
+# than the generic one without Highway to vectorise it, and ~5.5-6.8x faster
+# with it. Highway uses static dispatch at the x86-64 baseline here, so the
+# wheel stays portable. Full measurements in the top-level CMakeLists.txt.
+MTL5_NATIVE_FAST_GEMM = "ON"
+MTL5_WITH_HIGHWAY = "ON"
+
+# Opt-in acceleration. Each needs something extra on the build machine, so the
+# defaults stay off for a portable wheel; enable at install time:
+#   pip install . -C cmake.define.MTL5_WITH_BLAS=ON
+#   pip install . -C cmake.define.MTL5_WITH_LAPACK=ON
+#   pip install . -C cmake.define.MTL5_NATIVE_ARCH=ON   # local builds only
+# MTL5_WITH_LAPACK additionally unlocks the geev/syev/gesdd dispatch paths that
+# the eigen and SVD bindings will need (Phase 3). MTL5_NATIVE_ARCH lets Highway
+# target AVX2/AVX-512 instead of the baseline, at the cost of portability.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

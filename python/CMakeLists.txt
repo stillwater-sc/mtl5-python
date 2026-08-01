@@ -17,17 +17,33 @@ endif()
 nanobind_add_module(_core src/mtl5_module.cpp)
 
 # Inject the package version from pyproject.toml into the C++ module via a
-# compile definition. scikit-build-core sets SKBUILD_PROJECT_VERSION; fall back
-# to the CMake project version, then to "0.0.0-dev" if neither is available
-# (e.g. standalone cmake invocation without scikit-build or project VERSION).
+# compile definition. scikit-build-core sets SKBUILD_PROJECT_VERSION; a plain
+# `cmake -S . -B build` has no package metadata at all, so it falls back to the
+# "0.0.0-dev" sentinel.
+#
+# PROJECT_VERSION here is mtl5_python's, which is deliberately unset. Do NOT use
+# CMAKE_PROJECT_VERSION: FetchContent brings MTL5's own project(MTL5 VERSION
+# x.y.z) into the build, and that value leaks through, stamping MTL5's version
+# onto the Python package (a standalone build reported 5.7.0 for a 5.2.0
+# package). Tests treat the sentinel as "dev build, version check not
+# applicable".
 if(DEFINED SKBUILD_PROJECT_VERSION AND NOT "${SKBUILD_PROJECT_VERSION}" STREQUAL "")
     set(_MTL5PY_VERSION "${SKBUILD_PROJECT_VERSION}")
-elseif(DEFINED CMAKE_PROJECT_VERSION AND NOT "${CMAKE_PROJECT_VERSION}" STREQUAL "")
-    set(_MTL5PY_VERSION "${CMAKE_PROJECT_VERSION}")
+elseif(DEFINED PROJECT_VERSION AND NOT "${PROJECT_VERSION}" STREQUAL "")
+    set(_MTL5PY_VERSION "${PROJECT_VERSION}")
 else()
     set(_MTL5PY_VERSION "0.0.0-dev")
 endif()
 target_compile_definitions(_core PRIVATE MTL5PY_VERSION="${_MTL5PY_VERSION}")
+
+# MTL5 exports MTL5_NATIVE_FAST_GEMM through a $<BUILD_INTERFACE:...> guard, so
+# it propagates when MTL5 is consumed via FetchContent but NOT when it is found
+# as an installed package. The macro only gates header code — no library, no ISA
+# assumption — so defining it directly here makes both paths behave the same.
+# MTL5_HAS_HIGHWAY is deliberately not mirrored: it requires linking hwy.
+if(MTL5_NATIVE_FAST_GEMM)
+    target_compile_definitions(_core PRIVATE MTL5_NATIVE_FAST_GEMM)
+endif()
 
 # Use namespaced target — works for both find_package and FetchContent
 # (FetchContent creates both 'mtl5' and 'MTL5::mtl5' alias)
