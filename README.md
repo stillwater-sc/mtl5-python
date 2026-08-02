@@ -113,6 +113,96 @@ below, or the ILU(0)/IC(0) preconditioners.
 > [stillwater-sc/mtl5#323](https://github.com/stillwater-sc/mtl5/issues/323) and
 > pinned by a strict-xfail regression in `tests/test_mixed_precision.py`.
 
+## Dense factorizations
+
+```python
+qr = mtl5.qr(A)  # Householder QR; tall or square
+x = qr.solve(b)  # least squares
+qr.Q, qr.R
+
+lq = mtl5.lq(A)  # the row-space counterpart
+lq.L, lq.Q
+
+ld = mtl5.ldlt(A)  # symmetric, indefinite allowed
+ld.solve(b)
+ld.diagonal()  # D — its signs are the inertia
+```
+
+All accept an MTL5 matrix or a float32/float64 NumPy array, alongside the
+existing `mtl5.lu` and `mtl5.cholesky`.
+
+### Cholesky vs LDLᵀ across number systems
+
+`ldlt` and `cholesky` are both available for float32, float64 and **all ten
+Universal dtypes** — the integer element types are not supported — which is what
+makes the interesting comparison possible. Cholesky takes square roots, so
+it refuses a matrix that has drifted out of positive-definiteness — the failure
+mode of a Kalman covariance update in low precision. LDLᵀ has no square roots,
+survives, and records what happened in `D`:
+
+```python
+P = np.eye(6)
+P[3, 3] = -1e-3  # covariance went indefinite
+
+mtl5.cholesky(mtl5.convert(P, "posit16"))  # RuntimeError: not SPD
+d = mtl5.ldlt(mtl5.convert(P, "posit16")).diagonal()
+(d < 0).any()  # True — D names the bad direction
+```
+
+> **Bunch–Kaufman is not exposed.** It is the pivoting variant you would
+> normally reach for when plain LDLᵀ hits a zero pivot, but MTL5's `ldlt_bk`
+> returns a wrong solution whenever it interchanges — backward error ~1e-1
+> under a success code. Filed as
+> [stillwater-sc/mtl5#335](https://github.com/stillwater-sc/mtl5/issues/335);
+> the binding is withheld until that is fixed.
+
+## Eigenvalues, BLAS 2/3, and matrix properties
+
+The eigen entry points mirror `numpy.linalg`, and return NumPy arrays:
+
+```python
+mtl5.eigvalsh(A)  # symmetric eigenvalues, real, ascending
+w, Q = mtl5.eigh(A)  # ...with eigenvectors:  A = Q diag(w) Qᵀ
+mtl5.eigvals(A)  # general spectrum, complex
+w, V = mtl5.eig(A)  # ...with right eigenvectors
+mtl5.spectral_radius(A)
+mtl5.inertia(A)  # {'positive': …, 'negative': …, 'zero': …}
+```
+
+BLAS levels 2 and 3 write into a caller-supplied output, as BLAS does — that
+in-place accumulation is the point:
+
+```python
+mtl5.ger(alpha, x, y, A)  # A += alpha x yᵀ
+mtl5.symv(alpha, A, x, beta, y)  # y = alpha A x + beta y
+mtl5.trsv(A, x, upper=True)  # x = A⁻¹x
+mtl5.trmm(alpha, A, B, upper=True)  # B = alpha A B
+mtl5.trsm(alpha, A, B, upper=True)  # solve A X = alpha B
+mtl5.symm(alpha, A, B, beta, C)  # C = alpha A B + beta C
+mtl5.syrk(alpha, A, beta, C)  # C = alpha A Aᵀ + beta C
+mtl5.syr2k(alpha, A, B, beta, C)
+```
+
+Property predicates come in two cost classes. The **docstrings are
+authoritative**; the split is:
+
+- **O(n²) or cheaper** — the structural checks (`is_square`, `is_empty`,
+  `is_symmetric`, `is_hermitian`, `is_triangular` and the upper/lower variants,
+  `is_diagonal`, `is_banded`, `is_diagonally_dominant`) and every vector
+  predicate.
+- **O(n³)** — anything that forms a product, factorizes, or runs an
+  eigensolve: `is_orthogonal`, `is_unitary`, `is_normal`, `is_spd`,
+  `is_positive_definite`, `is_singular`, `is_nonsingular`, `is_invertible`,
+  `spectral_radius`, `inertia`, `is_indefinite`. Don't put these inside a loop.
+
+> **SVD is not exposed**, and neither are `condition_number`, `rcond`,
+> `numerical_rank` or `nullity`, which are computed from it. MTL5's
+> `singular_values` returns all-NaN for roughly 30% of ordinary symmetric
+> matrices and is off by up to 143% on σ_max for many of the rest. Filed as
+> [stillwater-sc/mtl5#337](https://github.com/stillwater-sc/mtl5/issues/337).
+> The eigensolvers on the same matrices are accurate to 3.7e-15 (symmetric) and
+> 1.1e-9 (general) over 120 matrices, which is why those ship.
+
 ## Sparse direct solvers
 
 Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:

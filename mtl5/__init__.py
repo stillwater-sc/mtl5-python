@@ -3,6 +3,8 @@
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
+import mtl5._core as _core
+
 # Single source of truth: pyproject.toml → installed package metadata.
 # The C++ module also reads this at build time via CMake.
 # Falls back to the C++ extension's version when running from a source tree
@@ -67,10 +69,42 @@ from mtl5._core import (
     # Operations
     dot,
     dtypes,
+    eig,
+    eigh,
+    eigvals,
+    eigvalsh,
+    ger,
     get_backend,
     # Threading
     get_num_threads,
+    has_inf,
+    has_nan,
+    inertia,
     inv,
+    is_banded,
+    is_diagonal,
+    is_diagonally_dominant,
+    is_empty,
+    is_finite,
+    is_hermitian,
+    is_indefinite,
+    is_invertible,
+    is_lower_triangular,
+    is_nonsingular,
+    is_normal,
+    is_normalized,
+    is_orthogonal,
+    is_orthogonal_to,
+    is_positive_definite,
+    is_singular,
+    is_spd,
+    is_square,
+    is_symmetric,
+    is_triangular,
+    is_unit,
+    is_unitary,
+    is_upper_triangular,
+    is_zero,
     lu,
     matmul,
     matrix,
@@ -92,7 +126,16 @@ from mtl5._core import (
     set_backend,
     set_num_threads,
     solve,
+    spectral_radius,
+    symm,
+    symv,
+    syr2k,
+    syrk,
     transpose,
+    trmm,
+    trmv,
+    trsm,
+    trsv,
     vector,
     vector_copy,
     vector_fixpnt8,
@@ -108,6 +151,113 @@ from mtl5._core import (
 )
 from mtl5._core import det as _det
 
+_UNIVERSAL_DTYPES = (
+    "fp8",
+    "fp16",
+    "posit8",
+    "posit16",
+    "posit32",
+    "posit64",
+    "fixpnt8",
+    "fixpnt16",
+    "lns16",
+    "lns32",
+)
+
+
+_NUMPY_TO_MTL5 = {"float32": "f32", "float64": "f64"}
+
+
+def _as_mtl5_matrix(name: str, prefix: str, A):
+    """Normalize A to (mtl5_matrix, dtype_suffix).
+
+    Accepts an MTL5 matrix from mtl5.matrix()/mtl5.convert(), or a NumPy
+    float32/float64 array, which is wrapped zero-copy — matching what
+    mtl5.cholesky() has always accepted.
+
+    `name` is the public function ("qr", "ldlt", ...) and is what the errors
+    quote; `prefix` is the internal class prefix and never reaches the user.
+    """
+    import numpy as _np
+
+    if isinstance(A, _np.ndarray):
+        suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
+        if suffix is None:
+            # Only suggest convert() for the factorizations that actually have
+            # Universal instantiations — qr/lq are float32/float64 only, so
+            # sending a user there would just earn them a second TypeError.
+            hint = (
+                " For another number system, convert first: mtl5.convert(a, 'posit32')."
+                if _has_universal_support(prefix)
+                else f" {name}() supports float32 and float64 only."
+            )
+            raise TypeError(
+                f"{name}: NumPy arrays must be float32 or float64, got {A.dtype.name}.{hint}"
+            )
+        return matrix(_np.ascontiguousarray(A)), suffix
+
+    dt = getattr(A, "dtype", None)
+    if not isinstance(dt, str):
+        raise TypeError(
+            f"{name}: expected an MTL5 matrix (from mtl5.matrix() or "
+            f"mtl5.convert()) or a NumPy array, got {type(A).__name__}"
+        )
+    return A, dt
+
+
+def _has_universal_support(prefix: str) -> bool:
+    """Whether `prefix` is instantiated beyond float32/float64."""
+    return hasattr(_core, f"{prefix}_posit32")
+
+
+def _factor(name: str, prefix: str, A):
+    """Construct the Factor class matching A's element type."""
+    mat, dt = _as_mtl5_matrix(name, prefix, A)
+    cls = getattr(_core, f"{prefix}_{dt}", None)
+    if cls is None:
+        available = "float32/float64"
+        if _has_universal_support(prefix):
+            available += " and the Universal dtypes"
+        raise TypeError(f"{name} is not available for dtype '{dt}' — it supports {available}.")
+    return cls(mat)
+
+
+def qr(A):
+    """Householder QR of a tall-or-square matrix (num_rows >= num_cols).
+
+    float32 and float64 only. Returns a factorization exposing `.solve(b)`
+    (least squares), `.Q` and `.R`.
+    """
+    return _factor("qr", "QRFactor", A)
+
+
+def lq(A):
+    """Householder LQ: A = L Q, with L lower trapezoidal and Q orthogonal.
+
+    Accepts any shape. For a wide or square A, Q is `num_cols x num_cols`; for
+    a tall A the factorization is the economy form, with Q `num_cols x
+    num_cols` and L `num_rows x num_cols`. Unlike `qr`, which needs
+    num_rows >= num_cols, there is no shape restriction.
+
+    Returns a factorization exposing `.L` and `.Q`.
+    """
+    return _factor("lq", "LQFactor", A)
+
+
+def ldlt(A):
+    """LDL^T factorization of a symmetric matrix.
+
+    Takes no square roots, so unlike `cholesky` it tolerates an indefinite
+    matrix; `.diagonal()` returns D, whose signs give the inertia. It does not
+    pivot, so a zero pivot raises.
+
+    Available for float32/float64 and all ten Universal dtypes, which is what
+    makes a Cholesky-versus-LDL^T comparison across number systems possible.
+    The integer element types (i32/i64) are not supported.
+    """
+    return _factor("ldlt", "LDLTFactor", A)
+
+
 # Convenience aliases — default to f64
 DenseVector = DenseVector_f64
 DenseMatrix = DenseMatrix_f64
@@ -119,6 +269,22 @@ CholeskyFactor = CholeskyFactor_f64
 def det(A):
     """Compute the determinant of a matrix via LU factorization."""
     return _det(A)
+
+
+_native_cholesky = cholesky
+
+
+def cholesky(A):  # noqa: F811
+    """Cholesky factorization A = L L^T of a symmetric positive definite matrix.
+
+    Accepts float32/float64 matrices and NumPy arrays, and — since Phase 3 —
+    the Universal dtypes as well, so it can be compared against `ldlt` in the
+    same precision.
+    """
+    dt = getattr(A, "dtype", None)
+    if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
+        return getattr(_core, f"CholeskyFactor_{dt}")(A)
+    return _native_cholesky(A)
 
 
 # Optional pandas extension types — only loaded if pandas is installed
@@ -193,8 +359,53 @@ __all__ = [
     "build_info",
     "get_num_threads",
     "set_num_threads",
+    # Eigenvalues, BLAS L2/L3, and property predicates
+    "eig",
+    "eigh",
+    "eigvals",
+    "eigvalsh",
+    "ger",
+    "has_inf",
+    "has_nan",
+    "inertia",
+    "is_banded",
+    "is_diagonal",
+    "is_diagonally_dominant",
+    "is_empty",
+    "is_finite",
+    "is_hermitian",
+    "is_indefinite",
+    "is_invertible",
+    "is_lower_triangular",
+    "is_nonsingular",
+    "is_normal",
+    "is_normalized",
+    "is_orthogonal",
+    "is_orthogonal_to",
+    "is_positive_definite",
+    "is_singular",
+    "is_spd",
+    "is_square",
+    "is_symmetric",
+    "is_triangular",
+    "is_unit",
+    "is_unitary",
+    "is_upper_triangular",
+    "is_zero",
+    "spectral_radius",
+    "symm",
+    "symv",
+    "syr2k",
+    "syrk",
+    "trmm",
+    "trmv",
+    "trsm",
+    "trsv",
     # Operations
     "cholesky",
+    "ldlt",
+    "lq",
+    "qr",
     "det",
     "dot",
     "inv",

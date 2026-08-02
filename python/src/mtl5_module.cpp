@@ -1475,6 +1475,12 @@ NB_MODULE(_core, m) {
     // the direct factorizations as refinement factors.
     register_sparse_direct(m);
 
+    // ----- Dense factorizations: QR, LQ, LDL^T -------------------------------
+    register_dense_factorizations(m);
+
+    // ----- Eigen, BLAS L2/L3, property predicates ----------------------------
+    register_dense_ops(m);
+
     // ----- Universal number types (copy-converting from float64) -------------
     // Standard IEEE-style cfloat configurations
     register_universal<fp8>(m, "vector_fp8", "matrix_fp8");
