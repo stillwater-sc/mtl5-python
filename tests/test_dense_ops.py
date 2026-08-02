@@ -91,10 +91,87 @@ class TestEigen:
             with pytest.raises(ValueError, match="must be square"):
                 fn(M(np.ones((3, 5))))
 
-    def test_svd_is_not_exposed(self):
-        """Withheld pending stillwater-sc/mtl5#337 — see the module docstring."""
-        for name in ("svd", "svdvals", "condition_number", "rcond", "numerical_rank", "nullity"):
-            assert not hasattr(mtl5, name), f"{name} should not be exposed while #337 is open"
+
+class TestSVD:
+    """Bound once stillwater-sc/mtl5#337 was fixed. These are the checks that
+    caught the original defect, kept as regressions: NaN-freedom, agreement
+    with LAPACK, and the sigma_max == spectral_radius identity."""
+
+    @pytest.mark.parametrize("shape", [(4, 4), (8, 8), (10, 6), (6, 10), (20, 5)])
+    def test_svdvals_matches_numpy(self, shape):
+        A = np.random.default_rng(sum(shape)).standard_normal(shape)
+        got = np.sort(mtl5.svdvals(M(A)))[::-1]
+        ref = np.linalg.svd(A, compute_uv=False)
+        np.testing.assert_allclose(got, ref, rtol=1e-9, atol=1e-12)
+
+    def test_no_nan_across_many_symmetric_inputs(self):
+        """The original failure was all-NaN for ~30% of symmetric matrices."""
+        rng = np.random.default_rng(0)
+        for trial in range(60):
+            n = 3 + trial % 18
+            G = rng.standard_normal((n, n))
+            sv = mtl5.svdvals(M((G + G.T) / 2))
+            assert np.isfinite(sv).all(), f"NaN singular values at n={n}"
+
+    def test_sigma_max_equals_spectral_radius_for_symmetric(self):
+        """The identity that needs no reference implementation."""
+        rng = np.random.default_rng(1)
+        for trial in range(30):
+            n = 3 + trial % 15
+            G = rng.standard_normal((n, n))
+            S = (G + G.T) / 2
+            smax = mtl5.svdvals(M(S)).max()
+            assert smax == pytest.approx(mtl5.spectral_radius(M(S)), rel=1e-9)
+
+    def test_svd_reconstructs(self):
+        A = np.random.default_rng(2).standard_normal((9, 5))
+        U, s_, Vm = mtl5.svd(M(A))
+        assert U.shape == (9, 9) and Vm.shape == (5, 5) and s_.shape == (5,)
+        Sigma = np.zeros((9, 5))
+        Sigma[:5, :5] = np.diag(s_)
+        assert np.linalg.norm(U @ Sigma @ Vm.T - A) / np.linalg.norm(A) < 1e-10
+
+    @pytest.mark.parametrize("tol", [1e-8, 1e-10, 1e-12, 1e-14])
+    def test_u_orthogonality_tracks_the_requested_tolerance(self, tol):
+        """U is built by the iteration, so its orthogonality is bounded by tol
+        rather than by machine precision — asking for more gets more.
+
+        Measured over 160 matrices (n = 3..20, four tolerances): median ~1.4x
+        tol, worst 4.5x. The 20x bound here is deliberate headroom, so treat
+        the multiple as untested slack rather than a contract.
+        """
+        A = np.random.default_rng(3).standard_normal((8, 8))
+        U, _, _ = mtl5.svd(M(A), tol)
+        assert np.linalg.norm(U.T @ U - np.eye(8)) < 20 * tol
+
+    def test_v_is_orthogonal_to_machine_precision(self):
+        A = np.random.default_rng(3).standard_normal((8, 8))
+        _, _, Vm = mtl5.svd(M(A))
+        assert np.linalg.norm(Vm.T @ Vm - np.eye(8)) < 1e-13
+
+    def test_condition_number_matches_numpy(self):
+        for seed in (4, 5, 6):
+            S = sym(8, seed=seed)
+            assert mtl5.condition_number(M(S)) == pytest.approx(np.linalg.cond(S), rel=1e-8)
+
+    def test_rcond_is_the_reciprocal(self):
+        S = sym(8, seed=7)
+        assert mtl5.rcond(M(S)) == pytest.approx(1.0 / mtl5.condition_number(M(S)), rel=1e-10)
+
+    def test_numerical_rank_and_nullity(self):
+        full = np.random.default_rng(8).standard_normal((6, 6))
+        assert mtl5.numerical_rank(M(full)) == 6
+        assert mtl5.nullity(M(full)) == 0
+        deficient = np.array(full)
+        deficient[:, 3] = deficient[:, 0] + deficient[:, 1]
+        assert mtl5.numerical_rank(M(deficient)) == 5
+        assert mtl5.nullity(M(deficient)) == 1
+
+    def test_singular_matrix_has_infinite_condition_number(self):
+        S = np.eye(4)
+        S[2, 2] = 0.0
+        assert not np.isfinite(mtl5.condition_number(M(S)))
+        assert mtl5.rcond(M(S)) == pytest.approx(0.0)
 
 
 class TestBlasLevel2:

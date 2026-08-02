@@ -1,12 +1,12 @@
 // mtl5-python -- dense factorizations beyond LU and Cholesky.
 //
-// QR and LQ (Householder) and LDL^T. All follow the
+// QR and LQ (Householder), LDL^T, and Bunch-Kaufman LDL^T. All follow the
 // factorization-object shape the rest of the package uses: construct once,
 // solve many times.
 //
 // Type coverage is deliberately uneven:
 //
-//   QR / LQ                   float32, float64
+//   QR / LQ / Bunch-Kaufman   float32, float64
 //   LDL^T / Cholesky          float32, float64, and every Universal type
 //
 // LDL^T and Cholesky reach into the Universal types because that is the
@@ -14,7 +14,9 @@
 // covariance update across number systems, where the question is which one
 // survives a matrix that drifts out of positive-definiteness in low precision.
 //
-// Bunch-Kaufman is deliberately absent; see the note further down.
+// Bunch-Kaufman stays float-only: its pivot record follows the LAPACK `int`
+// ipiv convention, and the 2x2 pivot arithmetic has not been exercised against
+// tapered-precision types.
 
 #include "mtl5_types.hpp"
 
@@ -25,6 +27,7 @@
 #include <mtl/operation/qr.hpp>
 #include <mtl/operation/lq.hpp>
 #include <mtl/operation/ldlt.hpp>
+#include <mtl/operation/ldlt_bk.hpp>
 #include <mtl/operation/cholesky.hpp>
 
 #include <cstddef>
@@ -234,9 +237,8 @@ void register_ldlt(nb::module_& m) {
             if (info != 0)
                 throw std::runtime_error(
                     "ldlt: zero pivot in D at index " + std::to_string(info - 1) +
-                    ". LDL^T does not pivot. The pivoting variant (Bunch-Kaufman) "
-                    "is not exposed yet — MTL5's ldlt_bk is incorrect whenever it "
-                    "interchanges, see stillwater-sc/mtl5#335.");
+                    ". LDL^T does not pivot; use bunch_kaufman() for a symmetric "
+                    "matrix that needs pivoting.");
             new (self) Wrap{std::move(A), n_};
         }, "A"_a,
            "LDL^T factorization of a symmetric matrix. Unlike Cholesky it takes "
@@ -277,20 +279,83 @@ void register_ldlt(nb::module_& m) {
 }
 
 // ===========================================================================
-// Bunch-Kaufman LDL^T — NOT BOUND
+// Bunch-Kaufman LDL^T — symmetric indefinite WITH pivoting, so it survives
+// matrices that plain LDL^T rejects on a zero pivot.
 //
-// mtl::ldlt_bk returns a wrong solution whenever the factorization applies a
-// pivot interchange, and reports info == 0 while doing so: normwise backward
-// error ~1e-1 instead of ~1e-16. Classifying 400 random symmetric matrices
-// (n = 4..12) by pivot pattern: correct in 14/14 cases with no permutation,
-// wrong in 37/47 with a 1x1 interchange and 278/339 with a 2x2 block. MTL5's
-// own tests cover n = 2 and n = 3, which sit entirely in the regime that works.
-//
-// Filed as stillwater-sc/mtl5#335. Binding it would mean shipping a solver that
-// returns a 60% backward error under a success code, which is worse than not
-// shipping it, so the wrapper is withheld until the fix lands. When it does,
-// restore this from git history — plain LDL^T below is unaffected.
+// Withheld on first release: mtl::ldlt_bk returned a wrong solution whenever it
+// applied a pivot interchange, under info == 0 (stillwater-sc/mtl5#335). Fixed
+// upstream in MTL5 9f8f619 and re-verified here before binding — the minimal
+// reproducer went from 6.3e-1 to 4.2e-17 backward error, and a 400-matrix sweep
+// classified by pivot pattern is now 400/400 correct where it was 85/400.
 // ===========================================================================
+template <typename T>
+struct BKFactor {
+    mtl::mat::dense2D<T> LD;
+    mtl::bk_pivot_info pivots;
+    std::size_t n;
+};
+
+template <typename T>
+void register_bunch_kaufman(nb::module_& m) {
+    using Wrap = BKFactor<T>;
+    const std::string name = std::string("BunchKaufmanFactor_") + type_suffix<T>();
+
+    nb::class_<Wrap>(m, name.c_str())
+        .def("__init__", [](Wrap* self, const MatArg<T>& A_in) {
+            auto A = owned_copy<T>(A_in);
+            if (A.num_rows() != A.num_cols())
+                throw std::invalid_argument("bunch_kaufman: matrix must be square");
+            const std::size_t n_ = A.num_rows();
+            mtl::bk_pivot_info piv;
+            int info = 0;
+            {
+                nogil guard;
+                info = mtl::ldlt_bk_factor(A, piv);
+            }
+            if (info != 0)
+                throw std::runtime_error(
+                    "bunch_kaufman: singular block at index " + std::to_string(info - 1));
+            new (self) Wrap{std::move(A), std::move(piv), n_};
+        }, "A"_a,
+           "Bunch-Kaufman LDL^T of a symmetric matrix: LDL^T with 1x1 and 2x2 "
+           "block pivoting, so it handles indefinite matrices that plain ldlt() "
+           "rejects on a zero pivot.")
+        .def_prop_ro("n", [](const Wrap& s) { return s.n; })
+        .def_prop_ro("shape", [](const Wrap& s) {
+            return std::pair<std::size_t, std::size_t>(s.n, s.n);
+        })
+        .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
+        // A method, not a property: nanobind applies reference_internal to
+        // properties, which collides with the capsule that already owns the
+        // returned buffer. Matches LDLTFactor.diagonal().
+        .def("ipiv", [](const Wrap& s) {
+            // LAPACK convention: a positive entry is a 1x1 pivot, and a pair of
+            // equal negative entries marks a 2x2 block.
+            const std::size_t k = s.pivots.ipiv.size();
+            int64_t* buf = new int64_t[k];
+            for (std::size_t i = 0; i < k; ++i)
+                buf[i] = static_cast<int64_t>(s.pivots.ipiv[i]);
+            std::size_t shape[1] = { k };
+            nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
+            return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(buf, 1, shape, owner);
+        }, "Pivot record in LAPACK ipiv convention")
+        .def("solve", [](const Wrap& s, const VecArg<T>& b_in) {
+            const auto& b = as_vector<T>(b_in);
+            if (b.size() != s.n)
+                throw std::invalid_argument(
+                    "bunch_kaufman.solve: RHS length " + std::to_string(b.size()) +
+                    " does not match factor size " + std::to_string(s.n));
+            mtl::vec::dense_vector<T> x(s.n);
+            {
+                nogil guard;
+                mtl::ldlt_bk_solve(s.LD, s.pivots, x, b);
+            }
+            return wrap_vector<T>(std::move(x));
+        }, "b"_a, "Solve A x = b via the Bunch-Kaufman factor")
+        .def("__repr__", [name](const Wrap& s) {
+            return "mtl5." + name + "(n=" + std::to_string(s.n) + ")";
+        });
+}
 
 // ===========================================================================
 // Cholesky for the Universal types
@@ -349,6 +414,7 @@ template <typename T>
 void register_float_only(nb::module_& m) {
     register_qr<T>(m);
     register_lq<T>(m);
+    register_bunch_kaufman<T>(m);
 }
 
 }  // namespace
