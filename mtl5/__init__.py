@@ -155,7 +155,12 @@ from mtl5._core import (
     vector_posit32,
     vector_posit64,
 )
+from mtl5._core import arange as _arange
 from mtl5._core import det as _det
+from mtl5._core import generators as _generators
+from mtl5._core import geomspace as _geomspace
+from mtl5._core import linspace as _linspace
+from mtl5._core import logspace as _logspace
 
 _UNIVERSAL_DTYPES = (
     "fp8",
@@ -302,6 +307,85 @@ def cholesky(A):  # noqa: F811
     if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
         return getattr(_core, f"CholeskyFactor_{dt}")(A)
     return _native_cholesky(A)
+
+
+# ---------------------------------------------------------------------------
+# Generators and range vectors
+#
+# The C++ side produces float64. `dtype=` rounds to the requested element type,
+# which is the right semantics for a test matrix: the definitions are over the
+# reals, so you want the correctly rounded representation of the exact entry.
+# ---------------------------------------------------------------------------
+def _retype(obj, dtype: str):
+    """Round a float64 generator result to `dtype`, or pass it through."""
+    if dtype == "f64":
+        return obj
+    if not hasattr(obj, "to_numpy"):
+        raise TypeError(
+            "dtype= is not supported for the sparse generators; they are "
+            "float64 CSR. Convert with mtl5.sparse.from_scipy(...astype(...))."
+        )
+    return convert(obj.to_numpy(), dtype)
+
+
+def _make_generator(name):
+    fn = getattr(_generators, name)
+
+    def wrapper(*args, dtype: str = "f64", **kwargs):
+        return _retype(fn(*args, **kwargs), dtype)
+
+    wrapper.__name__ = name
+    doc = fn.__doc__ or ""
+    wrapper.__doc__ = (
+        doc + "\n\nGenerated in float64; pass dtype= to round to another "
+        "element type (see mtl5.dtypes())."
+    )
+    return wrapper
+
+
+class _Generators:
+    """Named test matrices with known pathologies.
+
+    Every dense generator takes `dtype=` — `mtl5.generators.hilbert(8,
+    dtype="posit16")` gives the correctly rounded posit16 Hilbert matrix, which
+    is the usual starting point for a conditioning experiment.
+    """
+
+    _DENSE = (
+        "clement frank pascal wilkinson rosser magic hilbert lehmer lotkin minij "
+        "ones forsythe kahan moler companion vandermonde randorth randspd randsym "
+        "randsvd"
+    ).split()
+    # Sparse generators still go through the wrapper so `dtype=` produces the
+    # explanatory TypeError rather than nanobind's arity error.
+    _SPARSE = ("laplacian_1d", "laplacian_2d", "poisson2d")
+    # Pure data — no matrix, so no dtype.
+    _PASSTHROUGH = ("testsuite_names", "testsuite_kappa")
+
+
+for _n in [*_Generators._DENSE, *_Generators._SPARSE]:
+    setattr(_Generators, _n, staticmethod(_make_generator(_n)))
+for _n in _Generators._PASSTHROUGH:
+    setattr(_Generators, _n, staticmethod(getattr(_generators, _n)))
+
+generators = _Generators()
+
+
+def _range_fn(fn, name):
+    def wrapper(*args, dtype: str = "f64", **kwargs):
+        return _retype(fn(*args, **kwargs), dtype)
+
+    wrapper.__name__ = name
+    wrapper.__doc__ = (fn.__doc__ or "") + (
+        "\n\nGenerated in float64; pass dtype= for another element type."
+    )
+    return wrapper
+
+
+arange = _range_fn(_arange, "arange")
+linspace = _range_fn(_linspace, "linspace")
+logspace = _range_fn(_logspace, "logspace")
+geomspace = _range_fn(_geomspace, "geomspace")
 
 
 # Optional pandas extension types — only loaded if pandas is installed

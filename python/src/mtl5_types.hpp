@@ -162,6 +162,9 @@ void register_dense_factorizations(nb::module_& m);
 // stillwater-sc/mtl5#337.
 void register_dense_ops(nb::module_& m);
 
+// Registered by mtl5_generators.cpp — named test matrices and range vectors.
+void register_generators(nb::module_& m);
+
 // Registered by mtl5_sparse_direct.cpp — the sparse direct factorizations and
 // the fill-reducing orderings.
 void register_sparse_direct(nb::module_& m);
