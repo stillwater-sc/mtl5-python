@@ -1,0 +1,149 @@
+#pragma once
+// Shared across the mtl5-python translation units: the Universal type aliases,
+// the Python-facing dtype naming, the zero-copy view wrappers, and the GIL
+// policy. Split out when the mixed-precision bindings moved into their own TU
+// (they carry the heavy template instantiations, so keeping them separate keeps
+// incremental builds tolerable).
+
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+
+#include <mtl/vec/dense_vector.hpp>
+#include <mtl/mat/dense2D.hpp>
+#include <mtl/mat/compressed2D.hpp>
+
+#include <universal/number/cfloat/cfloat.hpp>
+#include <universal/number/posit/posit.hpp>
+#include <universal/number/fixpnt/fixpnt.hpp>
+#include <universal/number/lns/lns.hpp>
+
+#include <cstddef>
+#include <string>
+
+namespace nb = nanobind;
+
+// ===========================================================================
+// GIL policy
+//
+// `nogil` marks a region that runs pure C++ on memory we own (or on a NumPy
+// buffer the caller handed us) with the interpreter released, so MTL5's
+// threaded kernels (#221/#297) can actually overlap with Python and a long
+// factorization no longer freezes the interpreter.
+//
+// Rules for every use:
+//   * No Python C-API inside the region. That means no nb::object, no
+//     nb::cast, no nb::ndarray construction, and no destruction of a
+//     VectorView/MatrixView (its `source` member is an nb::object).
+//   * Raw pointers and shapes are read from an ndarray BEFORE the region;
+//     dereferencing them inside is fine.
+//   * Throwing out of the region is safe — the guard reacquires the GIL while
+//     unwinding, before nanobind translates the exception.
+//   * Reading a borrowed NumPy buffer without the GIL carries the same
+//     contract as any nogil extension: the caller must not mutate the array
+//     from another thread for the duration of the call.
+// ===========================================================================
+using nogil = nb::gil_scoped_release;
+
+// ---------------------------------------------------------------------------
+// Universal type aliases
+// ---------------------------------------------------------------------------
+using fp8     = sw::universal::fp8;
+using fp16    = sw::universal::fp16;
+
+// Posit types — tapered precision floats with two exponent bits
+using posit8  = sw::universal::posit<8, 2>;
+using posit16 = sw::universal::posit<16, 2>;
+using posit32 = sw::universal::posit<32, 2>;
+using posit64 = sw::universal::posit<64, 2>;
+
+// Fixed-point types — saturating arithmetic for bounded precision
+// fixpnt8<8,4>: range [-8, 8) with 4 fractional bits (resolution 1/16)
+// fixpnt16<16,8>: range [-128, 128) with 8 fractional bits (resolution 1/256)
+using fixpnt8  = sw::universal::fixpnt<8, 4, sw::universal::Saturate>;
+using fixpnt16 = sw::universal::fixpnt<16, 8, sw::universal::Saturate>;
+
+// Logarithmic number system — multiplications become additions
+using lns16 = sw::universal::lns<16, 8>;
+using lns32 = sw::universal::lns<32, 16>;
+
+// ---------------------------------------------------------------------------
+// Human-readable suffix for Python class names and dtype strings
+// ---------------------------------------------------------------------------
+template <typename T> constexpr const char* type_suffix();
+template <> constexpr const char* type_suffix<float>()   { return "f32"; }
+template <> constexpr const char* type_suffix<double>()  { return "f64"; }
+template <> constexpr const char* type_suffix<int32_t>() { return "i32"; }
+template <> constexpr const char* type_suffix<int64_t>() { return "i64"; }
+template <> constexpr const char* type_suffix<fp8>()     { return "fp8"; }
+template <> constexpr const char* type_suffix<fp16>()    { return "fp16"; }
+template <> constexpr const char* type_suffix<posit8>()  { return "posit8"; }
+template <> constexpr const char* type_suffix<posit16>() { return "posit16"; }
+template <> constexpr const char* type_suffix<posit32>() { return "posit32"; }
+template <> constexpr const char* type_suffix<posit64>() { return "posit64"; }
+template <> constexpr const char* type_suffix<fixpnt8>() { return "fixpnt8"; }
+template <> constexpr const char* type_suffix<fixpnt16>(){ return "fixpnt16"; }
+template <> constexpr const char* type_suffix<lns16>()   { return "lns16"; }
+template <> constexpr const char* type_suffix<lns32>()   { return "lns32"; }
+
+// ===========================================================================
+// VectorView<T> — zero-copy wrapper around dense_vector<T>
+//
+// Holds a nb::object reference to the Python source array to prevent GC.
+// The dense_vector uses MTL5's non-owning constructor (borrows memory).
+// When _source is empty, the vector owns its memory (from vector_copy or solve).
+// ===========================================================================
+template <typename T>
+struct VectorView {
+    mtl::vec::dense_vector<T> vec;
+    nb::object source;  // prevents GC of source array; empty if owning
+    std::string device_name = "cpu";
+
+    // Non-owning view of external data
+    VectorView(std::size_t n, T* data, nb::object src)
+        : vec(n, data), source(std::move(src)) {}
+
+    // Owning vector (copy or result of computation)
+    explicit VectorView(mtl::vec::dense_vector<T>&& v)
+        : vec(std::move(v)) {}
+
+    bool is_view() const { return source.is_valid(); }
+};
+
+// ===========================================================================
+// MatrixView<T> — zero-copy wrapper around dense2D<T>
+// ===========================================================================
+template <typename T>
+struct MatrixView {
+    mtl::mat::dense2D<T> mat;
+    nb::object source;
+    std::string device_name = "cpu";
+
+    // Non-owning view of external data
+    MatrixView(std::size_t rows, std::size_t cols, T* data, nb::object src)
+        : mat(rows, cols, data), source(std::move(src)) {}
+
+    // Owning matrix (copy or result of computation)
+    explicit MatrixView(mtl::mat::dense2D<T>&& m)
+        : mat(std::move(m)) {}
+
+    bool is_view() const { return source.is_valid(); }
+};
+
+// ===========================================================================
+// PreconditionerWrapper — an MTL5 preconditioner plus the factor dimension, so
+// a mismatched RHS fails with a clean Python error before reaching the kernel.
+// Shared because the mixed-precision TU passes these to sparse iterative
+// refinement (any object exposing solve(x, b) satisfies that contract).
+// ===========================================================================
+template <typename PC, typename T>
+struct PreconditionerWrapper {
+    PC pc;
+    std::size_t n;
+
+    PreconditionerWrapper(const mtl::mat::compressed2D<T>& A)
+        : pc(A), n(A.num_rows()) {}
+};
+
+// Registered by mtl5_mixed_precision.cpp — convert(), the accumulator-policy
+// operations, and the iterative-refinement entry points.
+void register_mixed_precision(nb::module_& m);

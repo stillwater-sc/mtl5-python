@@ -1,12 +1,10 @@
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
+#include "mtl5_types.hpp"
+
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/tuple.h>
 
-#include <mtl/vec/dense_vector.hpp>
-#include <mtl/mat/dense2D.hpp>
 #include <mtl/operation/norms.hpp>
 #include <mtl/operation/dot.hpp>
 #include <mtl/operation/operators.hpp>
@@ -30,12 +28,6 @@
 // Switch to the public API when one lands upstream.
 #include <mtl/detail/thread_pool.hpp>
 
-// Universal number types
-#include <universal/number/cfloat/cfloat.hpp>
-#include <universal/number/posit/posit.hpp>
-#include <universal/number/fixpnt/fixpnt.hpp>
-#include <universal/number/lns/lns.hpp>
-
 #include <cstddef>
 #include <cstdlib>
 #include <thread>
@@ -44,30 +36,7 @@
 #include <sstream>
 #include <string>
 
-namespace nb = nanobind;
 using namespace nb::literals;
-
-// ===========================================================================
-// GIL policy
-//
-// `nogil` marks a region that runs pure C++ on memory we own (or on a NumPy
-// buffer the caller handed us) with the interpreter released, so MTL5's
-// threaded kernels (#221/#297) can actually overlap with Python and a long
-// factorization no longer freezes the interpreter.
-//
-// Rules for every use below:
-//   * No Python C-API inside the region. That means no nb::object, no
-//     nb::cast, no nb::ndarray construction, and no destruction of a
-//     VectorView/MatrixView (its `source` member is an nb::object).
-//   * Raw pointers and shapes are read from an ndarray BEFORE the region;
-//     dereferencing them inside is fine.
-//   * Throwing out of the region is safe — the guard reacquires the GIL while
-//     unwinding, before nanobind translates the exception.
-//   * Reading a borrowed NumPy buffer without the GIL carries the same
-//     contract as any nogil extension: the caller must not mutate the array
-//     from another thread for the duration of the call.
-// ===========================================================================
-using nogil = nb::gil_scoped_release;
 
 // Portable setenv — MSVC has no POSIX setenv.
 inline void mtl5py_setenv(const char* name, const char* value) {
@@ -77,89 +46,6 @@ inline void mtl5py_setenv(const char* name, const char* value) {
     ::setenv(name, value, 1);
 #endif
 }
-
-// Universal type aliases
-using fp8     = sw::universal::fp8;
-using fp16    = sw::universal::fp16;
-
-// Posit types — tapered precision floats with two exponent bits
-using posit8  = sw::universal::posit<8, 2>;
-using posit16 = sw::universal::posit<16, 2>;
-using posit32 = sw::universal::posit<32, 2>;
-using posit64 = sw::universal::posit<64, 2>;
-
-// Fixed-point types — saturating arithmetic for bounded precision
-// fixpnt8<8,4>: range [-8, 8) with 4 fractional bits (resolution 1/16)
-// fixpnt16<16,8>: range [-128, 128) with 8 fractional bits (resolution 1/256)
-using fixpnt8  = sw::universal::fixpnt<8, 4, sw::universal::Saturate>;
-using fixpnt16 = sw::universal::fixpnt<16, 8, sw::universal::Saturate>;
-
-// Logarithmic number system — multiplications become additions
-using lns16 = sw::universal::lns<16, 8>;
-using lns32 = sw::universal::lns<32, 16>;
-
-// ===========================================================================
-// Human-readable suffix for Python class names
-// ===========================================================================
-template <typename T> constexpr const char* type_suffix();
-template <> constexpr const char* type_suffix<float>()   { return "f32"; }
-template <> constexpr const char* type_suffix<double>()  { return "f64"; }
-template <> constexpr const char* type_suffix<int32_t>() { return "i32"; }
-template <> constexpr const char* type_suffix<int64_t>() { return "i64"; }
-template <> constexpr const char* type_suffix<fp8>()     { return "fp8"; }
-template <> constexpr const char* type_suffix<fp16>()    { return "fp16"; }
-template <> constexpr const char* type_suffix<posit8>()  { return "posit8"; }
-template <> constexpr const char* type_suffix<posit16>() { return "posit16"; }
-template <> constexpr const char* type_suffix<posit32>() { return "posit32"; }
-template <> constexpr const char* type_suffix<posit64>() { return "posit64"; }
-template <> constexpr const char* type_suffix<fixpnt8>() { return "fixpnt8"; }
-template <> constexpr const char* type_suffix<fixpnt16>(){ return "fixpnt16"; }
-template <> constexpr const char* type_suffix<lns16>()   { return "lns16"; }
-template <> constexpr const char* type_suffix<lns32>()   { return "lns32"; }
-
-// ===========================================================================
-// VectorView<T> — zero-copy wrapper around dense_vector<T>
-//
-// Holds a nb::object reference to the Python source array to prevent GC.
-// The dense_vector uses MTL5's non-owning constructor (borrows memory).
-// When _source is empty, the vector owns its memory (from vector_copy or solve).
-// ===========================================================================
-template <typename T>
-struct VectorView {
-    mtl::vec::dense_vector<T> vec;
-    nb::object source;  // prevents GC of source array; empty if owning
-    std::string device_name = "cpu";
-
-    // Non-owning view of external data
-    VectorView(std::size_t n, T* data, nb::object src)
-        : vec(n, data), source(std::move(src)) {}
-
-    // Owning vector (copy or result of computation)
-    explicit VectorView(mtl::vec::dense_vector<T>&& v)
-        : vec(std::move(v)) {}
-
-    bool is_view() const { return source.is_valid(); }
-};
-
-// ===========================================================================
-// MatrixView<T> — zero-copy wrapper around dense2D<T>
-// ===========================================================================
-template <typename T>
-struct MatrixView {
-    mtl::mat::dense2D<T> mat;
-    nb::object source;
-    std::string device_name = "cpu";
-
-    // Non-owning view of external data
-    MatrixView(std::size_t rows, std::size_t cols, T* data, nb::object src)
-        : mat(rows, cols, data), source(std::move(src)) {}
-
-    // Owning matrix (copy or result of computation)
-    explicit MatrixView(mtl::mat::dense2D<T>&& m)
-        : mat(std::move(m)) {}
-
-    bool is_view() const { return source.is_valid(); }
-};
 
 // ===========================================================================
 // Registration for native types (float, double, int32_t, int64_t)
@@ -1314,15 +1200,6 @@ void register_sparse_solvers(nb::module_& m) {
 // underlying preconditioner so that mismatched RHS lengths fail with a clean
 // Python ValueError before reaching the native implementation.
 // ===========================================================================
-template <typename PC, typename T>
-struct PreconditionerWrapper {
-    PC pc;
-    std::size_t n;
-
-    PreconditionerWrapper(const mtl::mat::compressed2D<T>& A)
-        : pc(A), n(A.num_rows()) {}
-};
-
 template <typename T>
     requires std::is_floating_point_v<T>
 void register_preconditioners(nb::module_& m) {
@@ -1587,6 +1464,11 @@ NB_MODULE(_core, m) {
     // ----- Preconditioners (ILU0, IC0) ---------------------------------------
     register_preconditioners<float>(m);
     register_preconditioners<double>(m);
+
+    // ----- Mixed precision (separate TU; see mtl5_mixed_precision.cpp) -------
+    // Registered after the containers above so the classes it takes and returns
+    // already exist in the module.
+    register_mixed_precision(m);
 
     // ----- Universal number types (copy-converting from float64) -------------
     // Standard IEEE-style cfloat configurations
