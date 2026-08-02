@@ -130,14 +130,14 @@ Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:
 ```python
 import mtl5.sparse as ms
 
-lu = ms.splu(A, ordering="amd")   # analyze (ordering + symbolic) then factor
-x  = lu.solve(b)
+lu = ms.splu(A, ordering="amd")  # analyze (ordering + symbolic) then factor
+x = lu.solve(b)
 
-lu.refactor(A2)                   # numeric only — same pattern, new values
+lu.refactor(A2)  # numeric only — same pattern, new values
 x2 = lu.solve(b2)
 
-k = ms.klu(A)                     # block triangular form + per-block LU
-k.nblocks                         # how reducible the matrix turned out to be
+k = ms.klu(A)  # block triangular form + per-block LU
+k.nblocks  # how reducible the matrix turned out to be
 ```
 
 Two things `scipy.sparse.linalg.splu` cannot do.
@@ -194,7 +194,7 @@ available standalone as a permutation, for inspection or for use on a scipy
 matrix directly:
 
 ```python
-p = ms.amd(A)          # or ms.colamd(A), ms.rcm(A), ms.ordering(A, name)
+p = ms.amd(A)  # or ms.colamd(A), ms.rcm(A), ms.ordering(A, name)
 A[p][:, p]
 ```
 
