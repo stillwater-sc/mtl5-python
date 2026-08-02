@@ -73,7 +73,9 @@ quire is available for the posit, cfloat, lns and fixpnt families; `f32`/`f64`
 have none (Universal defines no quire for the native types). Exactness varies by
 family — it is genuinely exact for posit and fixpnt, while the cfloat and lns
 quires have known upstream limitations documented in
-`python/include/mtl/math/quire_accumulator.hpp`.
+`python/include/mtl/math/quire_accumulator.hpp`. The accumulated norms are
+computed locally rather than through `mtl::two_norm<Acc>`, which cannot take a
+quire ([stillwater-sc/mtl5#324](https://github.com/stillwater-sc/mtl5/issues/324)).
 
 `accumulator=` is available on `dot`, `norm` (ord=2), `frobenius_norm`,
 `matvec` and `matmul`.
@@ -108,8 +110,9 @@ mixed-precision workhorse arrive with the sparse-solver bindings.
 
 > **Known upstream defect:** MTL5's `ilu_0::solve` returns wrong values for
 > every input (it sums the diagonal into the off-diagonal term of its back
-> substitution). `mtl5.sparse.ilu0` is affected; IC(0) is correct. Tracked by a
-> strict-xfail regression in `tests/test_mixed_precision.py`.
+> substitution). `mtl5.sparse.ilu0` is affected; IC(0) is correct. Filed as
+> [stillwater-sc/mtl5#323](https://github.com/stillwater-sc/mtl5/issues/323) and
+> pinned by a strict-xfail regression in `tests/test_mixed_precision.py`.
 
 ## Performance
 

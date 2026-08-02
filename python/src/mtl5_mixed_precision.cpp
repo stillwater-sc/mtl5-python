@@ -173,8 +173,9 @@ double mixed_dot(const V& a, const V& b, AccKind kind, bool result_element) {
 // the accumulator out to the ACCUMULATOR type and then take its square root.
 // That only compiles when Accumulator is a plain arithmetic type, so it rejects
 // both non-trivial configurations accumulator_traits documents: fma_accumulator
-// and the quire. (`value<mag_t>` is what was meant.) Reported upstream; until
-// it lands, these two loops are the accumulator-generic version, rounding the
+// and the quire. (`value<mag_t>` is what was meant.) Reported as
+// stillwater-sc/mtl5#324; until the fix lands, these two loops are the
+// accumulator-generic version, rounding the
 // accumulated sum out to double before the square root so a narrow element type
 // does not throw away the precision the accumulator just bought.
 //
@@ -508,6 +509,10 @@ nb::dict refine_result_dict(const mtl::lu_refine_result& r) {
 // low-precision factor makes this the mixed-precision workhorse it is meant to
 // be. With an incomplete factor this is preconditioned Richardson — a real
 // method, but not yet the mixed-precision story.
+//
+// NOTE: ilu_0 is currently broken upstream (stillwater-sc/mtl5#323) — its
+// back substitution double-counts the diagonal — so IC(0) is the only
+// factorization here that refines correctly today.
 // ===========================================================================
 using ILU0d = PreconditionerWrapper<mtl::itl::pc::ilu_0<double>, double>;
 using IC0d  = PreconditionerWrapper<mtl::itl::pc::ic_0<double>, double>;

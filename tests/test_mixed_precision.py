@@ -145,8 +145,8 @@ class TestAccumulatorPolicy:
 
 
 class TestAccumulatedNorms:
-    """These exercise the local sum-of-squares loops that work around the
-    upstream two_norm<Acc>/frobenius_norm<Acc> limitation."""
+    """These exercise the local sum-of-squares loops that work around
+    stillwater-sc/mtl5#324 (two_norm<Acc>/frobenius_norm<Acc>)."""
 
     def test_norm_matches_numpy_with_wide_accumulator(self):
         rng = np.random.default_rng(5)
@@ -311,7 +311,8 @@ class TestUpstreamDefects:
     """
 
     @pytest.mark.xfail(
-        reason="MTL5 ilu_0::solve sums the diagonal into the off-diagonal term "
+        reason="stillwater-sc/mtl5#323 — ilu_0::solve sums the diagonal into the "
+        "off-diagonal term "
         "of its back substitution (u_rows[i] holds j >= i), so the "
         "preconditioner returns wrong values for every input",
         strict=True,
