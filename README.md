@@ -107,12 +107,6 @@ degrades the answer.
 through any factorization exposing `solve()` — the sparse direct factorizations
 below, or the ILU(0)/IC(0) preconditioners.
 
-> **Known upstream defect:** MTL5's `ilu_0::solve` returns wrong values for
-> every input (it sums the diagonal into the off-diagonal term of its back
-> substitution). `mtl5.sparse.ilu0` is affected; IC(0) is correct. Filed as
-> [stillwater-sc/mtl5#323](https://github.com/stillwater-sc/mtl5/issues/323) and
-> pinned by a strict-xfail regression in `tests/test_mixed_precision.py`.
-
 ## Dense factorizations
 
 ```python

@@ -303,38 +303,48 @@ class TestSparseIterativeRefine:
             mtl5.mixed.iterative_refine(Am, M, np.ones(5))
 
 
-class TestUpstreamDefects:
-    """Failing regressions that pin MTL5 bugs found while building Phase 1.
+class TestFormerlyBrokenUpstream:
+    """Regressions for MTL5 defects this binding work found and upstream fixed.
 
-    Each xfail flips to a pass when the upstream fix lands, which is the signal
-    to drop the local workaround (and, for ILU(0), to stop warning users).
+    Each was a case the upstream tests did not reach, so they are kept here as
+    well: an ILU(0) that never got checked against a known solve, and the IC(0)
+    control that always got it right.
     """
 
-    @pytest.mark.xfail(
-        reason="stillwater-sc/mtl5#323 — ilu_0::solve sums the diagonal into the "
-        "off-diagonal term "
-        "of its back substitution (u_rows[i] holds j >= i), so the "
-        "preconditioner returns wrong values for every input",
-        strict=True,
-    )
-    def test_ilu0_solve_is_exact_on_a_diagonal_matrix(self):
+    def _diagonal_system(self):
         sp = pytest.importorskip("scipy.sparse")
         import mtl5.sparse as ms
 
         d = np.array([4.0, 2.0, 8.0])
-        b = np.ones(3)
-        Am = ms.from_scipy(sp.diags([d], [0], format="csr"))
+        return ms.from_scipy(sp.diags([d], [0], format="csr")), d, np.ones(3)
+
+    def test_ilu0_solve_is_exact_on_a_diagonal_matrix(self):
+        """stillwater-sc/mtl5#323: the back substitution used to count the
+        diagonal twice, returning (b - d*b)/d for every input."""
+        Am, d, b = self._diagonal_system()
         got = mtl5._core.ILU0_f64(Am).solve(b).to_numpy()
-        # ILU(0) of a diagonal matrix is exact: x = b / d.
         np.testing.assert_allclose(got, b / d, rtol=1e-14)
 
     def test_ic0_solve_is_exact_on_a_diagonal_matrix(self):
-        """The same check on IC(0), which gets it right — this is the control."""
+        """The control that was always correct, kept alongside it."""
+        Am, d, b = self._diagonal_system()
+        got = mtl5._core.IC0_f64(Am).solve(b).to_numpy()
+        np.testing.assert_allclose(got, b / d, rtol=1e-14)
+
+    def test_refinement_through_ilu0_now_converges(self):
+        """With #323 fixed, ILU(0) is usable as a refinement factorization —
+        before, it drove x to zero and reported rel_residual 1.0."""
         sp = pytest.importorskip("scipy.sparse")
         import mtl5.sparse as ms
 
-        d = np.array([4.0, 2.0, 8.0])
-        b = np.ones(3)
-        Am = ms.from_scipy(sp.diags([d], [0], format="csr"))
-        got = mtl5._core.IC0_f64(Am).solve(b).to_numpy()
-        np.testing.assert_allclose(got, b / d, rtol=1e-14)
+        n = 200
+        off = -np.ones(n - 1)
+        A = sp.diags([off, 4.0 * np.ones(n), off], [-1, 0, 1], format="csr")
+        rng = np.random.default_rng(0)
+        xt = rng.standard_normal(n)
+        Am = ms.from_scipy(A)
+        x, info = mtl5.mixed.iterative_refine(
+            Am, mtl5._core.ILU0_f64(Am), A @ xt, max_iter=100, rel_tol=1e-12
+        )
+        assert info["converged"]
+        assert np.linalg.norm(x - xt) / np.linalg.norm(xt) < 1e-10
