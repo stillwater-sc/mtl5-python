@@ -1,8 +1,11 @@
-# GAP Analysis — mtl5-python bindings vs. MTL5 `main` (2026-08-01)
+# GAP Analysis — mtl5-python bindings vs. MTL5 `c6ff006` (audited 2026-08-01)
 
 **Analyst:** automated survey of `mtl5-python@968c602` against `mtl5@c6ff006`
 **Bindings source of truth:** `python/src/mtl5_module.cpp` (1338 LOC), `mtl5/__init__.py`, `mtl5/sparse/__init__.py`, `mtl5/pandas_ext.py`
-**MTL5 source of truth:** `include/mtl/**` at `main`, `CHANGELOG.md`, `git tag`
+**MTL5 source of truth:** `include/mtl/**` at `c6ff006` (`main` as of 2026-08-01), `CHANGELOG.md`, `git tag`
+
+Every statement below is against that revision. `main` moves, so the commit is
+the reproducible reference.
 
 ---
 
@@ -16,9 +19,12 @@ tracks MTL5 upstream — so the declared version is **five minor releases stale*
 
 Three findings, in order of impact:
 
-1. **No API breakage.** `mtl5_module.cpp` still compiles clean (`g++ -std=c++20 -fsyntax-only`,
-   exit 0, warnings only about symbol visibility) against today's MTL5 headers. The gap is
-   **entirely unexposed surface**, not drift. Catching up is additive work with no migration cost.
+1. **No compile breakage in the default-feature build.** `mtl5_module.cpp` still compiles
+   clean (`g++ -std=c++20 -fsyntax-only`, exit 0, warnings only about symbol visibility)
+   against `mtl5@c6ff006`. That is the extent of the evidence: it says nothing about runtime
+   behaviour, the Python surface, or the BLAS/LAPACK/Highway-gated code paths, none of which
+   this check compiled. On that basis the gap looks like **unexposed surface rather than
+   drift**, and catching up looks additive.
 
 2. **The strategic differentiator is 0% exposed.** MTL5's mixed-precision layer — epic #157's
    `accumulator_traits`, `mtl::convert`, the accumulator policies on `dot`/`gemm`/`gemv`/norms,
@@ -38,9 +44,11 @@ Three findings, in order of impact:
    - `get_backend()` can only ever return `"reference"`; the `MTL5_HAS_BLAS` / `MTL5_HAS_KPU`
      branches in `mtl5_module.cpp:1267–1290` are dead code as built.
    - Threading *is* available (runtime-gated on `MTL5_NUM_THREADS`, `detail/thread_pool.hpp:36`)
-     but is undocumented and unexposed in Python, and no binding releases the GIL
-     (zero `nb::gil_scoped_release` in the module), so threaded kernels cannot overlap with
-     the interpreter and any long solve freezes it.
+     but is undocumented and unexposed in Python, so it stays serial unless the caller happens
+     to know the environment variable. Separately, no binding releases the GIL (zero
+     `nb::gil_scoped_release` in the module): with `MTL5_NUM_THREADS > 1` the kernels *do*
+     run in parallel on MTL5's native worker threads, but the calling Python thread holds the
+     GIL for the whole call, so every other Python thread is blocked until it returns.
 
 ---
 
@@ -146,10 +154,12 @@ The whole #244 module (`matrix_properties.hpp`, `vector_properties.hpp`,
 Cheap to bind, and `condition_number`/`rcond`/`numerical_rank` map directly onto
 `np.linalg.cond` / `np.linalg.matrix_rank` expectations.
 
-### 3.7 Iterative solvers — P2, 3 of 10 Krylov, 2 of 9 preconditioners
+### 3.7 Iterative solvers — P2, 3 of 10 Krylov, 2 of 8 preconditioners
 
 **Missing Krylov:** `bicg`, `bicgstab_ell`, `cgs`, `idr_s`, `minres`, `qmr`, `tfqmr`.
-**Missing preconditioners:** `diagonal` (Jacobi), `block_diagonal`, `ildl`, `ilut`, `ssor`.
+**Missing preconditioners:** `diagonal` (Jacobi), `block_diagonal`, `ildl`, `ilut`, `ssor`,
+and `identity` — which the Krylov bindings construct internally but never hand to Python,
+so it cannot be used to run an unpreconditioned solve through a preconditioned entry point.
 **Missing smoothers (entire module):** `jacobi`, `gauss_seidel` + backward/symmetric,
 `sor` + backward/symmetric.
 **Missing multigrid (entire module):** `multigrid`, `prolongation`, `restriction`.
@@ -213,42 +223,69 @@ and they immediately improve the bindings' own test suite (which currently hand-
 | GIL never released | zero `nb::gil_scoped_release` in the module |
 | External solver interfaces unbound | `interface/{umfpack,superlu,klu,cholmod,spqr,blas,lapack}.hpp` |
 
-The GIL point compounds the threading point: even after #221/#297 made every substantial
-kernel parallel, a Python caller gets serial execution *and* a blocked interpreter.
+The two threading rows compound. #221/#297 made every substantial kernel parallel, but the
+pool is serial unless `MTL5_NUM_THREADS` is set, and the Python surface neither exposes nor
+documents that — so the default is serial. Turning it on gets native parallelism inside the
+kernel, yet because no binding releases the GIL the rest of the interpreter is still blocked
+for the duration of the call. Two independent fixes: expose the thread count, and release
+the GIL.
 
 ---
 
 ## 4. Coverage scorecard
 
-| Module | Exposed | Available | Coverage |
-|---|---|---|---|
-| Dense containers | 2 | 2 | ✅ full (f32/f64/i32/i64) |
-| Universal number types | 12 | 12 | ✅ full (storage only) |
-| Mixed-precision / accumulator | 0 | ~10 | ❌ 0% |
-| Dense factorizations | 2 | 10 | ⚠️ 20% |
-| Eigen / SVD | 0 | ~10 | ❌ 0% |
-| BLAS L2/L3 + elementwise | 2 | ~22 | ⚠️ 9% |
-| Property predicates | 0 | ~30 | ❌ 0% |
-| Sparse containers | 1 | 6 | ⚠️ 17% (CSR only) |
-| Sparse direct solvers | 0 | ~9 | ❌ 0% |
-| Sparse ordering / analysis | 0 | ~9 | ❌ 0% |
-| Krylov solvers | 3 | 10 | ⚠️ 30% |
-| Preconditioners | 2 | 9 | ⚠️ 22% |
-| Smoothers / multigrid | 0 | 6 | ❌ 0% |
-| Views / expressions | 0 | ~8 | ❌ 0% |
-| Tensor / ndarray | 0 | ~15 | ❌ 0% |
-| I/O | 0 | ~8 | ❌ 0% |
-| Generators | 0 | ~28 | ❌ 0% |
-| Build acceleration | 0 | 5 options | ❌ 0% |
+The unit differs by row and is named in the **Unit** column — a container row counts
+class templates, an operations row counts namespace-scope functions, and the build row
+counts CMake options. Mixing them in one number would be meaningless, so compare
+percentages only within a row. Counts marked `~` are approximate; see §6.
+
+| Module | Unit | Exposed | Available | Coverage |
+|---|---|---|---|---|
+| Dense containers | class templates | 2 | 2 | ✅ full (f32/f64/i32/i64) |
+| Universal number types | instantiated types | 10 | 10 | ✅ full (storage only) |
+| Mixed-precision / accumulator | functions | 0 | ~10 | ❌ 0% |
+| Dense factorizations | functions | 2 | 10 | ⚠️ 20% |
+| Eigen / SVD | functions | 0 | ~10 | ❌ 0% |
+| BLAS L2/L3 + elementwise | functions | 2 | ~22 | ⚠️ 9% |
+| Property predicates | functions | 0 | ~30 | ❌ 0% |
+| Sparse containers | class templates | 1 | 6 | ⚠️ 17% (CSR only) |
+| Sparse direct solvers | functions | 0 | ~9 | ❌ 0% |
+| Sparse ordering / analysis | functions | 0 | ~9 | ❌ 0% |
+| Krylov solvers | solvers | 3 | 10 | ⚠️ 30% |
+| Preconditioners | preconditioners | 2 | 8 | ⚠️ 25% |
+| Smoothers / multigrid | functions | 0 | 12 | ❌ 0% |
+| Views / expressions | class templates | 0 | ~8 | ❌ 0% |
+| Tensor / ndarray | functions | 0 | ~15 | ❌ 0% |
+| I/O | functions | 0 | ~8 | ❌ 0% |
+| Generators | generators | 0 | ~28 | ❌ 0% |
+| Build acceleration | CMake options | 0 | 5 | ❌ 0% |
+
+Notes on the rows that are easy to miscount:
+
+- **Universal number types** — the ten instantiated element types listed in §2
+  (`fp8`, `fp16`, `posit8/16/32/64`, `fixpnt8/16`, `lns16/32`), not the twelve dtype
+  strings you get by adding `f32`/`f64`.
+- **Preconditioners** — the eight in `itl/pc/` excluding `solver.hpp`, which is a
+  dispatch helper rather than a preconditioner. `identity` is constructed internally by
+  the Krylov bindings but is not exposed as a Python object, so it counts as unexposed.
+- **Smoothers / multigrid** — twelve functions across six headers: `jacobi`;
+  `gauss_seidel` + backward + symmetric; `sor` + backward + symmetric; `multigrid`,
+  `make_prolongation_1d`, `prolongate`, `make_restriction_1d`, `restrict`.
+- **Build acceleration** — `MTL5_NATIVE_FAST_GEMM`, `MTL5_WITH_BLAS`, `MTL5_WITH_LAPACK`,
+  `MTL5_WITH_HIGHWAY`, `MTL5_NATIVE_ARCH`.
 
 ---
 
 ## 5. Recommended sequencing
 
-**Phase 0 — build configuration (days, no new bindings)**
-Turn on `MTL5_NATIVE_FAST_GEMM`; add opt-in `MTL5_WITH_BLAS`/`WITH_LAPACK`/`WITH_HIGHWAY`
-via `[tool.scikit-build.cmake.define]`; make `get_backend()` truthful; expose
-`set_num_threads()`/`get_num_threads()`; release the GIL around every kernel that can run
+**Phase 0 — build configuration (days, no new numerical bindings)**
+Turn on `MTL5_NATIVE_FAST_GEMM`; add opt-in `MTL5_WITH_BLAS`, `MTL5_WITH_LAPACK` and
+`MTL5_WITH_HIGHWAY` via `[tool.scikit-build.cmake.define]` — MTL5 declares them under
+exactly those `MTL5_`-prefixed names, and an unprefixed `WITH_LAPACK` would silently
+enable nothing. Make `get_backend()` truthful and `set_backend()` honest (today it accepts
+any name and does nothing — either it validates against the build or it should not be
+public). Add `set_num_threads()`/`get_num_threads()` — the only new bindings in this phase,
+and infrastructure rather than numerics. Release the GIL around every kernel that can run
 longer than a few microseconds. Sync `pyproject.toml` to `5.7.x`. This is the highest
 performance-per-hour item in the document — MTL5's entire 2026 performance program is
 currently compiled out of the wheel.
@@ -285,6 +322,8 @@ before expanding from 3×2 to 10×9 combinations.
   `build/_deps` tree. Exit 0; only `-Wattributes` visibility warnings. It was run **without**
   MTL5's optional feature macros, so LAPACK/BLAS/Highway-gated code paths were not compiled;
   enabling those in Phase 0 needs its own build validation.
-- "Available" counts are namespace-scope public functions; internal `detail::` helpers are
-  excluded but the counts are approximate and intended for proportion, not precision.
+- "Available" counts use the unit named per row in §4 — class templates, functions,
+  solvers, or CMake options — because a single unit across all of them would be
+  meaningless. Internal `detail::` helpers are excluded. Counts marked `~` are approximate
+  and intended for proportion, not precision; the unmarked ones are exact at `c6ff006`.
 - Issue numbers in parentheses refer to **MTL5** issues unless stated as mtl5-python.
