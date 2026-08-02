@@ -18,8 +18,8 @@ import mtl5
 
 # NumPy
 a = np.array([1.0, 2.0, 3.0], dtype=mtl5.posit16)
-b = a * 2.0   # element-wise math in posit arithmetic
-np.sum(a)     # reductions
+b = a * 2.0  # element-wise math in posit arithmetic
+np.sum(a)  # reductions
 
 # PyTorch
 t = torch.tensor([1.0, 2.0, 3.0], dtype=mtl5.torch_posit16)
