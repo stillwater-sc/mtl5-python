@@ -101,6 +101,22 @@ class TestLQ:
         assert fac.shape == A.shape
         assert "LQFactor_f64" in repr(fac)
 
+    @pytest.mark.parametrize("shape", [(40, 200), (20, 20), (200, 40), (1, 5), (5, 1)])
+    def test_accepts_any_shape(self, shape):
+        """LQ has no shape restriction, unlike QR.
+
+        A tall A gives the economy form — L is num_rows x num_cols and Q is
+        num_cols x num_cols — and still reconstructs exactly, so there is
+        nothing to reject.
+        """
+        A = np.random.default_rng(11).standard_normal(shape)
+        fac = mtl5.lq(mtl5.matrix(A))
+        L, Q = fac.L.to_numpy(), fac.Q.to_numpy()
+        assert Q.shape == (shape[1], shape[1])
+        assert L.shape == shape
+        assert np.linalg.norm(L @ Q - A) / np.linalg.norm(A) < 1e-12
+        assert np.linalg.norm(Q @ Q.T - np.eye(Q.shape[0])) < 1e-11
+
 
 class TestLDLT:
     def test_solves_an_indefinite_system(self):
@@ -200,6 +216,32 @@ class TestAcrossNumberSystems:
     def test_rejects_an_unsupported_numpy_dtype(self):
         with pytest.raises(TypeError, match="must be float32 or float64"):
             mtl5.ldlt(np.eye(3, dtype=np.int64))
+
+    def test_errors_name_the_public_function_not_the_class(self):
+        """The message must not leak 'ldltfactor'/'qrfactor'."""
+        for fn, name in ((mtl5.qr, "qr"), (mtl5.lq, "lq"), (mtl5.ldlt, "ldlt")):
+            with pytest.raises(TypeError) as exc:
+                fn(np.eye(3, dtype=np.int64))
+            msg = str(exc.value)
+            assert msg.startswith(f"{name}:")
+            assert "factor" not in msg.lower().replace("factorization", "")
+
+    def test_convert_hint_only_where_convert_would_help(self):
+        """qr/lq are float-only, so pointing at convert() would just earn a
+        second TypeError."""
+        with pytest.raises(TypeError, match="convert"):
+            mtl5.ldlt(np.eye(3, dtype=np.int64))
+        for fn in (mtl5.qr, mtl5.lq):
+            with pytest.raises(TypeError) as exc:
+                fn(np.eye(3, dtype=np.int64))
+            assert "convert" not in str(exc.value)
+            assert "float32 and float64 only" in str(exc.value)
+
+    def test_universal_dtype_rejected_by_float_only_factorizations(self):
+        M = mtl5.convert(np.eye(4), "posit32")
+        for fn, name in ((mtl5.qr, "qr"), (mtl5.lq, "lq")):
+            with pytest.raises(TypeError, match=f"{name} is not available for dtype"):
+                fn(M)
 
     def test_rejects_a_non_matrix(self):
         with pytest.raises(TypeError, match="expected an MTL5 matrix"):

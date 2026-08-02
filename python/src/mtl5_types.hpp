@@ -153,10 +153,13 @@ struct PreconditionerWrapper {
 // operations, and the iterative-refinement entry points.
 void register_mixed_precision(nb::module_& m);
 
-// Registered by mtl5_dense_factor.cpp — QR, LQ, LDL^T and Bunch-Kaufman.
+// Registered by mtl5_dense_factor.cpp — QR, LQ and LDL^T. Bunch-Kaufman is
+// withheld pending stillwater-sc/mtl5#335.
 void register_dense_factorizations(nb::module_& m);
 
-// Registered by mtl5_dense_ops.cpp — eigen/SVD, BLAS L2/L3, property predicates.
+// Registered by mtl5_dense_ops.cpp — eigen, BLAS L2/L3, property predicates.
+// SVD (and the condition/rank queries built on it) is withheld pending
+// stillwater-sc/mtl5#337.
 void register_dense_ops(nb::module_& m);
 
 // Registered by mtl5_sparse_direct.cpp — the sparse direct factorizations and

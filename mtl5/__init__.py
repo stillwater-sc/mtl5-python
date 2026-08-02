@@ -168,54 +168,80 @@ _UNIVERSAL_DTYPES = (
 _NUMPY_TO_MTL5 = {"float32": "f32", "float64": "f64"}
 
 
-def _as_mtl5_matrix(prefix: str, A):
+def _as_mtl5_matrix(name: str, prefix: str, A):
     """Normalize A to (mtl5_matrix, dtype_suffix).
 
     Accepts an MTL5 matrix from mtl5.matrix()/mtl5.convert(), or a NumPy
     float32/float64 array, which is wrapped zero-copy — matching what
     mtl5.cholesky() has always accepted.
+
+    `name` is the public function ("qr", "ldlt", ...) and is what the errors
+    quote; `prefix` is the internal class prefix and never reaches the user.
     """
     import numpy as _np
 
     if isinstance(A, _np.ndarray):
         suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
         if suffix is None:
+            # Only suggest convert() for the factorizations that actually have
+            # Universal instantiations — qr/lq are float32/float64 only, so
+            # sending a user there would just earn them a second TypeError.
+            hint = (
+                " For another number system, convert first: mtl5.convert(a, 'posit32')."
+                if _has_universal_support(prefix)
+                else f" {name}() supports float32 and float64 only."
+            )
             raise TypeError(
-                f"{prefix.lower()}: NumPy arrays must be float32 or float64, "
-                f"got {A.dtype.name}. For another number system, convert first: "
-                f"mtl5.convert(a, 'posit32')."
+                f"{name}: NumPy arrays must be float32 or float64, got {A.dtype.name}.{hint}"
             )
         return matrix(_np.ascontiguousarray(A)), suffix
 
     dt = getattr(A, "dtype", None)
     if not isinstance(dt, str):
         raise TypeError(
-            f"{prefix.lower()}: expected an MTL5 matrix (from mtl5.matrix() or "
+            f"{name}: expected an MTL5 matrix (from mtl5.matrix() or "
             f"mtl5.convert()) or a NumPy array, got {type(A).__name__}"
         )
     return A, dt
 
 
-def _factor(prefix: str, A):
+def _has_universal_support(prefix: str) -> bool:
+    """Whether `prefix` is instantiated beyond float32/float64."""
+    return hasattr(_core, f"{prefix}_posit32")
+
+
+def _factor(name: str, prefix: str, A):
     """Construct the Factor class matching A's element type."""
-    mat, dt = _as_mtl5_matrix(prefix, A)
+    mat, dt = _as_mtl5_matrix(name, prefix, A)
     cls = getattr(_core, f"{prefix}_{dt}", None)
     if cls is None:
-        raise TypeError(f"{prefix.lower()} is not available for dtype '{dt}'")
+        available = "float32/float64"
+        if _has_universal_support(prefix):
+            available += " and the Universal dtypes"
+        raise TypeError(f"{name} is not available for dtype '{dt}' — it supports {available}.")
     return cls(mat)
 
 
 def qr(A):
-    """Householder QR of a tall-or-square matrix.
+    """Householder QR of a tall-or-square matrix (num_rows >= num_cols).
 
-    Returns a factorization exposing `.solve(b)` (least squares), `.Q` and `.R`.
+    float32 and float64 only. Returns a factorization exposing `.solve(b)`
+    (least squares), `.Q` and `.R`.
     """
-    return _factor("QRFactor", A)
+    return _factor("qr", "QRFactor", A)
 
 
 def lq(A):
-    """Householder LQ. Returns a factorization exposing `.L` and `.Q`."""
-    return _factor("LQFactor", A)
+    """Householder LQ: A = L Q, with L lower trapezoidal and Q orthogonal.
+
+    Accepts any shape. For a wide or square A, Q is `num_cols x num_cols`; for
+    a tall A the factorization is the economy form, with Q `num_cols x
+    num_cols` and L `num_rows x num_cols`. Unlike `qr`, which needs
+    num_rows >= num_cols, there is no shape restriction.
+
+    Returns a factorization exposing `.L` and `.Q`.
+    """
+    return _factor("lq", "LQFactor", A)
 
 
 def ldlt(A):
@@ -225,10 +251,11 @@ def ldlt(A):
     matrix; `.diagonal()` returns D, whose signs give the inertia. It does not
     pivot, so a zero pivot raises.
 
-    Available for float32/float64 and every Universal dtype, which is what
+    Available for float32/float64 and all ten Universal dtypes, which is what
     makes a Cholesky-versus-LDL^T comparison across number systems possible.
+    The integer element types (i32/i64) are not supported.
     """
-    return _factor("LDLTFactor", A)
+    return _factor("ldlt", "LDLTFactor", A)
 
 
 # Convenience aliases — default to f64

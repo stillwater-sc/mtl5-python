@@ -1475,10 +1475,10 @@ NB_MODULE(_core, m) {
     // the direct factorizations as refinement factors.
     register_sparse_direct(m);
 
-    // ----- Dense factorizations: QR, LQ, LDL^T, Bunch-Kaufman ---------------
+    // ----- Dense factorizations: QR, LQ, LDL^T -------------------------------
     register_dense_factorizations(m);
 
-    // ----- Eigen/SVD, BLAS L2/L3, property predicates ------------------------
+    // ----- Eigen, BLAS L2/L3, property predicates ----------------------------
     register_dense_ops(m);
 
     // ----- Universal number types (copy-converting from float64) -------------

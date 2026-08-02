@@ -133,8 +133,9 @@ existing `mtl5.lu` and `mtl5.cholesky`.
 
 ### Cholesky vs LDLᵀ across number systems
 
-`ldlt` and `cholesky` are both available for **every** element type, which is
-what makes the interesting comparison possible. Cholesky takes square roots, so
+`ldlt` and `cholesky` are both available for float32, float64 and **all ten
+Universal dtypes** — the integer element types are not supported — which is what
+makes the interesting comparison possible. Cholesky takes square roots, so
 it refuses a matrix that has drifted out of positive-definiteness — the failure
 mode of a Kalman covariance update in low precision. LDLᵀ has no square roots,
 survives, and records what happened in `D`:
@@ -182,11 +183,17 @@ mtl5.syrk(alpha, A, beta, C)  # C = alpha A Aᵀ + beta C
 mtl5.syr2k(alpha, A, B, beta, C)
 ```
 
-Property predicates come in two cost classes, and the docstrings say which:
-`is_square`, `is_symmetric`, `is_triangular`, `is_diagonal`, `is_banded`,
-`is_diagonally_dominant` and the vector checks are O(n²) or cheaper, while
-`is_orthogonal`, `is_spd`, `is_singular`, `spectral_radius` and `inertia` are
-O(n³) — don't put those inside a loop.
+Property predicates come in two cost classes. The **docstrings are
+authoritative**; the split is:
+
+- **O(n²) or cheaper** — the structural checks (`is_square`, `is_empty`,
+  `is_symmetric`, `is_hermitian`, `is_triangular` and the upper/lower variants,
+  `is_diagonal`, `is_banded`, `is_diagonally_dominant`) and every vector
+  predicate.
+- **O(n³)** — anything that forms a product, factorizes, or runs an
+  eigensolve: `is_orthogonal`, `is_unitary`, `is_normal`, `is_spd`,
+  `is_positive_definite`, `is_singular`, `is_nonsingular`, `is_invertible`,
+  `spectral_radius`, `inertia`, `is_indefinite`. Don't put these inside a loop.
 
 > **SVD is not exposed**, and neither are `condition_number`, `rcond`,
 > `numerical_rank` or `nullity`, which are computed from it. MTL5's
