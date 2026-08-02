@@ -149,12 +149,8 @@ d = mtl5.ldlt(mtl5.convert(P, "posit16")).diagonal()
 (d < 0).any()  # True — D names the bad direction
 ```
 
-> **Bunch–Kaufman is not exposed.** It is the pivoting variant you would
-> normally reach for when plain LDLᵀ hits a zero pivot, but MTL5's `ldlt_bk`
-> returns a wrong solution whenever it interchanges — backward error ~1e-1
-> under a success code. Filed as
-> [stillwater-sc/mtl5#335](https://github.com/stillwater-sc/mtl5/issues/335);
-> the binding is withheld until that is fixed.
+`mtl5.bunch_kaufman(A)` is the pivoting variant, for a symmetric matrix that
+plain `ldlt` rejects on a zero pivot. float32/float64 only.
 
 ## Eigenvalues, BLAS 2/3, and matrix properties
 
@@ -195,13 +191,21 @@ authoritative**; the split is:
   `is_positive_definite`, `is_singular`, `is_nonsingular`, `is_invertible`,
   `spectral_radius`, `inertia`, `is_indefinite`. Don't put these inside a loop.
 
-> **SVD is not exposed**, and neither are `condition_number`, `rcond`,
-> `numerical_rank` or `nullity`, which are computed from it. MTL5's
-> `singular_values` returns all-NaN for roughly 30% of ordinary symmetric
-> matrices and is off by up to 143% on σ_max for many of the rest. Filed as
-> [stillwater-sc/mtl5#337](https://github.com/stillwater-sc/mtl5/issues/337).
-> The eigensolvers on the same matrices are accurate to 3.7e-15 (symmetric) and
-> 1.1e-9 (general) over 120 matrices, which is why those ship.
+SVD and the queries built on it:
+
+```python
+U, s, V = mtl5.svd(A)  # s is the vector of singular values (NumPy's convention)
+mtl5.svdvals(A)  # singular values only — cheaper
+mtl5.condition_number(A)  # σ_max / σ_min
+mtl5.rcond(A)  # σ_min / σ_max, safer near singular
+mtl5.numerical_rank(A)
+mtl5.nullity(A)
+```
+
+`svd` takes a `tol`. `V` and the reconstruction are accurate to machine
+precision regardless, but `U`'s orthogonality is bounded by the iteration's
+tolerance rather than by eps — `‖UᵀU − I‖` runs about 1×tol, so tighten `tol`
+if you need an orthonormal `U` specifically.
 
 ## Sparse direct solvers
 

@@ -62,6 +62,7 @@ from mtl5._core import (
     # Build introspection
     build_info,
     cholesky,
+    condition_number,
     # Mixed precision
     convert,
     # Device management
@@ -123,10 +124,15 @@ from mtl5._core import (
     # Mixed-precision submodule (element / accumulator / result precisions)
     mixed,
     norm,
+    nullity,
+    numerical_rank,
+    rcond,
     set_backend,
     set_num_threads,
     solve,
     spectral_radius,
+    svd,
+    svdvals,
     symm,
     symv,
     syr2k,
@@ -244,6 +250,17 @@ def lq(A):
     return _factor("lq", "LQFactor", A)
 
 
+def bunch_kaufman(A):
+    """Bunch-Kaufman LDL^T: symmetric indefinite with 1x1/2x2 block pivoting.
+
+    The pivoting variant of `ldlt`, so it handles a symmetric matrix that plain
+    `ldlt` rejects on a zero pivot. float32 and float64 only.
+
+    Returns a factorization exposing `.solve(b)` and `.ipiv()`.
+    """
+    return _factor("bunch_kaufman", "BunchKaufmanFactor", A)
+
+
 def ldlt(A):
     """LDL^T factorization of a symmetric matrix.
 
@@ -359,7 +376,13 @@ __all__ = [
     "build_info",
     "get_num_threads",
     "set_num_threads",
-    # Eigenvalues, BLAS L2/L3, and property predicates
+    # Eigenvalues, SVD, BLAS L2/L3, and property predicates
+    "condition_number",
+    "nullity",
+    "numerical_rank",
+    "rcond",
+    "svd",
+    "svdvals",
     "eig",
     "eigh",
     "eigvals",
@@ -402,6 +425,7 @@ __all__ = [
     "trsm",
     "trsv",
     # Operations
+    "bunch_kaufman",
     "cholesky",
     "ldlt",
     "lq",

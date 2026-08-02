@@ -2,7 +2,7 @@
 // and the property predicates (MTL5 epics #202, #229, #244).
 //
 // The eigen and SVD entry points mirror numpy.linalg deliberately -- eigvals /
-// eig / eigvalsh / eigh with the same return shapes -- because
+// eig / eigvalsh / eigh / svd / svdvals with the same return shapes -- because
 // that is the vocabulary a caller already has. They return NumPy arrays rather
 // than MTL5 containers: these are analysis results you read, not operands you
 // chain, and the general eigenproblem is complex, which the MTL5 container
@@ -13,15 +13,12 @@
 // tolerance defaults and convergence behaviour want their own validation pass
 // before being exposed for posit and friends.
 //
-// SVD IS NOT BOUND. mtl::svd / detail::singular_values returns all-NaN
-// singular values for roughly 30% of ordinary symmetric matrices, and is off by
-// up to 143% on sigma_max for many of the rest -- verified against the
-// sigma_max == spectral_radius identity, which needs no reference
-// implementation. Filed as stillwater-sc/mtl5#337. That also takes out
-// condition_number, rcond, numerical_rank and nullity, which are all computed
-// from it. The eigensolvers on the same matrices are accurate (worst relative
-// error 3.7e-15 symmetric, 1.1e-9 general over 120 matrices), so eigvals / eig
-// / eigvalsh / eigh do ship.
+// SVD was withheld on first release: mtl::svd / detail::singular_values
+// returned all-NaN singular values for ~30% of ordinary symmetric matrices and
+// was off by up to 143% on sigma_max for many of the rest
+// (stillwater-sc/mtl5#337). Fixed upstream in MTL5 e437e4b/0cee70f and
+// re-verified here before binding -- the same 200-matrix scan now shows 0 NaN
+// cases and a worst sigma_max identity error of 5.8e-15, down from 1.427e+00.
 
 #include "mtl5_types.hpp"
 
@@ -36,6 +33,7 @@
 #include <mtl/operation/operators.hpp>
 #include <mtl/mat/operators.hpp>
 
+#include <mtl/operation/svd.hpp>
 #include <mtl/operation/eigenvalue.hpp>
 #include <mtl/operation/eigenvalue_symmetric.hpp>
 #include <mtl/operation/matrix_properties.hpp>
@@ -181,7 +179,44 @@ void register_eigen(nb::module_& m) {
        "Eigenvalues and eigenvectors of a symmetric matrix, as (w, Q) with "
        "A = Q diag(w) Q^T");
 
-    // svd() and svdvals() are NOT bound — see the note at the head of this file.
+    m.def("svd", [](const MV& A_mv, double tol) {
+        const std::size_t rows = A_mv.mat.num_rows(), cols = A_mv.mat.num_cols();
+        const std::size_t k = rows < cols ? rows : cols;
+        std::vector<double> Ud(rows * rows), sd(k), Vd(cols * cols);
+        {
+            nogil guard;
+            auto [U, S, V] = mtl::svd(A_mv.mat, static_cast<T>(tol));
+            for (std::size_t r = 0; r < U.num_rows(); ++r)
+                for (std::size_t c = 0; c < U.num_cols(); ++c)
+                    Ud[r * U.num_cols() + c] = static_cast<double>(U(r, c));
+            // MTL5 hands back S as a matrix; NumPy's convention is the vector
+            // of singular values, so take the diagonal.
+            for (std::size_t i = 0; i < k; ++i) sd[i] = static_cast<double>(S(i, i));
+            for (std::size_t r = 0; r < V.num_rows(); ++r)
+                for (std::size_t c = 0; c < V.num_cols(); ++c)
+                    Vd[r * V.num_cols() + c] = static_cast<double>(V(r, c));
+        }
+        auto Un = make_numpy_2d<double>(rows, rows, [&](double* b) {
+            for (std::size_t i = 0; i < rows * rows; ++i) b[i] = Ud[i];
+        });
+        auto Vn = make_numpy_2d<double>(cols, cols, [&](double* b) {
+            for (std::size_t i = 0; i < cols * cols; ++i) b[i] = Vd[i];
+        });
+        return std::make_tuple(Un, to_numpy_1d(sd), Vn);
+    }, "A"_a, "tol"_a = 1e-10,
+       "Singular value decomposition, returned as (U, s, V) with s the vector "
+       "of singular values (NumPy's convention, not MTL5's diagonal matrix)");
+
+    m.def("svdvals", [](const MV& A_mv) {
+        std::vector<double> out;
+        {
+            nogil guard;
+            auto sv = mtl::detail::singular_values(A_mv.mat);
+            out.resize(sv.size());
+            for (std::size_t i = 0; i < sv.size(); ++i) out[i] = static_cast<double>(sv[i]);
+        }
+        return to_numpy_1d(out);
+    }, "A"_a, "Singular values only — cheaper than the full svd()");
 }
 
 // ===========================================================================
@@ -347,16 +382,26 @@ void register_predicates(nb::module_& m) {
         nogil guard; return mtl::is_invertible(A.mat, static_cast<T>(tol));
     }, "A"_a, "tol"_a = 0.0);
 
-    // -- spectral, O(n^3) via an eigensolve ---------------------------------
-    //
-    // condition_number, rcond, numerical_rank and nullity are absent: all four
-    // are computed from detail::singular_values, and MTL5's SVD returns NaN for
-    // ~30% of symmetric inputs (stillwater-sc/mtl5#337). spectral_radius,
-    // inertia and is_indefinite go through the eigensolvers instead, which
-    // check out, so they are bound.
+    // -- spectral, O(n^3) via an SVD or an eigensolve ------------------------
     m.def("spectral_radius", [](const MV& A) {
         nogil guard; return static_cast<double>(mtl::spectral_radius(A.mat));
     }, "A"_a, "Largest |eigenvalue|. O(n^3).");
+    m.def("condition_number", [](const MV& A) {
+        nogil guard; return static_cast<double>(mtl::condition_number(A.mat));
+    }, "A"_a, "2-norm condition number sigma_max/sigma_min via SVD. O(n^3).");
+    m.def("rcond", [](const MV& A) {
+        nogil guard; return static_cast<double>(mtl::rcond(A.mat));
+    }, "A"_a,
+       "Reciprocal condition number sigma_min/sigma_max, in [0,1]. Safer than "
+       "condition_number when the matrix may be singular. O(n^3).");
+    m.def("numerical_rank", [](const MV& A, double tol) {
+        nogil guard; return mtl::numerical_rank(A.mat, static_cast<T>(tol));
+    }, "A"_a, "tol"_a = -1.0,
+       "Singular values above a threshold; the default is the standard "
+       "max(m,n)*eps*sigma_max cutoff. O(n^3).");
+    m.def("nullity", [](const MV& A, double tol) {
+        nogil guard; return mtl::nullity(A.mat, static_cast<T>(tol));
+    }, "A"_a, "tol"_a = -1.0, "min(m,n) - numerical_rank. O(n^3).");
     m.def("is_indefinite", [](const MV& A, double tol) {
         nogil guard; return mtl::is_indefinite(A.mat, static_cast<T>(tol));
     }, "A"_a, "tol"_a = -1.0);

@@ -246,3 +246,60 @@ class TestAcrossNumberSystems:
     def test_rejects_a_non_matrix(self):
         with pytest.raises(TypeError, match="expected an MTL5 matrix"):
             mtl5.ldlt("not a matrix")
+
+
+class TestBunchKaufman:
+    """Bound once stillwater-sc/mtl5#335 was fixed. The tests below are the ones
+    that caught the original defect — the failure needed a pivot interchange,
+    which n=2/n=3 cases never produce."""
+
+    def test_solves_an_indefinite_system(self):
+        S = sym(30, seed=4)
+        b = np.random.default_rng(5).standard_normal(30)
+        x = mtl5.bunch_kaufman(mtl5.matrix(S)).solve(mtl5.vector(b)).to_numpy()
+        ref = np.linalg.solve(S, b)
+        assert np.linalg.norm(x - ref) / np.linalg.norm(ref) < 1e-10
+
+    @pytest.mark.parametrize("n", [4, 5, 8, 12, 20, 33])
+    def test_correct_at_sizes_that_force_interchanges(self, n):
+        """n >= 4 is where the original bug lived; n=2/3 never pivot."""
+        S = sym(n, seed=n)
+        b = np.random.default_rng(n).standard_normal(n)
+        x = mtl5.bunch_kaufman(mtl5.matrix(S)).solve(mtl5.vector(b)).to_numpy()
+        ref = np.linalg.solve(S, b)
+        assert np.linalg.norm(x - ref) / np.linalg.norm(ref) < 1e-9, f"n={n}"
+
+    def test_agrees_with_ldlt_where_both_apply(self):
+        S = sym(16, seed=21)
+        b = np.random.default_rng(22).standard_normal(16)
+        x_bk = mtl5.bunch_kaufman(mtl5.matrix(S)).solve(mtl5.vector(b)).to_numpy()
+        x_ld = mtl5.ldlt(mtl5.matrix(S)).solve(mtl5.vector(b)).to_numpy()
+        np.testing.assert_allclose(x_bk, x_ld, rtol=1e-9)
+
+    def test_survives_a_zero_pivot_that_plain_ldlt_rejects(self):
+        """The reason Bunch-Kaufman exists."""
+        A = np.array([[0.0, 1.0], [1.0, 0.0]])
+        with pytest.raises(RuntimeError, match="zero pivot"):
+            mtl5.ldlt(mtl5.matrix(A))
+        b = np.array([1.0, 2.0])
+        x = mtl5.bunch_kaufman(mtl5.matrix(A)).solve(mtl5.vector(b)).to_numpy()
+        np.testing.assert_allclose(x, np.linalg.solve(A, b), rtol=1e-12)
+
+    def test_ipiv_reports_the_pivot_record(self):
+        fac = mtl5.bunch_kaufman(mtl5.matrix(sym(10, seed=23)))
+        piv = fac.ipiv()
+        assert piv.shape == (10,)
+        assert piv.dtype == np.int64
+
+    def test_metadata_and_shape_checks(self):
+        fac = mtl5.bunch_kaufman(mtl5.matrix(sym(6, seed=24)))
+        assert fac.n == 6 and fac.shape == (6, 6) and fac.dtype == "f64"
+        assert "BunchKaufmanFactor_f64" in repr(fac)
+        with pytest.raises(ValueError, match="must be square"):
+            mtl5.bunch_kaufman(mtl5.matrix(np.ones((3, 5))))
+        with pytest.raises(ValueError, match="does not match factor size"):
+            fac.solve(mtl5.vector(np.ones(3)))
+
+    def test_float_only(self):
+        with pytest.raises(TypeError, match="not available for dtype"):
+            mtl5.bunch_kaufman(mtl5.convert(sym(4, seed=25), "posit32"))

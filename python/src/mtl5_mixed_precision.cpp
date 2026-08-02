@@ -167,17 +167,29 @@ double mixed_dot(const V& a, const V& b, AccKind kind, bool result_element) {
 }
 
 // The sum-of-squares norms are accumulated here rather than through
-// mtl::two_norm<Acc> / mtl::frobenius_norm<Acc>.
+// mtl::two_norm<Acc> / mtl::frobenius_norm<Acc>, and they stay that way even
+// now that stillwater-sc/mtl5#324 is fixed.
 //
-// Upstream those do `sqrt(AT::template value<Accumulator>(acc))` — they round
-// the accumulator out to the ACCUMULATOR type and then take its square root.
-// That only compiles when Accumulator is a plain arithmetic type, so it rejects
-// both non-trivial configurations accumulator_traits documents: fma_accumulator
-// and the quire. (`value<mag_t>` is what was meant.) Reported as
-// stillwater-sc/mtl5#324; until the fix lands, these two loops are the
-// accumulator-generic version, rounding the
-// accumulated sum out to double before the square root so a narrow element type
-// does not throw away the precision the accumulator just bought.
+// The upstream fix was the right one for a C++ caller: it rounds the
+// accumulator out to the accumulator's own arithmetic precision and then casts
+// to mag_t, so `two_norm<Acc>(v)` hands back the ELEMENT type, matching every
+// other MTL5 operation. But at the Python boundary we return a float
+// regardless, and that final cast throws away exactly what the accumulator
+// bought. Measured on 4000 posit16 values, against the exact norm of the same
+// posit16 data:
+//
+//     accumulator     upstream two_norm<Acc>     these loops
+//     f64             rel 1.19e-04               exact
+//     quire           rel 1.19e-04               exact
+//
+// Both accumulators give the SAME answer upstream, because posit16's
+// resolution swamps the difference — which makes `accumulator=` unobservable
+// from Python, and the tests asserting that a wider accumulator is strictly
+// better would be asserting nothing.
+//
+// The clean fix is a Result parameter on the norms, mirroring the one
+// dot<Accumulator, Result> already has; requested as an upstream enhancement.
+// Until then these two loops are deliberate, not vestigial.
 //
 // All element types bound here are real, so |x|^2 == x*x and the magnitude type
 // is the element type.
