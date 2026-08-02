@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 
 import numpy as np
@@ -17,23 +18,35 @@ import pytest
 
 import mtl5
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Point the child at the SAME mtl5 this process imported, rather than at the
+# repo root. Under `pip install .` the repo root holds a source `mtl5/` package
+# with no compiled `_core`, so running the child there shadows the installed
+# package and every subprocess test dies on ModuleNotFoundError. Resolving the
+# parent of `mtl5.__file__` works for both layouts: an installed package and an
+# in-place build.
+MTL5_IMPORT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(mtl5.__file__)))
 
 
 def run_fresh(code: str, env_extra: dict[str, str] | None = None):
     """Execute `code` in a clean interpreter that has never touched MTL5."""
     env = dict(os.environ)
     env.pop("MTL5_NUM_THREADS", None)
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        MTL5_IMPORT_ROOT + os.pathsep + existing if existing else MTL5_IMPORT_ROOT
+    )
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        cwd=REPO_ROOT,
-        env=env,
-        timeout=120,
-    )
+    # A neutral cwd, so the source tree can never shadow the resolved package.
+    with tempfile.TemporaryDirectory() as neutral_cwd:
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=neutral_cwd,
+            env=env,
+            timeout=120,
+        )
 
 
 class TestBuildInfo:
