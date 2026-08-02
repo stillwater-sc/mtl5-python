@@ -50,11 +50,11 @@ supplies the number systems, and this package composes them:
 import numpy as np, mtl5
 
 x = np.random.default_rng(0).standard_normal(4000)
-v = mtl5.convert(x, "posit16")          # store narrow
+v = mtl5.convert(x, "posit16")  # store narrow
 
-mtl5.mixed.dot(v, v)                     # accumulate in posit16 too
+mtl5.mixed.dot(v, v)  # accumulate in posit16 too
 mtl5.mixed.dot(v, v, accumulator="f64")  # ...or in double
-mtl5.mixed.dot(v, v, accumulator="quire")# ...or exactly, in Universal's quire
+mtl5.mixed.dot(v, v, accumulator="quire")  # ...or exactly, in Universal's quire
 ```
 
 Accumulating 4000 posit16 products, against the exact value of the same
