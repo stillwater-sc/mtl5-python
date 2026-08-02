@@ -218,7 +218,7 @@ and they immediately improve the bindings' own test suite (which currently hand-
 |---|---|
 | No acceleration options enabled in the wheel | `python/CMakeLists.txt` — no `MTL5_WITH_*`, no `MTL5_NATIVE_FAST_GEMM` |
 | `get_backend()` structurally cannot report anything but `"reference"` | `mtl5_module.cpp:1281–1290` vs. MTL5 `CMakeLists.txt:125–135` |
-| `set_backend()` is a no-op stub | `mtl5_module.cpp:1291` |
+| `set_backend()` validates the name but never selects anything | `mtl5_module.cpp:1291` — rejects unknown names and `"kpu"`, then no-ops for `"cpu"`/`"reference"`/`"blas"`, so it reports success for a backend the build lacks |
 | Threading unexposed and undocumented | `MTL5_NUM_THREADS` read in `detail/thread_pool.hpp:36`; no Python accessor |
 | GIL never released | zero `nb::gil_scoped_release` in the module |
 | External solver interfaces unbound | `interface/{umfpack,superlu,klu,cholmod,spqr,blas,lapack}.hpp` |
@@ -282,10 +282,22 @@ Notes on the rows that are easy to miscount:
 Turn on `MTL5_NATIVE_FAST_GEMM`; add opt-in `MTL5_WITH_BLAS`, `MTL5_WITH_LAPACK` and
 `MTL5_WITH_HIGHWAY` via `[tool.scikit-build.cmake.define]` — MTL5 declares them under
 exactly those `MTL5_`-prefixed names, and an unprefixed `WITH_LAPACK` would silently
-enable nothing. Make `get_backend()` truthful and `set_backend()` honest (today it accepts
-any name and does nothing — either it validates against the build or it should not be
-public). Add `set_num_threads()`/`get_num_threads()` — the only new bindings in this phase,
-and infrastructure rather than numerics. Release the GIL around every kernel that can run
+enable nothing.
+
+That is four of the five options in the §4 scorecard. The fifth,
+`MTL5_NATIVE_ARCH`, is deliberately **out of scope for Phase 0**: it adds
+`-march=native`, so the resulting wheel only runs on machines resembling the one that
+built it. It should be available to someone building locally for their own hardware,
+but never on by default in a distributed artifact.
+
+Make `get_backend()` truthful, and `set_backend()` honest. Today it does validate its
+argument — unknown names raise, and `"kpu"` raises "not yet available" — but it accepts
+`"cpu"`, `"reference"` and `"blas"` and then does nothing, including on a build with no
+BLAS linked. So `set_backend("blas")` succeeds on a wheel that cannot use BLAS. It should
+either validate against what was actually compiled in, or not be public.
+
+Add `set_num_threads()`/`get_num_threads()` — the only new bindings in this phase, and
+infrastructure rather than numerics. Release the GIL around every kernel that can run
 longer than a few microseconds. Sync `pyproject.toml` to `5.7.x`. This is the highest
 performance-per-hour item in the document — MTL5's entire 2026 performance program is
 currently compiled out of the wheel.
