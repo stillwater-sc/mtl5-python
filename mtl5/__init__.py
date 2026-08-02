@@ -57,12 +57,16 @@ from mtl5._core import (
     LUFactor_f64,
     # Backend management
     backends,
+    # Build introspection
+    build_info,
     cholesky,
     # Device management
     devices,
     # Operations
     dot,
     get_backend,
+    # Threading
+    get_num_threads,
     inv,
     lu,
     matmul,
@@ -81,6 +85,7 @@ from mtl5._core import (
     matvec,
     norm,
     set_backend,
+    set_num_threads,
     solve,
     transpose,
     vector,
@@ -175,6 +180,10 @@ __all__ = [
     "devices",
     "get_backend",
     "set_backend",
+    # Build introspection & threading
+    "build_info",
+    "get_num_threads",
+    "set_num_threads",
     # Operations
     "cholesky",
     "det",

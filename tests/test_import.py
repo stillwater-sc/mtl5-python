@@ -18,6 +18,10 @@ def test_version_string():
 def test_version_sync():
     """Python package version must match the C++ extension module version."""
     import mtl5._core as _core
+    import pytest
+
+    if _core.__version__ == "0.0.0-dev":
+        pytest.skip("dev build: extension built without scikit-build package metadata")
 
     assert mtl5.__version__ == _core.__version__, (
         f"Version mismatch: mtl5.__version__={mtl5.__version__!r} "

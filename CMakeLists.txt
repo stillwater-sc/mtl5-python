@@ -12,6 +12,65 @@ endif()
 
 option(MTL5_ENABLE_PYTHON "Build Python bindings" ON)
 
+# ---------------------------------------------------------------------------
+# MTL5 acceleration options
+#
+# Every MTL5_WITH_*/MTL5_NATIVE_* option defaults to OFF upstream, which
+# compiles out MTL5's entire native performance path — mtl::mult falls back to
+# the generic scalar kernel and get_backend() can only ever report "reference".
+# We declare the same option names here so the cache entry exists before MTL5's
+# own option() runs, which lets us pick wheel-appropriate defaults while still
+# honouring an explicit -D on the command line.
+#
+# MTL5_NATIVE_FAST_GEMM and MTL5_WITH_HIGHWAY are ON together, and that pairing
+# is not optional. The blocked GEMM pays a packing cost that only pays off once
+# the micro-kernel is actually vectorised, and mtl::simd falls back to a
+# scalar batch (lane count 1) unless Highway is present. Measured here,
+# double-precision matmul, GCC -O3, single thread, no -march=native:
+#
+#     config                       n=200      n=600     n=1000
+#     both OFF (status quo)      3.51 GF/s  2.67 GF/s  2.15 GF/s
+#     fast GEMM alone            0.79 GF/s  0.79 GF/s  0.79 GF/s   <- 3.4x SLOWER
+#     fast GEMM + Highway       12.63 GF/s 14.40 GF/s 14.66 GF/s   <- 5.5-6.8x faster
+#
+# Highway is fetched at a pinned version, is Apache-2.0/BSD-3-Clause, and uses
+# STATIC dispatch — one ISA chosen by the compiler flags. With no -march that
+# is the x86-64 baseline, which is what the numbers above measure, so the
+# result is still a portable binary.
+#
+#   MTL5_NATIVE_FAST_GEMM  ON  — blocked GEMM / SIMD GEMV. if-constexpr gated to
+#                                dense contiguous float/double, so int/posit/
+#                                fixpnt/lns still take the generic path.
+#   MTL5_WITH_HIGHWAY      ON  — vectorises that kernel. See the table above for
+#                                what happens if you turn this off on its own.
+#   MTL5_WITH_BLAS         OFF — needs a BLAS on the build machine.
+#   MTL5_WITH_LAPACK       OFF — needs LAPACK; enables geev/syev/gesdd dispatch,
+#                                which the Phase 3 eigen/SVD bindings will want.
+#   MTL5_NATIVE_ARCH       OFF — -march=native lets Highway target AVX2/AVX-512
+#                                instead of the baseline, but the binary then
+#                                only runs on machines like the build host.
+#                                Worth enabling for a local build, never for a
+#                                distributed wheel.
+#
+# Override at install time, e.g.:
+#   pip install . -C cmake.define.MTL5_WITH_BLAS=ON \
+#                 -C cmake.define.MTL5_WITH_LAPACK=ON
+# ---------------------------------------------------------------------------
+option(MTL5_NATIVE_FAST_GEMM "Route mtl::mult through MTL5's blocked GEMM / SIMD GEMV" ON)
+option(MTL5_WITH_HIGHWAY     "Use Google Highway as the mtl::simd backend"             ON)
+option(MTL5_WITH_BLAS        "Link an external BLAS for dense acceleration"            OFF)
+option(MTL5_WITH_LAPACK      "Link LAPACK (enables geev/syev/gesdd dispatch)"          OFF)
+option(MTL5_NATIVE_ARCH      "Tune for the host CPU (-march=native; non-portable)"     OFF)
+
+if(MTL5_NATIVE_FAST_GEMM AND NOT MTL5_WITH_HIGHWAY)
+    message(WARNING
+        "MTL5_NATIVE_FAST_GEMM=ON with MTL5_WITH_HIGHWAY=OFF is slower than "
+        "turning both off: the blocked GEMM pays its packing cost but mtl::simd "
+        "falls back to a scalar batch, so the micro-kernel never vectorises "
+        "(measured ~3.4x slower than the generic kernel). Enable "
+        "MTL5_WITH_HIGHWAY, or set MTL5_NATIVE_FAST_GEMM=OFF as well.")
+endif()
+
 # --- MTL5 (header-only) ---
 find_package(MTL5 QUIET)
 if(NOT MTL5_FOUND)

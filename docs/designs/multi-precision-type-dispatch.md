@@ -45,7 +45,7 @@ xi = mtl5.vector(np.array([1, 2, 3], dtype=np.int32))
 
 # Operations dispatch on input dtype
 mtl5.norm(np.array([3.0, 4.0], dtype=np.float32))  # → float32 computation
-mtl5.solve(A_f32, b_f32)                            # → float32 LU solve
+mtl5.solve(A_f32, b_f32)  # → float32 LU solve
 
 # Future: Universal types (once custom dtypes are registered)
 # x = mtl5.vector(np.array([1.0, 2.0], dtype=mtl5.posit16))
@@ -154,12 +154,12 @@ Users call `mtl5.vector_fp16(np_array)` to create fp16 vectors. Operations like 
 
 ```python
 v = mtl5.vector_fp16(np.array([3.0, 4.0]))
-print(mtl5.norm(v))      # works — overloaded on DenseVector_fp16
-print(mtl5.dot(v, v))    # works — overloaded on DenseVector_fp16
+print(mtl5.norm(v))  # works — overloaded on DenseVector_fp16
+print(mtl5.dot(v, v))  # works — overloaded on DenseVector_fp16
 
 A = mtl5.matrix_fp16(np.eye(3))
 b = mtl5.vector_fp16(np.ones(3))
-x = mtl5.solve(A, b)     # returns DenseVector_fp16
+x = mtl5.solve(A, b)  # returns DenseVector_fp16
 ```
 
 The `to_numpy()` method converts back to float64 for interop with the NumPy ecosystem.
