@@ -25,11 +25,27 @@ from mtl5._core import (
     IC0_f64,
     ILU0_f32,
     ILU0_f64,
+    KLU_f32,
+    KLU_f64,
+    SparseCholesky_f32,
+    SparseCholesky_f64,
+    SparseLDLT_f32,
+    SparseLDLT_f64,
+    SparseLU_f32,
+    SparseLU_f64,
     SparseMatrix_f32,
     SparseMatrix_f64,
+    SparseQR_f32,
+    SparseQR_f64,
+    SupernodalLDLT_f32,
+    SupernodalLDLT_f64,
+    SupernodalLU_f32,
+    SupernodalLU_f64,
+    _ordering,
     _sparse_bicgstab,
     _sparse_cg,
     _sparse_gmres,
+    orderings,
 )
 from mtl5._core import vector as _vector
 
@@ -320,6 +336,161 @@ def ic0(A):
     return IC0_f64(mat)
 
 
+# ===========================================================================
+# Sparse direct solvers
+#
+# The reason to reach for these over scipy.sparse.linalg.splu:
+#
+#   * analyze / factor / refactor is split, so a sequence of matrices sharing
+#     one sparsity pattern (the circuit-transient case) pays for the ordering
+#     and symbolic analysis once;
+#   * the factor's precision is independent of the residual precision, so a
+#     float32 factorization refined by mtl5.mixed.iterative_refine against a
+#     float64 residual is a genuine mixed-precision direct solve.
+# ===========================================================================
+
+
+def splu(A, ordering: str = "colamd", threshold: float = 1.0, pivot_perturb: float = 0.0):
+    """LU-factorize a square sparse matrix (Gilbert-Peierls, threshold pivoting).
+
+    Accepts an MTL5 or scipy sparse matrix. The dtype of `A` selects the
+    precision of the factors — pass a float32 matrix to factor cheaply and
+    recover accuracy with `mtl5.mixed.iterative_refine`.
+
+    `ordering` is one of `orderings()`: "colamd" (default; column minimum
+    degree, suits unsymmetric matrices), "amd" (symmetric minimum degree),
+    "rcm" (bandwidth reducing) or "natural" (no fill reduction).
+
+    `threshold` is the partial-pivoting threshold: 1.0 is classic partial
+    pivoting, smaller values trade stability for less fill. `pivot_perturb`,
+    if nonzero, replaces a zero pivot instead of raising — check
+    `.num_perturbed` afterwards.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseLU_f32 if mat.dtype == "f32" else SparseLU_f64
+    return cls(mat, ordering, threshold, pivot_perturb)
+
+
+def klu(A, threshold: float = 1.0, scale: bool = True, pivot_perturb: float = 0.0):
+    """Factor a square sparse matrix with native KLU.
+
+    Permutes to block triangular form (Dulmage-Mendelsohn), orders each
+    diagonal block with AMD, and LU-factorizes the blocks. Built for circuit
+    matrices, which are highly reducible — check `.nblocks` to see how much
+    structure was found.
+
+    `scale=True` factors R*A with row equilibration for pivot stability, which
+    matters most in low precision; the RHS is scaled inside `.solve()`.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = KLU_f32 if mat.dtype == "f32" else KLU_f64
+    return cls(mat, threshold, scale, pivot_perturb)
+
+
+def cholesky(A, ordering: str = "amd"):
+    """Cholesky factorization A = L L^T of a symmetric positive definite matrix.
+
+    Cheaper and sparser than `splu` when it applies: it exploits symmetry and
+    does no pivoting. Raises RuntimeError if A turns out not to be positive
+    definite. For a symmetric matrix that may be indefinite, use `ldlt`.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseCholesky_f32 if mat.dtype == "f32" else SparseCholesky_f64
+    return cls(mat, ordering)
+
+
+def ldlt(A, ordering: str = "amd"):
+    """LDL^T factorization of a symmetric matrix.
+
+    Does not require positive definiteness, so it handles symmetric indefinite
+    matrices — inspect `.diagonal()` for the inertia. It does not pivot, so a
+    zero pivot raises RuntimeError.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseLDLT_f32 if mat.dtype == "f32" else SparseLDLT_f64
+    return cls(mat, ordering)
+
+
+def qr(A, ordering: str = "colamd"):
+    """Householder QR for sparse linear least squares.
+
+    Accepts a rectangular (tall) or square matrix; `.solve(b)` returns the
+    least-squares solution of min ||A x - b||_2.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseQR_f32 if mat.dtype == "f32" else SparseQR_f64
+    return cls(mat, ordering)
+
+
+def supernodal_lu(
+    A,
+    ordering: str = "colamd",
+    threshold: float = 1.0,
+    max_super: int = 64,
+    scale: bool = False,
+    pivot_perturb: float = 0.0,
+):
+    """Supernodal LU: columns grouped into supernodes, applied as dense blocks.
+
+    The same factorization as `splu` organised to spend its time in dense block
+    updates instead of scalar sparse ones. `.nsuper` reports how many supernodes
+    were formed. `scale=True` row-equilibrates first, which matters most when
+    the factor precision is narrow.
+
+    `ordering` must be "amd", "colamd" or "rcm" — the supernodal analysis has no
+    natural-ordering path upstream.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SupernodalLU_f32 if mat.dtype == "f32" else SupernodalLU_f64
+    return cls(mat, ordering, threshold, max_super, scale, pivot_perturb)
+
+
+def supernodal_ldlt(A, ordering: str = "amd"):
+    """Supernodal LDL^T of a symmetric matrix, using dense block updates.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SupernodalLDLT_f32 if mat.dtype == "f32" else SupernodalLDLT_f64
+    return cls(mat, ordering)
+
+
+def ordering(A, name: str = "amd"):
+    """Return a fill-reducing permutation of A as an int64 array.
+
+    Exposed separately so an ordering can be inspected, compared, or applied
+    to a scipy matrix directly (`A[p][:, p]`). See `orderings()` for the names.
+    """
+    return _ordering(_coerce_matrix(A), name)
+
+
+def amd(A):
+    """Approximate minimum degree ordering on the pattern of A + A^T."""
+    return ordering(A, "amd")
+
+
+def colamd(A):
+    """Column approximate minimum degree ordering on the pattern of A^T A."""
+    return ordering(A, "colamd")
+
+
+def rcm(A):
+    """Reverse Cuthill-McKee (bandwidth-reducing) ordering."""
+    return ordering(A, "rcm")
+
+
 def as_preconditioner_lo(precond, n: int, dtype=None):
     """Wrap an ILU0/IC0 preconditioner as a scipy LinearOperator.
 
@@ -357,16 +528,42 @@ __all__ = [
     "IC0_f64",
     "ILU0_f32",
     "ILU0_f64",
+    "KLU_f32",
+    "KLU_f64",
+    "SparseCholesky_f32",
+    "SparseCholesky_f64",
+    "SparseLDLT_f32",
+    "SparseLDLT_f64",
+    "SparseLU_f32",
+    "SparseLU_f64",
+    "SparseQR_f32",
+    "SparseQR_f64",
+    "SupernodalLDLT_f32",
+    "SupernodalLDLT_f64",
+    "SupernodalLU_f32",
+    "SupernodalLU_f64",
     "SparseMatrix_f32",
     "SparseMatrix_f64",
+    "amd",
     "as_linear_operator",
     "as_preconditioner_lo",
     "bicgstab",
     "cg",
+    "cholesky",
+    "colamd",
     "csr_matrix",
     "from_scipy",
     "gmres",
     "ic0",
     "ilu0",
+    "klu",
+    "ldlt",
+    "ordering",
+    "orderings",
+    "qr",
+    "rcm",
+    "splu",
+    "supernodal_ldlt",
+    "supernodal_lu",
     "to_scipy",
 ]

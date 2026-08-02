@@ -1470,6 +1470,11 @@ NB_MODULE(_core, m) {
     // already exist in the module.
     register_mixed_precision(m);
 
+    // ----- Sparse direct solvers (separate TU) -------------------------------
+    // After the mixed-precision module, whose `mixed` submodule it extends with
+    // the direct factorizations as refinement factors.
+    register_sparse_direct(m);
+
     // ----- Universal number types (copy-converting from float64) -------------
     // Standard IEEE-style cfloat configurations
     register_universal<fp8>(m, "vector_fp8", "matrix_fp8");

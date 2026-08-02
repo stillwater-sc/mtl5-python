@@ -142,8 +142,17 @@ struct PreconditionerWrapper {
 
     PreconditionerWrapper(const mtl::mat::compressed2D<T>& A)
         : pc(A), n(A.num_rows()) {}
+
+    /// The object mtl::sparse::iterative_refine drives via solve(x, b).
+    /// Every wrapper that can act as a refinement factorization exposes this,
+    /// so one binding template serves preconditioners and direct factors alike.
+    const PC& factor() const { return pc; }
 };
 
 // Registered by mtl5_mixed_precision.cpp — convert(), the accumulator-policy
 // operations, and the iterative-refinement entry points.
 void register_mixed_precision(nb::module_& m);
+
+// Registered by mtl5_sparse_direct.cpp — the sparse direct factorizations and
+// the fill-reducing orderings.
+void register_sparse_direct(nb::module_& m);

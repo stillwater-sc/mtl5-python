@@ -16,7 +16,8 @@ endif()
 
 nanobind_add_module(_core
     src/mtl5_module.cpp
-    src/mtl5_mixed_precision.cpp)
+    src/mtl5_mixed_precision.cpp
+    src/mtl5_sparse_direct.cpp)
 
 # The MTL5 + Universal composition headers we own (mtl/math/quire_accumulator.hpp
 # bridges Universal's quire into MTL5's accumulator_traits). Kept under an
