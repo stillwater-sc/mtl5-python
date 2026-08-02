@@ -32,9 +32,10 @@ def run_fresh(code: str, env_extra: dict[str, str] | None = None):
     env = dict(os.environ)
     env.pop("MTL5_NUM_THREADS", None)
     existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        MTL5_IMPORT_ROOT + os.pathsep + existing if existing else MTL5_IMPORT_ROOT
-    )
+    if existing:
+        env["PYTHONPATH"] = MTL5_IMPORT_ROOT + os.pathsep + existing
+    else:
+        env["PYTHONPATH"] = MTL5_IMPORT_ROOT
     if env_extra:
         env.update(env_extra)
     # A neutral cwd, so the source tree can never shadow the resolved package.
