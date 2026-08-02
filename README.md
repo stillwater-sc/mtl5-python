@@ -34,6 +34,86 @@ x = mtl5.solve(A, b)
 print(x)  # [1.6, 1.8]
 ```
 
+## Mixed precision
+
+A mixed-precision operation has three independent precisions. MTL5 supplies the
+precision-generic kernels, [Universal](https://github.com/stillwater-sc/universal)
+supplies the number systems, and this package composes them:
+
+| | chosen by |
+|---|---|
+| **element** (storage) | the container you pass in — `mtl5.convert(x, "posit16")` |
+| **accumulator** (compute) | `accumulator=` |
+| **result** (delivery) | `result=` |
+
+```python
+import numpy as np, mtl5
+
+x = np.random.default_rng(0).standard_normal(4000)
+v = mtl5.convert(x, "posit16")  # store narrow
+
+mtl5.mixed.dot(v, v)  # accumulate in posit16 too
+mtl5.mixed.dot(v, v, accumulator="f64")  # ...or in double
+mtl5.mixed.dot(v, v, accumulator="quire")  # ...or exactly, in Universal's quire
+```
+
+Accumulating 4000 posit16 products, against the exact value of the same
+posit16 data:
+
+| accumulator | relative error |
+|---|---|
+| none (posit16) | 1.8 × 10⁻¹ |
+| `"f32"` | 3.8 × 10⁻⁷ |
+| `"f64"` | 1.1 × 10⁻¹⁶ |
+| `"fma"` | 1.1 × 10⁻¹⁶ |
+| `"quire"` | **0** — bit-exact |
+
+`mtl5.mixed.accumulators(dtype)` lists what a given element type supports. The
+quire is available for the posit, cfloat, lns and fixpnt families; `f32`/`f64`
+have none (Universal defines no quire for the native types). Exactness varies by
+family — it is genuinely exact for posit and fixpnt, while the cfloat and lns
+quires have known upstream limitations documented in
+`python/include/mtl/math/quire_accumulator.hpp`. The accumulated norms are
+computed locally rather than through `mtl::two_norm<Acc>`, which cannot take a
+quire ([stillwater-sc/mtl5#324](https://github.com/stillwater-sc/mtl5/issues/324)).
+
+`accumulator=` is available on `dot`, `norm` (ord=2), `frobenius_norm`,
+`matvec` and `matmul`.
+
+### Iterative refinement
+
+Factor cheaply in a low precision, then recover accuracy with a residual formed
+in float64:
+
+```python
+x, info = mtl5.mixed.lu_iterative_refine(A, b, working="posit16", rel_tol=1e-14)
+# info -> {'iters': 7, 'rel_residual': ..., 'converged': True}
+mtl5.mixed.backward_error(A, x, b)
+```
+
+On a 100×100 system, forward error of the refined solution:
+
+| working precision | iterations | forward error |
+|---|---|---|
+| `fp16` | 5 | 1.9 × 10⁻⁸ |
+| `posit16` | 7 | 1.9 × 10⁻¹⁵ |
+| `f32` | 2 | 3.8 × 10⁻¹⁶ |
+| `f64` | 0 | 3.1 × 10⁻¹⁶ |
+
+The result is always the *best* iterate found, so an over-long `max_iter` never
+degrades the answer.
+
+`mtl5.mixed.iterative_refine(A, M, b)` is the sparse counterpart, refining
+through any factorization exposing `solve()`. Today that means the ILU(0)/IC(0)
+preconditioners; the sparse direct factorizations that make this the
+mixed-precision workhorse arrive with the sparse-solver bindings.
+
+> **Known upstream defect:** MTL5's `ilu_0::solve` returns wrong values for
+> every input (it sums the diagonal into the off-diagonal term of its back
+> substitution). `mtl5.sparse.ilu0` is affected; IC(0) is correct. Filed as
+> [stillwater-sc/mtl5#323](https://github.com/stillwater-sc/mtl5/issues/323) and
+> pinned by a strict-xfail regression in `tests/test_mixed_precision.py`.
+
 ## Performance
 
 ### Threading

@@ -60,10 +60,13 @@ from mtl5._core import (
     # Build introspection
     build_info,
     cholesky,
+    # Mixed precision
+    convert,
     # Device management
     devices,
     # Operations
     dot,
+    dtypes,
     get_backend,
     # Threading
     get_num_threads,
@@ -83,6 +86,8 @@ from mtl5._core import (
     matrix_posit32,
     matrix_posit64,
     matvec,
+    # Mixed-precision submodule (element / accumulator / result precisions)
+    mixed,
     norm,
     set_backend,
     set_num_threads,
@@ -180,6 +185,10 @@ __all__ = [
     "devices",
     "get_backend",
     "set_backend",
+    # Mixed precision
+    "mixed",
+    "convert",
+    "dtypes",
     # Build introspection & threading
     "build_info",
     "get_num_threads",

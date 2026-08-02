@@ -14,7 +14,15 @@ if(NOT nanobind_FOUND)
     FetchContent_MakeAvailable(nanobind)
 endif()
 
-nanobind_add_module(_core src/mtl5_module.cpp)
+nanobind_add_module(_core
+    src/mtl5_module.cpp
+    src/mtl5_mixed_precision.cpp)
+
+# The MTL5 + Universal composition headers we own (mtl/math/quire_accumulator.hpp
+# bridges Universal's quire into MTL5's accumulator_traits). Kept under an
+# <mtl/...> path so the specialization sits next to the generic trait it extends,
+# matching the mp-* repos that mirror the same header.
+target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Inject the package version from pyproject.toml into the C++ module via a
 # compile definition. scikit-build-core sets SKBUILD_PROJECT_VERSION; a plain
