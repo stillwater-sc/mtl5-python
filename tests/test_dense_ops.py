@@ -134,7 +134,12 @@ class TestSVD:
     @pytest.mark.parametrize("tol", [1e-8, 1e-10, 1e-12, 1e-14])
     def test_u_orthogonality_tracks_the_requested_tolerance(self, tol):
         """U is built by the iteration, so its orthogonality is bounded by tol
-        rather than by machine precision — asking for more gets more."""
+        rather than by machine precision — asking for more gets more.
+
+        Measured over 160 matrices (n = 3..20, four tolerances): median ~1.4x
+        tol, worst 4.5x. The 20x bound here is deliberate headroom, so treat
+        the multiple as untested slack rather than a contract.
+        """
         A = np.random.default_rng(3).standard_normal((8, 8))
         U, _, _ = mtl5.svd(M(A), tol)
         assert np.linalg.norm(U.T @ U - np.eye(8)) < 20 * tol

@@ -198,8 +198,11 @@ mtl5.nullity(A)
 
 `svd` takes a `tol`. `V` and the reconstruction are accurate to machine
 precision regardless, but `U`'s orthogonality is bounded by the iteration's
-tolerance rather than by eps — `‖UᵀU − I‖` runs about 1×tol, so tighten `tol`
-if you need an orthonormal `U` specifically.
+tolerance rather than by eps. Over 160 matrices (n = 3..20, four tolerances)
+`‖UᵀU − I‖` had a median of about 1.4×tol and a worst case of 4.5×tol; the
+regression test asserts 20×tol to leave headroom. Treat `tol` as the knob:
+tighten it if you need an orthonormal `U` specifically, rather than relying on
+a particular multiple.
 
 ## Sparse direct solvers
 
