@@ -44,7 +44,8 @@ before you do any work:
 
 ```python
 import mtl5
-mtl5.set_num_threads(8)     # must precede the first MTL5 operation
+
+mtl5.set_num_threads(8)  # must precede the first MTL5 operation
 print(mtl5.get_num_threads())
 ```
 
