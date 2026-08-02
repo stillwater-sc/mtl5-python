@@ -27,10 +27,20 @@ from mtl5._core import (
     ILU0_f64,
     KLU_f32,
     KLU_f64,
+    SparseCholesky_f32,
+    SparseCholesky_f64,
+    SparseLDLT_f32,
+    SparseLDLT_f64,
     SparseLU_f32,
     SparseLU_f64,
     SparseMatrix_f32,
     SparseMatrix_f64,
+    SparseQR_f32,
+    SparseQR_f64,
+    SupernodalLDLT_f32,
+    SupernodalLDLT_f64,
+    SupernodalLU_f32,
+    SupernodalLU_f64,
     _ordering,
     _sparse_bicgstab,
     _sparse_cg,
@@ -381,6 +391,82 @@ def klu(A, threshold: float = 1.0, scale: bool = True, pivot_perturb: float = 0.
     return cls(mat, threshold, scale, pivot_perturb)
 
 
+def cholesky(A, ordering: str = "amd"):
+    """Cholesky factorization A = L L^T of a symmetric positive definite matrix.
+
+    Cheaper and sparser than `splu` when it applies: it exploits symmetry and
+    does no pivoting. Raises RuntimeError if A turns out not to be positive
+    definite. For a symmetric matrix that may be indefinite, use `ldlt`.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseCholesky_f32 if mat.dtype == "f32" else SparseCholesky_f64
+    return cls(mat, ordering)
+
+
+def ldlt(A, ordering: str = "amd"):
+    """LDL^T factorization of a symmetric matrix.
+
+    Does not require positive definiteness, so it handles symmetric indefinite
+    matrices — inspect `.diagonal()` for the inertia. It does not pivot, so a
+    zero pivot raises RuntimeError.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseLDLT_f32 if mat.dtype == "f32" else SparseLDLT_f64
+    return cls(mat, ordering)
+
+
+def qr(A, ordering: str = "colamd"):
+    """Householder QR for sparse linear least squares.
+
+    Accepts a rectangular (tall) or square matrix; `.solve(b)` returns the
+    least-squares solution of min ||A x - b||_2.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SparseQR_f32 if mat.dtype == "f32" else SparseQR_f64
+    return cls(mat, ordering)
+
+
+def supernodal_lu(
+    A,
+    ordering: str = "colamd",
+    threshold: float = 1.0,
+    max_super: int = 64,
+    scale: bool = False,
+    pivot_perturb: float = 0.0,
+):
+    """Supernodal LU: columns grouped into supernodes, applied as dense blocks.
+
+    The same factorization as `splu` organised to spend its time in dense block
+    updates instead of scalar sparse ones. `.nsuper` reports how many supernodes
+    were formed. `scale=True` row-equilibrates first, which matters most when
+    the factor precision is narrow.
+
+    `ordering` must be "amd", "colamd" or "rcm" — the supernodal analysis has no
+    natural-ordering path upstream.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SupernodalLU_f32 if mat.dtype == "f32" else SupernodalLU_f64
+    return cls(mat, ordering, threshold, max_super, scale, pivot_perturb)
+
+
+def supernodal_ldlt(A, ordering: str = "amd"):
+    """Supernodal LDL^T of a symmetric matrix, using dense block updates.
+
+    The returned object exposes `.solve(b)` and `.refactor(A2)`.
+    """
+    mat = _coerce_matrix(A)
+    cls = SupernodalLDLT_f32 if mat.dtype == "f32" else SupernodalLDLT_f64
+    return cls(mat, ordering)
+
+
 def ordering(A, name: str = "amd"):
     """Return a fill-reducing permutation of A as an int64 array.
 
@@ -444,8 +530,18 @@ __all__ = [
     "ILU0_f64",
     "KLU_f32",
     "KLU_f64",
+    "SparseCholesky_f32",
+    "SparseCholesky_f64",
+    "SparseLDLT_f32",
+    "SparseLDLT_f64",
     "SparseLU_f32",
     "SparseLU_f64",
+    "SparseQR_f32",
+    "SparseQR_f64",
+    "SupernodalLDLT_f32",
+    "SupernodalLDLT_f64",
+    "SupernodalLU_f32",
+    "SupernodalLU_f64",
     "SparseMatrix_f32",
     "SparseMatrix_f64",
     "amd",
@@ -453,6 +549,7 @@ __all__ = [
     "as_preconditioner_lo",
     "bicgstab",
     "cg",
+    "cholesky",
     "colamd",
     "csr_matrix",
     "from_scipy",
@@ -460,9 +557,13 @@ __all__ = [
     "ic0",
     "ilu0",
     "klu",
+    "ldlt",
     "ordering",
     "orderings",
+    "qr",
     "rcm",
     "splu",
+    "supernodal_ldlt",
+    "supernodal_lu",
     "to_scipy",
 ]

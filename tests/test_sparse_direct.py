@@ -26,10 +26,16 @@ def laplacian_2d(k: int):
 
 
 def perturbed(A, seed: int):
-    """Same sparsity pattern, different values."""
-    B = A.copy()
-    B.data = A.data * (1.0 + 0.01 * np.sin(seed * np.arange(A.nnz)))
-    return B
+    """Same sparsity pattern, different values — and symmetry preserved.
+
+    The scaling is a function of (row + col), which is symmetric, so a
+    symmetric A stays symmetric. Scaling by linear index instead would quietly
+    break symmetry, and the Cholesky/LDL^T factorizations would then solve a
+    different (implicitly symmetrized) system than A2 @ x produced.
+    """
+    B = A.tocoo()
+    factor = 1.0 + 0.01 * np.sin(seed * (B.row + B.col).astype(np.float64))
+    return sp.coo_matrix((B.data * factor, (B.row, B.col)), shape=A.shape).tocsr()
 
 
 @pytest.fixture
@@ -272,3 +278,145 @@ class TestMixedPrecisionDirectSolve:
         wrong = ms.splu(laplacian_2d(6))
         with pytest.raises(ValueError, match="does not match A"):
             mtl5.mixed.iterative_refine(Ad, wrong, b)
+
+
+# ===========================================================================
+# The symmetric and least-squares factorizations
+# ===========================================================================
+
+ALL_SQUARE = ["splu", "klu", "cholesky", "ldlt", "supernodal_lu", "supernodal_ldlt"]
+
+
+class TestSymmetricFactorizations:
+    @pytest.mark.parametrize("kind", ALL_SQUARE)
+    def test_every_square_factorization_solves(self, kind, system):
+        A, xt, b = system
+        fac = getattr(ms, kind)(A)
+        x = fac.solve(b).to_numpy()
+        assert np.linalg.norm(x - xt) / np.linalg.norm(xt) < 1e-11, kind
+
+    @pytest.mark.parametrize("kind", ALL_SQUARE)
+    def test_every_square_factorization_refactors(self, kind, system):
+        """refactor must agree with a fresh factorization of the same matrix."""
+        A, _, _ = system
+        A2 = perturbed(A, 5)
+        rng = np.random.default_rng(9)
+        xt = rng.standard_normal(A.shape[0])
+        b = A2 @ xt
+
+        fac = getattr(ms, kind)(A)
+        fac.refactor(ms.from_scipy(A2))
+        got = fac.solve(b).to_numpy()
+
+        fresh = getattr(ms, kind)(A2).solve(b).to_numpy()
+        np.testing.assert_allclose(got, fresh, rtol=1e-9, err_msg=kind)
+        assert np.linalg.norm(got - xt) / np.linalg.norm(xt) < 1e-11, kind
+
+    def test_cholesky_is_sparser_than_lu(self, system):
+        """Exploiting symmetry must pay off in fill, or it is not doing so."""
+        A, _, _ = system
+        assert ms.cholesky(A, ordering="amd").nnz < ms.splu(A, ordering="amd").nnz
+
+    def test_cholesky_rejects_indefinite(self):
+        A = sp.csr_matrix(np.diag([1.0, -2.0, 3.0]))
+        with pytest.raises(RuntimeError):
+            ms.cholesky(A)
+
+    def test_ldlt_diagonal_reveals_inertia(self):
+        """LDL^T handles what Cholesky refuses, and D's signs say why."""
+        A = sp.csr_matrix(np.array([[2.0, 1.0], [1.0, -3.0]]))
+        fac = ms.ldlt(A)
+        d = fac.diagonal()
+        assert d.shape == (2,)
+        assert (d < 0).any(), "an indefinite matrix must show a negative pivot"
+
+    def test_supernodal_lu_forms_supernodes(self, system):
+        A, _, _ = system
+        assert ms.supernodal_lu(A).nsuper > 0
+
+    def test_supernodal_lu_rejects_natural_ordering(self, system):
+        A, _, _ = system
+        with pytest.raises(ValueError, match="must be 'amd', 'colamd' or 'rcm'"):
+            ms.supernodal_lu(A, ordering="natural")
+
+    def test_supernodal_lu_scaled_variant(self, system):
+        A, xt, b = system
+        x = ms.supernodal_lu(A, scale=True).solve(b).to_numpy()
+        assert np.linalg.norm(x - xt) / np.linalg.norm(xt) < 1e-11
+
+    @pytest.mark.parametrize("kind", ["cholesky", "ldlt", "supernodal_ldlt"])
+    def test_symmetric_factorizations_reject_non_square(self, kind):
+        A = sp.random(4, 6, density=0.5, format="csr", random_state=0)
+        with pytest.raises(ValueError, match="must be square"):
+            getattr(ms, kind)(A)
+
+
+class TestSparseQR:
+    @pytest.fixture
+    def lstsq(self):
+        rng = np.random.default_rng(4)
+        m, n = 300, 60
+        A = sp.random(m, n, density=0.06, format="csr", random_state=3)
+        A = (A + sp.eye(m, n, format="csr")).tocsr()
+        b = rng.standard_normal(m)
+        return A, b
+
+    def test_matches_numpy_lstsq(self, lstsq):
+        A, b = lstsq
+        x = np.asarray(ms.qr(A).solve(b).to_numpy(), dtype=np.float64)
+        ref = np.linalg.lstsq(A.toarray(), b, rcond=None)[0]
+        assert np.linalg.norm(x - ref) / np.linalg.norm(ref) < 1e-9
+
+    def test_square_system(self, system):
+        A, xt, b = system
+        x = np.asarray(ms.qr(A).solve(b).to_numpy(), dtype=np.float64)
+        assert np.linalg.norm(x - xt) / np.linalg.norm(xt) < 1e-10
+
+    def test_shape_and_metadata(self, lstsq):
+        A, _ = lstsq
+        fac = ms.qr(A)
+        assert fac.shape == A.shape
+        assert fac.dtype == "f64"
+        assert fac.nnz > 0
+        assert "SparseQR_f64" in repr(fac)
+
+    def test_refactor(self, lstsq):
+        A, b = lstsq
+        A2 = perturbed(A, 13)
+        fac = ms.qr(A)
+        fac.refactor(ms.from_scipy(A2))
+        x = np.asarray(fac.solve(b).to_numpy(), dtype=np.float64)
+        ref = np.linalg.lstsq(A2.toarray(), b, rcond=None)[0]
+        assert np.linalg.norm(x - ref) / np.linalg.norm(ref) < 1e-9
+
+    def test_rejects_underdetermined(self):
+        A = sp.random(20, 50, density=0.2, format="csr", random_state=0)
+        with pytest.raises(ValueError, match="num_rows >= num_cols"):
+            ms.qr(A)
+
+    def test_rhs_length_checked(self, lstsq):
+        A, _ = lstsq
+        with pytest.raises(ValueError, match="does not match the row count"):
+            ms.qr(A).solve(np.ones(7))
+
+
+class TestRefineThroughEveryFactorization:
+    """Every square factorization must be usable as a refinement factor, and a
+    float32 one must recover float64 accuracy."""
+
+    @pytest.fixture
+    def system(self):
+        A = laplacian_2d(18)
+        rng = np.random.default_rng(6)
+        x = rng.standard_normal(A.shape[0])
+        return A, x, A @ x
+
+    @pytest.mark.parametrize("kind", ALL_SQUARE)
+    def test_float32_factor_refines_to_float64(self, kind, system):
+        A, xt, b = system
+        Ad = ms.from_scipy(A)
+        fac32 = getattr(ms, kind)(A.astype(np.float32))
+        x, info = mtl5.mixed.iterative_refine(Ad, fac32, b, max_iter=50, rel_tol=1e-14)
+        err = np.linalg.norm(x - xt) / np.linalg.norm(xt)
+        assert info["converged"], kind
+        assert err < 1e-12, f"{kind}: {err:.2e}"

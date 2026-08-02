@@ -115,6 +115,18 @@ below, or the ILU(0)/IC(0) preconditioners.
 
 ## Sparse direct solvers
 
+Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:
+
+| | for | notes |
+|---|---|---|
+| `ms.splu` | general square | Gilbert–Peierls, threshold pivoting |
+| `ms.klu` | circuit matrices | block triangular form + per-block LU |
+| `ms.supernodal_lu` | general square | dense block updates; `.nsuper` |
+| `ms.cholesky` | symmetric positive definite | cheapest when it applies |
+| `ms.ldlt` | symmetric, possibly indefinite | `.diagonal()` gives the inertia |
+| `ms.supernodal_ldlt` | symmetric | dense block updates |
+| `ms.qr` | least squares, rectangular | `min ‖Ax − b‖₂` |
+
 ```python
 import mtl5.sparse as ms
 
@@ -131,18 +143,28 @@ k.nblocks                         # how reducible the matrix turned out to be
 Two things `scipy.sparse.linalg.splu` cannot do.
 
 **Refactorization.** A sequence of matrices sharing one sparsity pattern — the
-circuit-transient case — pays for the ordering and symbolic analysis once.
-Measured here, factor vs. refactor:
+circuit-transient case — pays for the ordering and symbolic analysis once. On a
+2-D Laplacian, n=3600, nnz(A)=17,760:
 
-| matrix | analyze+factor | refactor | speedup |
-|---|---|---|---|
-| 2-D Laplacian, n=3600 | 7.3 ms | 2.1 ms | **3.5×** |
-| tridiagonal, n=20000 | 4.8 ms | 1.7 ms | **2.8×** |
+| | nnz(factor) | factor | refactor | speedup |
+|---|---|---|---|---|
+| `splu` | 205,636 | 12.5 ms | 4.5 ms | 2.8× |
+| `klu` | 119,530 | 6.7 ms | 2.2 ms | 3.0× |
+| `supernodal_lu` | 205,636 | 19.6 ms | 4.0 ms | **5.0×** |
+| `cholesky` | 59,765 | 22.3 ms | 20.8 ms | 1.1× |
+| `ldlt` | 56,165 | 8.4 ms | 7.0 ms | 1.2× |
+| `supernodal_ldlt` | 56,165 | 4.7 ms | 2.2 ms | 2.1× |
 
-The win comes from skipping analysis, so it scales with how much of the total
-is analysis. On a matrix whose fill is catastrophic — a dense-ish random
-pattern — numeric work dominates and refactor is no faster (we measured a
-slight loss). Structured sparsity is where it pays.
+Two things to read off that table. Exploiting symmetry cuts the fill to about a
+quarter, and `supernodal_ldlt` is both the sparsest and the fastest option for a
+symmetric matrix. And the refactor win is small for `cholesky`/`ldlt` — they do
+not pivot, so their analysis is a cheap symbolic pass and there is little to
+skip; the LU-family factorizations, which must otherwise redo ordering *and* the
+pivot search, gain the most.
+
+The saving is the analysis, so it scales with how much of the runtime that is.
+On a random pattern with catastrophic fill, numeric work dominates and refactor
+is no faster (we measured a slight loss). Structured sparsity is where it pays.
 
 **A factor narrower than the residual.** The factor's precision is chosen by
 the dtype of `A`, independent of the precision you refine in:
@@ -161,7 +183,9 @@ On a 2-D Laplacian, n=1600:
 | **float32 factor + float64 refinement** (3 iters) | **7.0 × 10⁻¹⁶** |
 
 Half the factorization memory and traffic, and the refined answer is *better*
-than the float64 direct solve.
+than the float64 direct solve. Every square factorization above works this way;
+`qr` is excluded because least squares is not the square system refinement
+corrects.
 
 ### Orderings
 
