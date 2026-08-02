@@ -104,15 +104,85 @@ The result is always the *best* iterate found, so an over-long `max_iter` never
 degrades the answer.
 
 `mtl5.mixed.iterative_refine(A, M, b)` is the sparse counterpart, refining
-through any factorization exposing `solve()`. Today that means the ILU(0)/IC(0)
-preconditioners; the sparse direct factorizations that make this the
-mixed-precision workhorse arrive with the sparse-solver bindings.
+through any factorization exposing `solve()` — the sparse direct factorizations
+below, or the ILU(0)/IC(0) preconditioners.
 
 > **Known upstream defect:** MTL5's `ilu_0::solve` returns wrong values for
 > every input (it sums the diagonal into the off-diagonal term of its back
 > substitution). `mtl5.sparse.ilu0` is affected; IC(0) is correct. Filed as
 > [stillwater-sc/mtl5#323](https://github.com/stillwater-sc/mtl5/issues/323) and
 > pinned by a strict-xfail regression in `tests/test_mixed_precision.py`.
+
+## Sparse direct solvers
+
+```python
+import mtl5.sparse as ms
+
+lu = ms.splu(A, ordering="amd")   # analyze (ordering + symbolic) then factor
+x  = lu.solve(b)
+
+lu.refactor(A2)                   # numeric only — same pattern, new values
+x2 = lu.solve(b2)
+
+k = ms.klu(A)                     # block triangular form + per-block LU
+k.nblocks                         # how reducible the matrix turned out to be
+```
+
+Two things `scipy.sparse.linalg.splu` cannot do.
+
+**Refactorization.** A sequence of matrices sharing one sparsity pattern — the
+circuit-transient case — pays for the ordering and symbolic analysis once.
+Measured here, factor vs. refactor:
+
+| matrix | analyze+factor | refactor | speedup |
+|---|---|---|---|
+| 2-D Laplacian, n=3600 | 7.3 ms | 2.1 ms | **3.5×** |
+| tridiagonal, n=20000 | 4.8 ms | 1.7 ms | **2.8×** |
+
+The win comes from skipping analysis, so it scales with how much of the total
+is analysis. On a matrix whose fill is catastrophic — a dense-ish random
+pattern — numeric work dominates and refactor is no faster (we measured a
+slight loss). Structured sparsity is where it pays.
+
+**A factor narrower than the residual.** The factor's precision is chosen by
+the dtype of `A`, independent of the precision you refine in:
+
+```python
+lu32 = ms.splu(A.astype(np.float32), ordering="amd")
+x, info = mtl5.mixed.iterative_refine(ms.from_scipy(A), lu32, b, rel_tol=1e-14)
+```
+
+On a 2-D Laplacian, n=1600:
+
+| | forward error |
+|---|---|
+| float64 factor, direct solve | 2.0 × 10⁻¹⁵ |
+| float32 factor, direct solve | 8.9 × 10⁻⁷ |
+| **float32 factor + float64 refinement** (3 iters) | **7.0 × 10⁻¹⁶** |
+
+Half the factorization memory and traffic, and the refined answer is *better*
+than the float64 direct solve.
+
+### Orderings
+
+`ms.orderings()` lists `amd`, `colamd`, `rcm` and `natural`. Each is also
+available standalone as a permutation, for inspection or for use on a scipy
+matrix directly:
+
+```python
+p = ms.amd(A)          # or ms.colamd(A), ms.rcm(A), ms.ordering(A, name)
+A[p][:, p]
+```
+
+The choice matters. Nonzeros in L+U for the 2-D Laplacian above (n=1600,
+7840 nonzeros in A):
+
+| ordering | `amd` | `colamd` | `rcm` | `natural` |
+|---|---|---|---|---|
+| nnz(L+U) | 41,542 | 62,944 | 90,040 | 128,078 |
+
+`colamd` is the default because it suits unsymmetric matrices; `amd` is the
+better choice when the pattern is symmetric, as here.
 
 ## Performance
 

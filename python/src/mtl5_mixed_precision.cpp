@@ -29,7 +29,7 @@
 #include <mtl/operation/mult.hpp>
 #include <mtl/operation/lu_iterative_refine.hpp>
 #include <mtl/operation/backward_error.hpp>
-#include <mtl/sparse/iterative_refine.hpp>
+#include "mtl5_sparse_refine.hpp"
 #include <mtl/itl/pc/ilu_0.hpp>
 #include <mtl/itl/pc/ic_0.hpp>
 
@@ -503,66 +503,13 @@ nb::dict refine_result_dict(const mtl::lu_refine_result& r) {
 // ===========================================================================
 // Sparse iterative refinement through a factorization
 //
-// mtl::sparse::iterative_refine accepts anything exposing solve(dx, r). Today
-// the bound candidates are ILU(0)/IC(0); the sparse direct factorizations
-// (sparse_lu, native_klu) land in Phase 2 and are where a genuinely
-// low-precision factor makes this the mixed-precision workhorse it is meant to
-// be. With an incomplete factor this is preconditioned Richardson — a real
-// method, but not yet the mixed-precision story.
-//
-// NOTE: ilu_0 is currently broken upstream (stillwater-sc/mtl5#323) — its
-// back substitution double-counts the diagonal — so IC(0) is the only
-// factorization here that refines correctly today.
+// The binding template lives in mtl5_sparse_refine.hpp so the sparse direct
+// factorizations (registered in their own TU) can reuse it. Bound here for the
+// preconditioners; a low-precision DIRECT factor is where the mixed-precision
+// payoff actually lives.
 // ===========================================================================
 using ILU0d = PreconditionerWrapper<mtl::itl::pc::ilu_0<double>, double>;
 using IC0d  = PreconditionerWrapper<mtl::itl::pc::ic_0<double>, double>;
-
-template <typename PCWrap>
-std::pair<nb::ndarray<nb::numpy, double, nb::ndim<1>>, nb::dict>
-sparse_refine(const mtl::mat::compressed2D<double>& A, const PCWrap& M,
-              nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np,
-              int max_iter, double rel_tol, bool scaled, int patience) {
-    const std::size_t n = A.num_rows();
-    if (A.num_cols() != n)
-        throw std::invalid_argument("iterative_refine: A must be square");
-    if (b_np.shape(0) != n)
-        throw std::invalid_argument("iterative_refine: len(b) must match A");
-    if (M.n != n)
-        throw std::invalid_argument(
-            "iterative_refine: factorization size " + std::to_string(M.n) +
-            " does not match A (" + std::to_string(n) + ")");
-    if (patience < 1)
-        throw std::invalid_argument("iterative_refine: patience must be >= 1");
-    const double* bp = b_np.data();
-
-    mtl::sparse::refine_options opt;
-    opt.max_iter = max_iter;
-    opt.rel_tol  = rel_tol;
-    opt.scaled   = scaled;
-    opt.patience = patience;
-
-    double* buf = new double[n];
-    mtl::sparse::refine_result res;
-    try {
-        nogil guard;
-        mtl::vec::dense_vector<double> b(n), x(n, 0.0);
-        for (std::size_t i = 0; i < n; ++i) b[i] = bp[i];
-        res = mtl::sparse::iterative_refine(A, M.pc, b, x, opt);
-        for (std::size_t i = 0; i < n; ++i) buf[i] = x[i];
-    } catch (...) {
-        delete[] buf;   // no capsule owns it yet
-        throw;
-    }
-
-    std::size_t shape[1] = { n };
-    nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<double*>(p); });
-    auto out = nb::ndarray<nb::numpy, double, nb::ndim<1>>(buf, 1, shape, owner);
-    nb::dict d;
-    d["iters"]        = res.iters;
-    d["rel_residual"] = res.rel_residual;
-    d["converged"]    = res.converged;
-    return std::make_pair(out, d);
-}
 
 }  // namespace
 
@@ -690,12 +637,10 @@ void register_mixed_precision(nb::module_& m) {
        "Normwise backward error ||b - Ax||_inf / (||A||_inf ||x||_inf + ||b||_inf)");
 
     // ----- Sparse iterative refinement through a factorization ---------------
-    mx.def("iterative_refine", &sparse_refine<ILU0d>,
+    mx.def("iterative_refine", &sparse_refine_through<ILU0d>,
            "A"_a, "M"_a, "b"_a, "max_iter"_a = 20, "rel_tol"_a = 0.0,
-           "scaled"_a = false, "patience"_a = 3,
-           "Refine a solution of A x = b through a factorization M exposing "
-           "solve(). Returns (x, info).");
-    mx.def("iterative_refine", &sparse_refine<IC0d>,
+           "scaled"_a = false, "patience"_a = 3, kRefineDoc);
+    mx.def("iterative_refine", &sparse_refine_through<IC0d>,
            "A"_a, "M"_a, "b"_a, "max_iter"_a = 20, "rel_tol"_a = 0.0,
            "scaled"_a = false, "patience"_a = 3);
 }
