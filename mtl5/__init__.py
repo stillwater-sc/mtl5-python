@@ -3,6 +3,8 @@
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
+import mtl5._core as _core
+
 # Single source of truth: pyproject.toml → installed package metadata.
 # The C++ module also reads this at build time via CMake.
 # Falls back to the C++ extension's version when running from a source tree
@@ -108,6 +110,86 @@ from mtl5._core import (
 )
 from mtl5._core import det as _det
 
+_UNIVERSAL_DTYPES = (
+    "fp8",
+    "fp16",
+    "posit8",
+    "posit16",
+    "posit32",
+    "posit64",
+    "fixpnt8",
+    "fixpnt16",
+    "lns16",
+    "lns32",
+)
+
+
+_NUMPY_TO_MTL5 = {"float32": "f32", "float64": "f64"}
+
+
+def _as_mtl5_matrix(prefix: str, A):
+    """Normalize A to (mtl5_matrix, dtype_suffix).
+
+    Accepts an MTL5 matrix from mtl5.matrix()/mtl5.convert(), or a NumPy
+    float32/float64 array, which is wrapped zero-copy — matching what
+    mtl5.cholesky() has always accepted.
+    """
+    import numpy as _np
+
+    if isinstance(A, _np.ndarray):
+        suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
+        if suffix is None:
+            raise TypeError(
+                f"{prefix.lower()}: NumPy arrays must be float32 or float64, "
+                f"got {A.dtype.name}. For another number system, convert first: "
+                f"mtl5.convert(a, 'posit32')."
+            )
+        return matrix(_np.ascontiguousarray(A)), suffix
+
+    dt = getattr(A, "dtype", None)
+    if not isinstance(dt, str):
+        raise TypeError(
+            f"{prefix.lower()}: expected an MTL5 matrix (from mtl5.matrix() or "
+            f"mtl5.convert()) or a NumPy array, got {type(A).__name__}"
+        )
+    return A, dt
+
+
+def _factor(prefix: str, A):
+    """Construct the Factor class matching A's element type."""
+    mat, dt = _as_mtl5_matrix(prefix, A)
+    cls = getattr(_core, f"{prefix}_{dt}", None)
+    if cls is None:
+        raise TypeError(f"{prefix.lower()} is not available for dtype '{dt}'")
+    return cls(mat)
+
+
+def qr(A):
+    """Householder QR of a tall-or-square matrix.
+
+    Returns a factorization exposing `.solve(b)` (least squares), `.Q` and `.R`.
+    """
+    return _factor("QRFactor", A)
+
+
+def lq(A):
+    """Householder LQ. Returns a factorization exposing `.L` and `.Q`."""
+    return _factor("LQFactor", A)
+
+
+def ldlt(A):
+    """LDL^T factorization of a symmetric matrix.
+
+    Takes no square roots, so unlike `cholesky` it tolerates an indefinite
+    matrix; `.diagonal()` returns D, whose signs give the inertia. It does not
+    pivot, so a zero pivot raises.
+
+    Available for float32/float64 and every Universal dtype, which is what
+    makes a Cholesky-versus-LDL^T comparison across number systems possible.
+    """
+    return _factor("LDLTFactor", A)
+
+
 # Convenience aliases — default to f64
 DenseVector = DenseVector_f64
 DenseMatrix = DenseMatrix_f64
@@ -119,6 +201,22 @@ CholeskyFactor = CholeskyFactor_f64
 def det(A):
     """Compute the determinant of a matrix via LU factorization."""
     return _det(A)
+
+
+_native_cholesky = cholesky
+
+
+def cholesky(A):  # noqa: F811
+    """Cholesky factorization A = L L^T of a symmetric positive definite matrix.
+
+    Accepts float32/float64 matrices and NumPy arrays, and — since Phase 3 —
+    the Universal dtypes as well, so it can be compared against `ldlt` in the
+    same precision.
+    """
+    dt = getattr(A, "dtype", None)
+    if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
+        return getattr(_core, f"CholeskyFactor_{dt}")(A)
+    return _native_cholesky(A)
 
 
 # Optional pandas extension types — only loaded if pandas is installed
@@ -195,6 +293,9 @@ __all__ = [
     "set_num_threads",
     # Operations
     "cholesky",
+    "ldlt",
+    "lq",
+    "qr",
     "det",
     "dot",
     "inv",

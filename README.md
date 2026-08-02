@@ -113,6 +113,48 @@ below, or the ILU(0)/IC(0) preconditioners.
 > [stillwater-sc/mtl5#323](https://github.com/stillwater-sc/mtl5/issues/323) and
 > pinned by a strict-xfail regression in `tests/test_mixed_precision.py`.
 
+## Dense factorizations
+
+```python
+qr = mtl5.qr(A)  # Householder QR; tall or square
+x = qr.solve(b)  # least squares
+qr.Q, qr.R
+
+lq = mtl5.lq(A)  # the row-space counterpart
+lq.L, lq.Q
+
+ld = mtl5.ldlt(A)  # symmetric, indefinite allowed
+ld.solve(b)
+ld.diagonal()  # D — its signs are the inertia
+```
+
+All accept an MTL5 matrix or a float32/float64 NumPy array, alongside the
+existing `mtl5.lu` and `mtl5.cholesky`.
+
+### Cholesky vs LDLᵀ across number systems
+
+`ldlt` and `cholesky` are both available for **every** element type, which is
+what makes the interesting comparison possible. Cholesky takes square roots, so
+it refuses a matrix that has drifted out of positive-definiteness — the failure
+mode of a Kalman covariance update in low precision. LDLᵀ has no square roots,
+survives, and records what happened in `D`:
+
+```python
+P = np.eye(6)
+P[3, 3] = -1e-3  # covariance went indefinite
+
+mtl5.cholesky(mtl5.convert(P, "posit16"))  # RuntimeError: not SPD
+d = mtl5.ldlt(mtl5.convert(P, "posit16")).diagonal()
+(d < 0).any()  # True — D names the bad direction
+```
+
+> **Bunch–Kaufman is not exposed.** It is the pivoting variant you would
+> normally reach for when plain LDLᵀ hits a zero pivot, but MTL5's `ldlt_bk`
+> returns a wrong solution whenever it interchanges — backward error ~1e-1
+> under a success code. Filed as
+> [stillwater-sc/mtl5#335](https://github.com/stillwater-sc/mtl5/issues/335);
+> the binding is withheld until that is fixed.
+
 ## Sparse direct solvers
 
 Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:
