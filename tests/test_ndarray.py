@@ -69,6 +69,16 @@ class TestConstruction:
     def test_zeros_f32(self):
         assert A.zeros([4], dtype="f32").dtype == "f32"
 
+    def test_owning_arrays_report_no_owner(self):
+        """NDArrayView's owner defaults to a NULL handle rather than
+        nb::none(), because copy/arithmetic/axis-reductions build one inside a
+        nogil scope and increfing Py_None there is a data race. This pins the
+        behaviour that default stands for."""
+        x = A.asarray(arange(2, 3))
+        assert not x.copy().is_view
+        assert not (x + x).is_view
+        assert not x.sum_axis(0).is_view
+
     def test_zeros_rejects_other_dtypes(self):
         with pytest.raises(ValueError, match="f32.*f64"):
             A.zeros([4], dtype="posit16")
@@ -86,6 +96,36 @@ class TestConstruction:
         aliased. That has to say so rather than produce garbage."""
         with pytest.raises(ValueError, match="negative strides"):
             A.asarray(arange(4)[::-1])
+
+
+class TestAsarrayDoesNotConvert:
+    """`asarray` is documented zero-copy, so it must require an exact dtype
+    match. A converting overload would return a view of a temporary — neither
+    zero-copy nor the dtype asked for. Before `.noconvert()`, an int64 array
+    silently became float32 while still reporting `is_view = True`."""
+
+    def test_integer_input_is_refused(self):
+        with pytest.raises(TypeError):
+            A.asarray(np.arange(6, dtype=np.int64))
+
+    def test_exact_dtypes_are_preserved(self):
+        assert A.asarray(np.arange(4, dtype=np.float32)).dtype == "f32"
+        assert A.asarray(np.arange(4, dtype=np.float64)).dtype == "f64"
+
+    def test_float32_is_not_widened_to_float64(self):
+        """Registration order used to decide this; now nothing converts."""
+        a = np.arange(4, dtype=np.float32)
+        x = A.asarray(a)
+        assert x.dtype == "f32"
+        x[[0]] = 7.0
+        assert a[0] == 7.0, "still the same buffer"
+
+    def test_read_only_input_is_refused(self):
+        """The view aliases the buffer, so it has to be writable."""
+        a = np.arange(6.0)
+        a.flags.writeable = False
+        with pytest.raises(TypeError):
+            A.asarray(a)
 
 
 class TestElementAccess:
@@ -108,6 +148,20 @@ class TestElementAccess:
 
     def test_len_is_the_first_extent(self):
         assert len(A.asarray(arange(7, 2))) == 7
+
+    def test_setitem_accepts_negative_indices(self):
+        """__getitem__ normalises them, so __setitem__ must agree — it used to
+        reject them with a TypeError from the cast."""
+        a = arange(2, 3)
+        x = A.asarray(a)
+        x[[-1, 0]] = 9.0
+        assert a[1, 0] == 9.0
+        assert x[-1, 0] == 9.0, "read and write must agree on what -1 means"
+
+    def test_setitem_out_of_range_negative(self):
+        x = A.asarray(arange(2, 3))
+        with pytest.raises(IndexError, match="axis 0"):
+            x[[-9, 0]] = 1.0
 
 
 class TestTranspose:

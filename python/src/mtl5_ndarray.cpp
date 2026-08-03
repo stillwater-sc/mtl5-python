@@ -54,16 +54,23 @@ namespace {
 namespace ma = mtl::array;
 
 /// An ndarray plus, when it borrows NumPy memory, the object owning it.
+///
+/// `owner` defaults to a NULL handle rather than `nb::none()`. That matters:
+/// `copy`, the arithmetic operators and the axis reductions all construct an
+/// NDArrayView inside a `nogil` scope, and `nb::none()` would incref Py_None
+/// with the GIL released -- a data race on any interpreter that refcounts it
+/// (CPython < 3.12, and free-threaded builds). A NULL handle touches nothing:
+/// nanobind's copy path is Py_XINCREF, which is a no-op on null.
 template <typename T, std::size_t N>
 struct NDArrayView {
     ma::ndarray<T, N> arr;
-    nb::object owner;
+    nb::object owner;   // NULL when this array owns its memory
 
     NDArrayView() = default;
-    explicit NDArrayView(ma::ndarray<T, N> a, nb::object o = nb::none())
+    explicit NDArrayView(ma::ndarray<T, N> a, nb::object o = nb::object())
         : arr(std::move(a)), owner(std::move(o)) {}
 
-    bool is_view() const { return arr.is_view() || !owner.is_none(); }
+    bool is_view() const { return arr.is_view() || owner.is_valid(); }
 };
 
 template <std::size_t N>
@@ -277,13 +284,19 @@ void register_ndarray(nb::module_& m) {
                     nb::keep_alive<0, 1>(), "Reverse the axes. Returns a view.");
 
     // -- element / slice access ---------------------------------------------
-    cls.def("__setitem__", [](NV& v, const std::vector<std::size_t>& idx, T val) {
+    // Signed, so that a negative index means the same thing it does in
+    // __getitem__ (which normalises through resolve_key).
+    cls.def("__setitem__", [](NV& v, const std::vector<Py_ssize_t>& idx, T val) {
         if (idx.size() != N)
             throw nb::index_error("assignment needs one index per axis");
         std::size_t off = 0;
         for (std::size_t d = 0; d < N; ++d) {
-            if (idx[d] >= v.arr.extent(d)) throw nb::index_error();
-            off += idx[d] * v.arr.get_strides()[d];
+            Py_ssize_t i = idx[d];
+            if (i < 0) i += static_cast<Py_ssize_t>(v.arr.extent(d));
+            if (i < 0 || static_cast<std::size_t>(i) >= v.arr.extent(d))
+                throw nb::index_error(
+                    ("index out of range for axis " + std::to_string(d)).c_str());
+            off += static_cast<std::size_t>(i) * v.arr.get_strides()[d];
         }
         v.arr.data()[off] = val;
     });
@@ -433,6 +446,12 @@ void register_ndarray(nb::module_& m) {
     // -- zero-copy factory from NumPy ---------------------------------------
     // Any strided layout is accepted, so a NumPy transpose or slice comes
     // through without a copy.
+    // .noconvert() is load-bearing, not a nicety. Without it nanobind's second
+    // pass converts, and because the float overloads are registered first an
+    // int64 array silently became a float32 array -- while still reporting
+    // is_view=True, since the view is of the converted temporary. That breaks
+    // both the dtype and the zero-copy contract at once. Requiring an exact
+    // match makes anything else a TypeError.
     m.def("asarray", [](nb::ndarray<T, nb::ndim<N>, nb::device::cpu> a) {
         ma::shape<N> sh;
         std::array<std::size_t, N> st{};
@@ -446,7 +465,14 @@ void register_ndarray(nb::module_& m) {
             st[i] = static_cast<std::size_t>(s);
         }
         return NDArrayView<T, N>(ma::ndarray<T, N>(a.data(), sh, st), nb::cast(a));
-    }, "a"_a, "Zero-copy MTL5 ndarray view of a NumPy array (any strided layout)");
+    }, nb::arg("a").noconvert(),
+       "Zero-copy MTL5 ndarray view of a NumPy array (any strided layout).\n\n"
+       "The dtype must match exactly -- float32 for an f32 array, float64 for "
+       "an f64 one. Anything else raises TypeError rather than converting, "
+       "because a converted array would be a view of a temporary and neither "
+       "zero-copy nor the dtype you asked for.\n\n"
+       "The array must also be writable: the view aliases it, so a read-only "
+       "NumPy array raises TypeError. Pass a.copy() if that is what you have.");
 }
 
 // ---------------------------------------------------------------------------

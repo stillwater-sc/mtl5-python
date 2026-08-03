@@ -357,8 +357,13 @@ col = mtl5.array.as_ndarray(M)[:, 2]  # a column of a DenseMatrix, no copy
 ```
 
 `asarray` accepts any strided layout, so a NumPy transpose or slice comes
-through without materialising. Negative strides are the exception — MTL5's
-strides are unsigned — and those raise rather than producing garbage.
+through without materialising. Three things raise rather than quietly doing
+something else, all because the result aliases your buffer:
+
+* **negative strides** — MTL5's strides are unsigned
+* **any dtype but float32/float64** — converting would return a view of a
+  temporary, which is neither zero-copy nor the dtype you asked for
+* **read-only arrays** — the view can write through
 
 Two details worth knowing:
 
