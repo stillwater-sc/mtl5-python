@@ -92,3 +92,25 @@ jobs:
           pip install "jax[cpu]"
       - name: Run all tests
         run: pytest -v
+
+  # The .gz Matrix Market path is compiled in only with MTL5_WITH_ZLIB, which is
+  # off by default for portability. Without this lane that code would ship with
+  # no coverage — tests/test_io.py::TestGzip skips itself when the flag is off.
+  zlib-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install zlib headers
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+      - name: Install package with zlib enabled
+        run: pip install ".[dev,notebooks]" -v -C cmake.define.MTL5_WITH_ZLIB=ON
+      - name: Confirm zlib was actually compiled in
+        run: |
+          python -c "import mtl5, sys; ok = mtl5.build_info()['zlib']; print('zlib:', ok); sys.exit(0 if ok else 1)"
+      - name: Run the I/O tests
+        run: pytest tests/test_io.py -v

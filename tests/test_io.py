@@ -7,6 +7,8 @@ back bit-identical. Anything less means the writer is losing precision.
 
 from __future__ import annotations
 
+import gzip
+import shutil
 import struct
 
 import numpy as np
@@ -178,6 +180,50 @@ class TestSpy:
         width, height, channels = png_header(path)
         raw = height * (1 + width * channels)  # +1 filter byte per scanline
         assert path.stat().st_size == pytest.approx(raw, rel=0.02)
+
+
+class TestGzip:
+    """Transparent `.gz` reading is compiled in only with MTL5_WITH_ZLIB, which
+    is off by default. Both branches are asserted, and CI runs a lane with it
+    on — otherwise the enabled path would have no coverage at all.
+    """
+
+    @staticmethod
+    def _fixtures(tmp_path):
+        """A Matrix Market file and a gzip of the same bytes."""
+        plain = tmp_path / "m.mtx"
+        mtl5.io.mm_write_sparse(plain, mtl5.generators.laplacian_2d(6, 6), "gz fixture")
+        gz = tmp_path / "m.mtx.gz"
+        with open(plain, "rb") as src, gzip.open(gz, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        return plain, gz
+
+    @pytest.mark.skipif(not mtl5.build_info()["zlib"], reason="built without zlib")
+    def test_gz_matches_the_uncompressed_file(self, tmp_path):
+        pytest.importorskip("scipy.sparse")
+        import mtl5.sparse as ms
+
+        plain, gz = self._fixtures(tmp_path)
+        assert gz.stat().st_size < plain.stat().st_size, "fixture is not actually compressed"
+        np.testing.assert_array_equal(
+            ms.to_scipy(mtl5.io.mm_read(gz)).toarray(),
+            ms.to_scipy(mtl5.io.mm_read(plain)).toarray(),
+        )
+
+    @pytest.mark.skipif(not mtl5.build_info()["zlib"], reason="built without zlib")
+    def test_gz_works_for_the_dense_reader_too(self, tmp_path):
+        plain, gz = self._fixtures(tmp_path)
+        np.testing.assert_array_equal(
+            mtl5.io.mm_read_dense(gz).to_numpy(),
+            mtl5.io.mm_read_dense(plain).to_numpy(),
+        )
+
+    @pytest.mark.skipif(mtl5.build_info()["zlib"], reason="built with zlib")
+    def test_gz_raises_a_clear_error_without_zlib(self, tmp_path):
+        """It must refuse, not read the compressed bytes as text."""
+        _, gz = self._fixtures(tmp_path)
+        with pytest.raises(RuntimeError):
+            mtl5.io.mm_read(gz)
 
 
 class TestBuildInfo:

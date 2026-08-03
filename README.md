@@ -130,9 +130,9 @@ rather than an error.
 **The PNGs are uncompressed.** MTL5 writes them with a from-scratch encoder
 emitting DEFLATE *stored* blocks, which is what lets `spy` work with no image
 library and no plotting stack in the process. File size is therefore about
-`width × height × channels` — the default `max_pixels=1024` on a large matrix
-gives roughly a 3 MB RGB file. Pipe it through any PNG optimizer if that
-matters.
+`width × height × channels` — measured at the default `max_pixels=1024`, that
+is ~1.0 MB for `spy` (grayscale) and ~3.1 MB for `spy_magnitude` /
+`spy_density` (RGB). Pipe the output through any PNG optimizer if that matters.
 
 `.gz` inputs are read transparently only when MTL5 is built with zlib
 (`-C cmake.define.MTL5_WITH_ZLIB=ON`); `mtl5.build_info()["zlib"]` reports it,
