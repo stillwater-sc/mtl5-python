@@ -330,6 +330,51 @@ mtl5.ldlt_solve(H, b)  # ValueError, by design
 Complex is not in `mtl5.dtypes()`, which lists what `mtl5.convert()` accepts —
 the Universal number systems are real-only, so there is no complex target.
 
+## N-dimensional arrays
+
+`mtl5.array` exposes MTL5's `mtl/array` layer — ranks 1 through 4, float32 and
+float64:
+
+```python
+import mtl5
+
+x = mtl5.array.asarray(a)  # zero-copy view of any strided NumPy array
+x[1, 2]  # element access
+x[:, 1:3]  # a view, never a copy
+x.T.sum_axis(0)  # transpose is a view too
+x.to_numpy()  # back to NumPy, strides included
+```
+
+Rank is a C++ template parameter, so the ranks are fixed at build time. Rank 5+
+raises rather than silently flattening.
+
+The point of the layer here is that it makes the dense containers sliceable
+without a copy:
+
+```python
+M = mtl5.matrix(a)
+col = mtl5.array.as_ndarray(M)[:, 2]  # a column of a DenseMatrix, no copy
+```
+
+`asarray` accepts any strided layout, so a NumPy transpose or slice comes
+through without materialising. Negative strides are the exception — MTL5's
+strides are unsigned — and those raise rather than producing garbage.
+
+Two details worth knowing:
+
+**`.strides` is in elements, not bytes.** That is how MTL5 holds them. NumPy's
+`.strides` is in bytes, so the two differ by itemsize — `[3, 1]` here is
+`(24, 8)` there for float64.
+
+**Broadcasting is same-rank only.** An extent of 1 stretches, so `(2,3) + (2,1)`
+works, but NumPy's rank promotion — `(2,3) + (3,)` — does not, because MTL5's
+`broadcast_shape` takes two shapes of equal rank. Reshape the operand first.
+
+`reshape` and `ravel` return a view when the layout allows it and a copy
+otherwise, and never error; `flatten` always copies. All three give NumPy's
+element order even for a transposed or sliced source, which MTL5's own
+`reshape`/`flatten` do not — see `docs/gap-analysis-2026-08.md` §3.9.
+
 ## Sparse storage formats
 
 CSR is the default and what every solver here takes. Two other formats are
@@ -369,11 +414,13 @@ ms.ell_matrix(ms.from_scipy(arrow)).padding_ratio  # 0.985 — use CSR
 ELL has no incremental build path: MTL5's `ell_matrix` has no element setter, so
 CSR is the only way in.
 
-**There is no CSC.** MTL5's `compressed2D` accepts a `col_major` orientation tag
-but ignores it — the inserter, element access and `mult` all treat the storage
-as row-major regardless — so a CSC binding would disagree with scipy about which
-way the matrix is oriented. `from_scipy` converts a `csc_matrix` to CSR at the
-boundary instead, which is honest about the cost.
+**There is no CSC.** MTL5's `compressed2D` used to accept a `col_major`
+orientation tag and ignore it — the inserter, element access and `mult` all
+treated the storage as row-major regardless, so genuine CSC arrays came back
+transposed with no error. That is now a compile-time rejection upstream
+([mtl5#355](https://github.com/stillwater-sc/mtl5/issues/355)), but there is
+still no column-major container, so `from_scipy` converts a `csc_matrix` to CSR
+at the boundary — which is honest about the cost.
 
 The thing CSC is usually wanted for here is a transpose product, and that is
 available directly, using MTL5's own transpose view rather than a scipy round

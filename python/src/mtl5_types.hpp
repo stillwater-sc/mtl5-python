@@ -174,6 +174,9 @@ void register_dense_factorizations(nb::module_& m);
 // stillwater-sc/mtl5#337.
 void register_dense_ops(nb::module_& m);
 
+// Registered by mtl5_ndarray.cpp — the N-D array layer (mtl/array).
+void register_ndarray_layer(nb::module_& m);
+
 // Registered by mtl5_sparse_formats.cpp — COO and ELL storage formats.
 void register_sparse_formats(nb::module_& m);
 

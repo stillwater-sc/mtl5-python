@@ -1543,6 +1543,9 @@ NB_MODULE(_core, m) {
     // ----- Alternative sparse storage formats: COO and ELL --------------------
     register_sparse_formats(m);
 
+    // ----- N-dimensional array layer (mtl/array) ------------------------------
+    register_ndarray_layer(m);
+
     // ----- Complex element types (c64, c128) ---------------------------------
     // Registered after the real overloads so that a complex NumPy array matches
     // a complex overload in nanobind's first (no-convert) pass rather than
