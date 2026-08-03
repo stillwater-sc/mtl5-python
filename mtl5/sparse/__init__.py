@@ -18,10 +18,11 @@ scipy is an optional dependency: importing this module without scipy installed
 yields the bare MTL5 SparseMatrix bindings, but the conversion helpers raise
 ImportError when called.
 
-**There is no CSC.** MTL5's `compressed2D` takes an orientation parameter, but
-it is inert — the inserter, element access and `mult` all treat the storage as
-row-major whichever tag you pass. So `from_scipy` converts a `csc_matrix` to CSR
-at the boundary rather than pretending to hold it. The thing CSC is usually
+**There is no CSC.** MTL5's `compressed2D` took an orientation parameter that
+was inert — the inserter, element access and `mult` all treated the storage as
+row-major whichever tag you passed. Upstream now rejects `col_major` at compile
+time, but has no column-major container, so `from_scipy` converts a `csc_matrix`
+to CSR at the boundary rather than pretending to hold it. The thing CSC is usually
 wanted for here — a transpose product that does not round-trip through scipy —
 is available directly as `A.rmatvec(x)`, which uses MTL5's own transpose view.
 """

@@ -187,14 +187,18 @@ upstream rather than a binding decision.
 | ELL | `ell_matrix` | ✅ `SparseMatrixELL_*` — plus `padding_ratio`, the fit metric |
 | CSC | — | ❌ not implemented |
 
-**`compressed2D`'s orientation parameter is inert.** It is templated on
-`tag::row_major` | `tag::col_major` (`mat/parameter.hpp:14`), but nothing reads the tag:
-the inserter, `operator()` and `mult` all treat the storage as row-major. Measured on a
-2×3 matrix, a `col_major` `compressed2D` builds a `major` array of length 3 (nrows + 1)
-where CSC needs 4 (ncols + 1); a `row_major` and a `col_major` instance built from the
-same elements have byte-identical `major`/`minor`/`data`. Feeding it genuine scipy CSC
-arrays produces the transpose while reporting success. So there is no CSC container to
-bind, and `from_scipy` converts CSC input to CSR at the boundary.
+**`compressed2D`'s orientation parameter was inert; it is now rejected.** It is templated
+on `tag::row_major` | `tag::col_major` (`mat/parameter.hpp:14`), but nothing read the tag:
+the inserter, `operator()` and `mult` all treated the storage as row-major. Measured at
+`c666ae4` on a 2×3 matrix, a `col_major` `compressed2D` built a `major` array of length 3
+(nrows + 1) where CSC needs 4 (ncols + 1); a `row_major` and a `col_major` instance built
+from the same elements had byte-identical `major`/`minor`/`data`; and genuine scipy CSC
+arrays produced the transpose while reporting success. Filed as
+[stillwater-sc/mtl5#355](https://github.com/stillwater-sc/mtl5/issues/355) and fixed
+upstream in MTL5 `3ac75bd`, which takes the smaller of the two options offered and
+`static_assert`s the orientation to `row_major` — so the silent wrong answer is now a
+compile error, but there is still no CSC container. `from_scipy` continues to convert CSC
+input to CSR at the boundary.
 
 What CSC was wanted for in practice — a transpose-SpMV so a `LinearOperator`'s `rmatvec`
 need not round-trip through scipy — is now `SparseMatrix.rmatvec`, built on `mtl::trans`,
@@ -237,15 +241,49 @@ Two findings worth carrying upstream:
 
 `hermitian_view` exists but has no binding.
 
-### 3.9 Tensor / N-D array layer — P2, 0 exposed
+### 3.9 Tensor / N-D array layer — `mtl/array` bound in Phase 4e; `mtl/tensor` still P2
 
-`mtl/tensor/*` (rank-N `tensor`, `Index`/`contract`/`outer`/`bind`, metric raise/lower,
-symmetric/antisymmetric storage) and `mtl/array/*` (`ndarray`, `shape`, `slice`, `broadcast`,
-`interop`: `as_matrix`/`as_vector`/`flatten`/`reduce`/`transform`, and `sum`/`mean`/`min`/`max`/`prod`).
+**`mtl/array/*` — bound.** `mtl5.array` exposes `ndarray` at ranks 1–4 for float32/float64:
+zero-copy `asarray` from any strided NumPy layout, `to_numpy` that carries the strides back,
+element access, `transpose`, `reshape`, NumPy-style slicing, the whole-array reductions
+(`sum`/`prod`/`mean`/`min`/`max`), `sum_axis`/`mean_axis`, elementwise arithmetic, and
+`as_ndarray`/`as_matrix`/`as_vector` interop with the dense containers.
 
-This is the natural home for real NumPy N-D interop, and it is entirely unbound — today's
-bindings are 1-D and 2-D only. `mtl/array/interop.hpp` reads like it was designed for exactly
-this purpose.
+Rank is a template parameter (`ndarray<T, N, Order>`), so the ranks have to be fixed at build
+time; 1–4 are instantiated and rank 5+ raises rather than silently flattening.
+
+Four things did not come across, each for a stated reason:
+
+* **`ndarray::reshape` is unsound for a non-C-contiguous array.** It guards on
+  `is_contiguous()`, which means "contiguous in *either* C or F order" (`shape.hpp:158`), and
+  then rebuilds with the array's own `Order`. A transposed C-order array is F-contiguous, so
+  it passes the guard and is read back with C-order strides. Measured:
+  `[[1,2,3],[4,5,6]].transpose().reshape(6)` returns `[1,2,3,4,5,6]` where NumPy gives
+  `[1,4,2,5,3,6]`, with no error. The binding does not call it — it checks contiguity in the
+  array's own order, aliases when that holds and packs a logical-order copy otherwise, which
+  is also NumPy's contract.
+* **`mtl::array::slice` is unreachable from Python.** It derives the result rank at compile
+  time from the argument *types* (`count_kept_dims<Args...>`), so a runtime index tuple would
+  need every {int, range, all} combination instantiated — 3^N per rank per dtype. `__getitem__`
+  computes the shape, strides and base offset itself and builds the view through ndarray's
+  (pointer, shape, strides) constructor, the same primitive `slice` uses.
+* **Broadcasting is same-rank only.** `broadcast_shape` takes two `shape<N>` of equal `N`, so
+  an extent of 1 stretches but NumPy's rank promotion does not. Reshape the operand first.
+
+* **`flatten` is wrong on an F-contiguous array, for the same reason.** It walks elements via
+  `for_each_element`, whose fast path triggers on the same `is_contiguous()` and then indexes
+  raw memory. Measured: flatten of the transpose of `[[1,2,3],[4,5,6]]` gives `[1,2,3,4,5,6]`
+  where NumPy gives `[1,4,2,5,3,6]`. The commutative reductions share that code path but are
+  unaffected — `sum`/`prod`/`min`/`max`/`mean` do not care what order they visit in — and
+  `sum_axis`/`mean_axis` index explicitly and are correct on strided input. `mtl5.array`
+  exposes `ravel` (view when possible) and `flatten` (always a copy), both in logical order.
+
+`transform`/`reduce` are not bound: they take C++ callables, so exposing them would mean a
+Python call per element — `to_numpy()` is the better answer.
+
+**`mtl/tensor/*` — still unbound, P2.** Rank-N `tensor`, `Index`/`contract`/`outer`/`bind`,
+metric raise/lower, symmetric/antisymmetric storage. Distinct from `mtl/array`: index-notation
+tensor algebra rather than NumPy-shaped N-D data.
 
 ### 3.10 I/O — P2, 0 exposed
 

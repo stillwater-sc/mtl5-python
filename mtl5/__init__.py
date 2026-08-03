@@ -66,6 +66,8 @@ from mtl5._core import (
     LUFactor_f64,
     # Complex operations
     adjoint,
+    # N-dimensional array layer (mtl/array)
+    array,
     # Backend management
     backends,
     # Build introspection
@@ -502,6 +504,7 @@ __all__ = [
     "get_backend",
     "set_backend",
     # Mixed precision
+    "array",
     "mixed",
     "convert",
     "dtypes",
