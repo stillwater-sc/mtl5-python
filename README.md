@@ -330,6 +330,62 @@ mtl5.ldlt_solve(H, b)  # ValueError, by design
 Complex is not in `mtl5.dtypes()`, which lists what `mtl5.convert()` accepts —
 the Universal number systems are real-only, so there is no complex target.
 
+## Sparse storage formats
+
+CSR is the default and what every solver here takes. Two other formats are
+available when the shape of the work suits them:
+
+```python
+import mtl5.sparse as ms
+
+C = ms.coo_matrix(row, col, data, shape=(n, n))  # triplets
+C.insert(3, 7, 1.5)  # append; no pattern needed up front
+A = C.tocsr()  # duplicates sum here
+
+E = ms.ell_matrix(A)  # fixed-width, vectorisable
+E.padding_ratio  # ...if this is small
+```
+
+**COO** is the format you build in when you don't know the pattern yet. It
+accumulates: a repeated `(row, col)` sums rather than overwrites, exactly as
+`scipy.sparse.coo_matrix` does. The duplicates stay separate — `nnz` counts them
+individually and a round trip through `to_scipy` preserves them — until
+`tocsr()` folds them into one entry.
+
+**ELL** stores `nrows × max_width` slots and pads the short rows, which is what
+makes it regular enough to vectorise over. The cost is that one long row forces
+every other row to carry empty slots, so it is only a good idea when the row
+widths are near-uniform. `padding_ratio` is that decision as a number — 0.0 when
+every slot is occupied, and rising toward 1.0 as the matrix gets more ragged:
+
+```python
+# a 2-D Laplacian: every row has 5 entries bar the boundary
+ms.ell_matrix(mtl5.generators.laplacian_2d(32, 32)).padding_ratio  # 0.025
+
+# an arrow matrix: one dense row and column, the rest diagonal
+ms.ell_matrix(ms.from_scipy(arrow)).padding_ratio  # 0.985 — use CSR
+```
+
+ELL has no incremental build path: MTL5's `ell_matrix` has no element setter, so
+CSR is the only way in.
+
+**There is no CSC.** MTL5's `compressed2D` accepts a `col_major` orientation tag
+but ignores it — the inserter, element access and `mult` all treat the storage
+as row-major regardless — so a CSC binding would disagree with scipy about which
+way the matrix is oriented. `from_scipy` converts a `csc_matrix` to CSR at the
+boundary instead, which is honest about the cost.
+
+The thing CSC is usually wanted for here is a transpose product, and that is
+available directly, using MTL5's own transpose view rather than a scipy round
+trip:
+
+```python
+A.rmatvec(x)  # A.T @ x, no second copy of the matrix
+```
+
+`mtl5.sparse.as_linear_operator(A)` uses it, so both directions of a SciPy
+`LinearOperator` now stay inside MTL5.
+
 ## Sparse direct solvers
 
 Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:

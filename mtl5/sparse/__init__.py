@@ -3,9 +3,12 @@
 This submodule provides:
 
 - `SparseMatrix_f32` / `SparseMatrix_f64` — MTL5 CSR sparse matrices
+- `SparseMatrixCOO_*` / `SparseMatrixELL_*` — the COO and ELL storage formats
 - `from_scipy(sp)` — convert a scipy.sparse matrix to MTL5
-- `to_scipy(A)` — convert an MTL5 sparse matrix back to scipy.sparse.csr_matrix
+- `to_scipy(A)` — convert any MTL5 sparse matrix back to scipy.sparse
 - `csr_matrix(data, indices, indptr, shape)` — direct CSR construction
+- `coo_matrix(row, col, data, shape)` — triplet construction; duplicates sum
+- `ell_matrix(A)` — fixed-width layout, for near-uniform row widths
 - `as_linear_operator(A)` — wrap an MTL5 sparse matrix as a SciPy
   `LinearOperator`, enabling use with scipy.sparse.linalg iterative solvers
 - `cg`, `gmres`, `bicgstab` — iterative Krylov solvers returning (x, info)
@@ -14,6 +17,13 @@ This submodule provides:
 scipy is an optional dependency: importing this module without scipy installed
 yields the bare MTL5 SparseMatrix bindings, but the conversion helpers raise
 ImportError when called.
+
+**There is no CSC.** MTL5's `compressed2D` takes an orientation parameter, but
+it is inert — the inserter, element access and `mult` all treat the storage as
+row-major whichever tag you pass. So `from_scipy` converts a `csc_matrix` to CSR
+at the boundary rather than pretending to hold it. The thing CSC is usually
+wanted for here — a transpose product that does not round-trip through scipy —
+is available directly as `A.rmatvec(x)`, which uses MTL5's own transpose view.
 """
 
 from __future__ import annotations
@@ -35,6 +45,10 @@ from mtl5._core import (
     SparseLU_f64,
     SparseMatrix_f32,
     SparseMatrix_f64,
+    SparseMatrixCOO_f32,
+    SparseMatrixCOO_f64,
+    SparseMatrixELL_f32,
+    SparseMatrixELL_f64,
     SparseQR_f32,
     SparseQR_f64,
     SupernodalLDLT_f32,
@@ -96,11 +110,61 @@ def csr_matrix(
     return cls(nrows, ncols, indptr, indices, data)
 
 
+def _coo_class_for_dtype(dtype: np.dtype):
+    dt = np.dtype(dtype)
+    if dt == np.float64:
+        return SparseMatrixCOO_f64
+    if dt == np.float32:
+        return SparseMatrixCOO_f32
+    raise TypeError(f"Unsupported sparse dtype: {dt}. Supported: float32, float64.")
+
+
+def coo_matrix(
+    row: np.ndarray,
+    col: np.ndarray,
+    data: np.ndarray,
+    shape: tuple[int, int],
+):
+    """Construct an MTL5 COO matrix from scipy-style (row, col, data) triplets.
+
+    Duplicate coordinates accumulate rather than overwrite, matching
+    `scipy.sparse.coo_matrix`: the duplicates stay in the triplet list, `nnz`
+    counts them separately, reading an element sums them, and `tocsr()` folds
+    them into one entry.
+    """
+    data = np.ascontiguousarray(data)
+    row = np.ascontiguousarray(row, dtype=np.int64)
+    col = np.ascontiguousarray(col, dtype=np.int64)
+    nrows, ncols = int(shape[0]), int(shape[1])
+    cls = _coo_class_for_dtype(data.dtype)
+    return cls(nrows, ncols, row, col, data)
+
+
+def ell_matrix(A):
+    """Convert a CSR matrix (MTL5 or scipy) to MTL5's ELL layout.
+
+    ELL stores `nrows x max_width` slots regardless of how many are occupied,
+    where `max_width` is the widest row's nnz. That regularity is what makes it
+    vectorisable, and the padding is what it costs — check `padding_ratio`
+    before committing to it. A single long row forces every other row to carry
+    empty slots, and CSR is the better choice there.
+
+    There is no incremental build path: MTL5's `ell_matrix` has no element
+    setter, so CSR is the only way in.
+    """
+    A = _coerce_matrix(A)
+    if isinstance(A, SparseMatrix_f32):
+        return SparseMatrixELL_f32(A)
+    return SparseMatrixELL_f64(A)
+
+
 def from_scipy(sp_matrix):
     """Convert a scipy.sparse matrix (any format) to an MTL5 SparseMatrix.
 
-    Non-CSR formats are converted to CSR via scipy. The result has the
-    same dtype as the input (must be float32 or float64).
+    Non-CSR formats are converted to CSR via scipy, including CSC — MTL5 has no
+    column-major container, so that conversion is real work rather than a
+    relabelling. Use `coo_matrix()` to build COO directly without going through
+    CSR. The result has the same dtype as the input (float32 or float64).
     """
     _ensure_scipy()
     if not _sp.issparse(sp_matrix):
@@ -110,8 +174,23 @@ def from_scipy(sp_matrix):
 
 
 def to_scipy(mtl5_sparse):
-    """Convert an MTL5 SparseMatrix back to a scipy.sparse.csr_matrix."""
+    """Convert an MTL5 sparse matrix back to scipy.sparse.
+
+    CSR and ELL come back as `csr_matrix`; COO comes back as `coo_matrix`, so a
+    round trip preserves the format rather than silently compressing it — and
+    with it any duplicate triplets, which `tocsr()` would have summed.
+    """
     _ensure_scipy()
+    if isinstance(mtl5_sparse, (SparseMatrixCOO_f32, SparseMatrixCOO_f64)):
+        row, col, data = mtl5_sparse.to_coo_arrays()
+        return _sp.coo_matrix((data, (row, col)), shape=mtl5_sparse.shape)
+    if isinstance(mtl5_sparse, (SparseMatrixELL_f32, SparseMatrixELL_f64)):
+        indices, data = mtl5_sparse.to_ell_arrays()
+        keep = indices >= 0
+        rows = np.repeat(np.arange(indices.shape[0]), indices.shape[1]).reshape(indices.shape)
+        return _sp.coo_matrix(
+            (data[keep], (rows[keep], indices[keep])), shape=mtl5_sparse.shape
+        ).tocsr()
     indptr, indices, data = mtl5_sparse.to_csr_arrays()
     return _sp.csr_matrix((data, indices, indptr), shape=mtl5_sparse.shape)
 
@@ -122,10 +201,9 @@ def as_linear_operator(mtl5_sparse):
     Enables use with SciPy's iterative solvers (cg, gmres, bicgstab, ...)
     by providing _matvec and _rmatvec callbacks that dispatch to MTL5 SpMV.
 
-    For symmetric matrices, _rmatvec is implemented as _matvec on the same
-    matrix. For non-symmetric matrices we currently fall back to converting
-    via scipy — a true MTL5 transpose-SpMV will follow once compressed2D
-    gains a CSC/transpose accessor.
+    Both _matvec and _rmatvec dispatch to MTL5. The transpose product goes
+    through `rmatvec`, which uses MTL5's own transpose view — no scipy round
+    trip and no second copy of the matrix.
     """
     _ensure_scipy()
 
@@ -137,12 +215,9 @@ def as_linear_operator(mtl5_sparse):
         y = mtl5_sparse.matvec(x_arr)
         return y.to_numpy()
 
-    # rmatvec via scipy round-trip — see docstring
-    sp = to_scipy(mtl5_sparse)
-
     def rmatvec_fn(x: np.ndarray) -> np.ndarray:
         x_arr = np.ascontiguousarray(x.ravel(), dtype=dtype)
-        return sp.T @ x_arr
+        return mtl5_sparse.rmatvec(x_arr).to_numpy()
 
     return _LinearOperator(
         shape=(n_rows, n_cols),
@@ -544,6 +619,10 @@ __all__ = [
     "SupernodalLU_f64",
     "SparseMatrix_f32",
     "SparseMatrix_f64",
+    "SparseMatrixCOO_f32",
+    "SparseMatrixCOO_f64",
+    "SparseMatrixELL_f32",
+    "SparseMatrixELL_f64",
     "amd",
     "as_linear_operator",
     "as_preconditioner_lo",
@@ -551,7 +630,9 @@ __all__ = [
     "cg",
     "cholesky",
     "colamd",
+    "coo_matrix",
     "csr_matrix",
+    "ell_matrix",
     "from_scipy",
     "gmres",
     "ic0",

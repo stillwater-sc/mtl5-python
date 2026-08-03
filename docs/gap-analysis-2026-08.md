@@ -177,9 +177,32 @@ and the inserter API (`compressed2D_inserter`, `shifted_inserter`).
 **Views:** `transposed_view`, `lower_view`, `upper_view`, `strict_lower_view`,
 `strict_upper_view`, `banded_view`, `hermitian_view`, `map_view`.
 
-**Notable:** `compressed2D` is templated on orientation (`tag::row_major` | `tag::col_major`,
-`mat/parameter.hpp:14`) but the bindings instantiate **row-major only** — so
-`scipy.sparse.csc_matrix` has no zero-copy path and must be converted.
+**Storage formats** — COO and ELL bound in Phase 4d. CSC is not, and the reason is
+upstream rather than a binding decision.
+
+| format | MTL5 | bound |
+|---|---|---|
+| CSR | `compressed2D` | ✅ since Phase 2 |
+| COO | `coordinate2D` | ✅ `SparseMatrixCOO_*` — duplicates accumulate, matching scipy |
+| ELL | `ell_matrix` | ✅ `SparseMatrixELL_*` — plus `padding_ratio`, the fit metric |
+| CSC | — | ❌ not implemented |
+
+**`compressed2D`'s orientation parameter is inert.** It is templated on
+`tag::row_major` | `tag::col_major` (`mat/parameter.hpp:14`), but nothing reads the tag:
+the inserter, `operator()` and `mult` all treat the storage as row-major. Measured on a
+2×3 matrix, a `col_major` `compressed2D` builds a `major` array of length 3 (nrows + 1)
+where CSC needs 4 (ncols + 1); a `row_major` and a `col_major` instance built from the
+same elements have byte-identical `major`/`minor`/`data`. Feeding it genuine scipy CSC
+arrays produces the transpose while reporting success. So there is no CSC container to
+bind, and `from_scipy` converts CSC input to CSR at the boundary.
+
+What CSC was wanted for in practice — a transpose-SpMV so a `LinearOperator`'s `rmatvec`
+need not round-trip through scipy — is now `SparseMatrix.rmatvec`, built on `mtl::trans`,
+which *is* correct for sparse (verified on a non-symmetric 2×3).
+
+**ELL has no element setter.** `ell_matrix(nrows, ncols, max_width)` produces an
+all-padding matrix with no way to fill it, so the CSR constructor is the only usable
+entry point and the only one bound.
 
 **Complex scalars** — bound in Phase 4c, but only where MTL5 actually supports them. The
 boundary was established by compiling each operation against `std::complex<double>` and then
@@ -347,7 +370,8 @@ QR/LQ/LDLᵀ/Bunch–Kaufman (unblocks #18), eigen/SVD family, BLAS L2/L3, prope
 
 **Phase 4 — ecosystem depth**
 Generators + `linspace` family (quick win, improves own tests), Matrix Market I/O, `spy`
-visualization, complex scalar support, CSC/COO/ELL containers, the `mtl/array` N-D layer.
+visualization, complex scalar support, COO/ELL containers, the `mtl/array` N-D layer.
+CSC is blocked upstream — see §3.8.
 
 **Cross-cutting:** refactor the Krylov binding pattern to a solver/preconditioner dispatch
 before expanding from 3×2 to 10×9 combinations.
