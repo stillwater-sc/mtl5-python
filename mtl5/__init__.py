@@ -21,6 +21,9 @@ from mtl5._core import (
     # Cholesky factorization objects
     CholeskyFactor_f32,
     CholeskyFactor_f64,
+    # Complex types (zero-copy views over complex64/complex128)
+    DenseMatrix_c64,
+    DenseMatrix_c128,
     # Native IEEE types (zero-copy views)
     DenseMatrix_f32,
     DenseMatrix_f64,
@@ -40,6 +43,8 @@ from mtl5._core import (
     DenseMatrix_posit16,
     DenseMatrix_posit32,
     DenseMatrix_posit64,
+    DenseVector_c64,
+    DenseVector_c128,
     DenseVector_f32,
     DenseVector_f64,
     DenseVector_fixpnt8,
@@ -55,25 +60,32 @@ from mtl5._core import (
     DenseVector_posit32,
     DenseVector_posit64,
     # LU factorization objects
+    LUFactor_c64,
+    LUFactor_c128,
     LUFactor_f32,
     LUFactor_f64,
+    # Complex operations
+    adjoint,
     # Backend management
     backends,
     # Build introspection
     build_info,
     cholesky,
     condition_number,
+    conj,
     # Mixed precision
     convert,
     # Device management
     devices,
     # Operations
     dot,
+    dot_real,
     dtypes,
     eig,
     eigh,
     eigvals,
     eigvalsh,
+    frobenius_norm,
     ger,
     get_backend,
     # Threading
@@ -106,6 +118,7 @@ from mtl5._core import (
     is_unitary,
     is_upper_triangular,
     is_zero,
+    ldlt_solve,
     lu,
     matmul,
     matrix,
@@ -178,6 +191,27 @@ _UNIVERSAL_DTYPES = (
 
 _NUMPY_TO_MTL5 = {"float32": "f32", "float64": "f64"}
 
+_COMPLEX_DTYPES = ("complex64", "complex128", "c64", "c128")
+
+
+def _reject_complex(name: str, A) -> None:
+    """Raise for complex input to a factorization that has no complex form.
+
+    MTL5's cholesky and qr compare a complex against a complex where a
+    magnitude is meant, so they do not compile for complex at all, and its ldlt
+    is LDL^T rather than LDL^H. Without this the caller gets either nanobind's
+    overload dump or, worse, a wrong answer — so name the alternative instead.
+    """
+    dt = getattr(A, "dtype", None)
+    dt_name = dt if isinstance(dt, str) else getattr(dt, "name", None)
+    if dt_name in _COMPLEX_DTYPES:
+        raise TypeError(
+            f"{name}: not available for {dt_name} — MTL5 has no complex {name}. "
+            "Complex is supported for solve/lu/inv/matmul/matvec/norm/dot; use "
+            "mtl5.solve() for a general complex system, or mtl5.ldlt_solve() "
+            "for a complex symmetric one."
+        )
+
 
 def _as_mtl5_matrix(name: str, prefix: str, A):
     """Normalize A to (mtl5_matrix, dtype_suffix).
@@ -194,6 +228,7 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
     if isinstance(A, _np.ndarray):
         suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
         if suffix is None:
+            _reject_complex(name, A)
             # Only suggest convert() for the factorizations that actually have
             # Universal instantiations — qr/lq are float32/float64 only, so
             # sending a user there would just earn them a second TypeError.
@@ -213,6 +248,7 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
             f"{name}: expected an MTL5 matrix (from mtl5.matrix() or "
             f"mtl5.convert()) or a NumPy array, got {type(A).__name__}"
         )
+    _reject_complex(name, A)
     return A, dt
 
 
@@ -306,6 +342,7 @@ def cholesky(A):  # noqa: F811
     dt = getattr(A, "dtype", None)
     if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
         return getattr(_core, f"CholeskyFactor_{dt}")(A)
+    _reject_complex("cholesky", A)
     return _native_cholesky(A)
 
 
@@ -407,6 +444,9 @@ __all__ = [
     "__version__",
     # Typed vector classes — IEEE
     "DenseVector",
+    # Complex
+    "DenseVector_c64",
+    "DenseVector_c128",
     "DenseVector_f32",
     "DenseVector_f64",
     "DenseVector_i32",
@@ -427,6 +467,8 @@ __all__ = [
     "DenseVector_lns32",
     # Typed matrix classes — IEEE
     "DenseMatrix",
+    "DenseMatrix_c64",
+    "DenseMatrix_c128",
     "DenseMatrix_f32",
     "DenseMatrix_f64",
     "DenseMatrix_i32",
@@ -447,6 +489,8 @@ __all__ = [
     "DenseMatrix_lns32",
     # Factorization classes
     "LUFactor",
+    "LUFactor_c64",
+    "LUFactor_c128",
     "LUFactor_f32",
     "LUFactor_f64",
     "CholeskyFactor",
@@ -525,10 +569,15 @@ __all__ = [
     "bunch_kaufman",
     "cholesky",
     "ldlt",
+    "ldlt_solve",
     "lq",
     "qr",
+    "adjoint",
+    "conj",
     "det",
     "dot",
+    "dot_real",
+    "frobenius_norm",
     "inv",
     "lu",
     "matmul",

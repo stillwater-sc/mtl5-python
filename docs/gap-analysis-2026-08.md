@@ -181,8 +181,38 @@ and the inserter API (`compressed2D_inserter`, `shifted_inserter`).
 `mat/parameter.hpp:14`) but the bindings instantiate **row-major only** — so
 `scipy.sparse.csc_matrix` has no zero-copy path and must be converted.
 
-**Also unsupported anywhere:** complex scalars, despite `eigenvalue` returning complex and
-`hermitian_view` existing.
+**Complex scalars** — bound in Phase 4c, but only where MTL5 actually supports them. The
+boundary was established by compiling each operation against `std::complex<double>` and then
+checking the answer, not just the compile:
+
+| | complex |
+|---|---|
+| containers, factories, `to_numpy`, `.real`/`.imag` | ✅ |
+| `one_norm` / `two_norm` / `infinity_norm` / `frobenius_norm` | ✅ (returns a real magnitude) |
+| `dot` (Hermitian, = `np.vdot`), `dot_real` (= `np.dot`) | ✅ |
+| `mult` — matvec, matmul, sparse matvec | ✅ |
+| `lu_factor`/`lu_solve`, `inv` | ✅ |
+| `trans` (**plain** transpose — does not conjugate) | ✅ |
+| `conj`, `is_hermitian`, `is_symmetric` | ✅ |
+| `ldlt` | ⚠️ LDLᵀ, not LDLᴴ — see below |
+| `cholesky`, `qr` | ❌ do not compile |
+| `eigenvalue`, `svd` | ❌ would need `complex<complex>` |
+| `cg` / `gmres` / `bicgstab` and the preconditioners | ❌ Krylov layer is real-only |
+
+Two findings worth carrying upstream:
+
+* **`ldlt` is silently wrong on Hermitian input.** `operation/ldlt.hpp` contains no
+  conjugation anywhere, so it computes A = L D Lᵀ. That is correct for a complex
+  *symmetric* matrix and wrong for a Hermitian one — and it returns `info = 0` either way.
+  Measured on `[[2, 1-i], [1+i, 3]]` it gives `x = [1.9+0.3i, -0.2+0.6i]` where the answer
+  is `[1, i]`. The binding refuses Hermitian-but-not-symmetric input rather than passing it
+  through; there is no LDLᴴ to offer instead.
+* **`cholesky` and `qr` are one `.real()`/`std::abs()` away from compiling.** They fail at
+  `cholesky.hpp:47` (`operator<=`) and `householder.hpp:42` (`operator>`), each comparing a
+  complex against a complex where a magnitude is meant. For a Hermitian matrix the Cholesky
+  pivot is real by construction, so this is a near-miss rather than a design limit.
+
+`hermitian_view` exists but has no binding.
 
 ### 3.9 Tensor / N-D array layer — P2, 0 exposed
 
@@ -317,7 +347,7 @@ QR/LQ/LDLᵀ/Bunch–Kaufman (unblocks #18), eigen/SVD family, BLAS L2/L3, prope
 
 **Phase 4 — ecosystem depth**
 Generators + `linspace` family (quick win, improves own tests), Matrix Market I/O, `spy`
-visualization, CSC/COO/ELL containers, complex scalar support, the `mtl/array` N-D layer.
+visualization, complex scalar support, CSC/COO/ELL containers, the `mtl/array` N-D layer.
 
 **Cross-cutting:** refactor the Krylov binding pattern to a solver/preconditioner dispatch
 before expanding from 3×2 to 10×9 combinations.
