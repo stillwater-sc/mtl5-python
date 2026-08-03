@@ -284,11 +284,11 @@ a particular multiple.
 and give the same zero-copy views as the real types, with dtypes `c64`/`c128`:
 
 ```python
-A = mtl5.matrix(np.array([[2+0j, 1-1j], [1+1j, 3+0j]]))
-b = mtl5.vector(np.array([3+1j, 1+4j]))
-x = mtl5.solve(A, b)          # complex LU with partial pivoting
-mtl5.norm(x, 2)               # a real float, not a complex
-A.real.to_numpy()             # real part, as a real matrix
+A = mtl5.matrix(np.array([[2 + 0j, 1 - 1j], [1 + 1j, 3 + 0j]]))
+b = mtl5.vector(np.array([3 + 1j, 1 + 4j]))
+x = mtl5.solve(A, b)  # complex LU with partial pivoting
+mtl5.norm(x, 2)  # a real float, not a complex
+A.real.to_numpy()  # real part, as a real matrix
 ```
 
 Three things differ from the real case, and getting them wrong is quiet rather
@@ -320,11 +320,11 @@ wrong for a Hermitian one — and it reports success either way. Hermitian input
 is refused here; use `mtl5.solve`, which handles it correctly.
 
 ```python
-S = mtl5.matrix(np.array([[2+1j, 1-1j], [1-1j, 3+2j]]))   # A == A^T
-mtl5.ldlt_solve(S, b)                                     # fine
+S = mtl5.matrix(np.array([[2 + 1j, 1 - 1j], [1 - 1j, 3 + 2j]]))  # A == A^T
+mtl5.ldlt_solve(S, b)  # fine
 
-H = mtl5.matrix(np.array([[2+0j, 1-1j], [1+1j, 3+0j]]))   # A == A^H
-mtl5.ldlt_solve(H, b)                                     # ValueError, by design
+H = mtl5.matrix(np.array([[2 + 0j, 1 - 1j], [1 + 1j, 3 + 0j]]))  # A == A^H
+mtl5.ldlt_solve(H, b)  # ValueError, by design
 ```
 
 Complex is not in `mtl5.dtypes()`, which lists what `mtl5.convert()` accepts —
