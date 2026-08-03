@@ -61,3 +61,31 @@ def test_device_api():
     assert hasattr(mtl5, "devices")
     devs = mtl5.devices()
     assert "cpu" in devs
+
+
+def test_all_matches_the_public_surface():
+    """`__all__` must list every public name, and list nothing that is missing.
+
+    This has drifted twice: `generators`/`arange`/`linspace`/`logspace`/
+    `geomspace` shipped without being added, so `from mtl5 import *` and any
+    tooling that reads `__all__` silently missed them. A hand-maintained list
+    beside a growing module needs a check, not discipline.
+    """
+    exported = set(mtl5.__all__)
+
+    public = {
+        name
+        for name in vars(mtl5)
+        if not name.startswith("_")
+        and name not in {"pandas_ext", "sparse"}  # submodules, imported for effect
+    }
+
+    missing = sorted(public - exported)
+    assert not missing, f"public but absent from __all__: {missing}"
+
+    dangling = sorted(n for n in exported if not hasattr(mtl5, n))
+    assert not dangling, f"listed in __all__ but not defined: {dangling}"
+
+
+def test_all_has_no_duplicates():
+    assert len(mtl5.__all__) == len(set(mtl5.__all__)), "duplicate entries in __all__"

@@ -1,6 +1,6 @@
 """MTL5 Python bindings — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch."""
 
-from importlib.metadata import PackageNotFoundError
+from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 import mtl5._core as _core
@@ -11,7 +11,7 @@ import mtl5._core as _core
 # without installed metadata (e.g. an in-place build without pip install).
 try:
     __version__ = _pkg_version("mtl5")
-except PackageNotFoundError:
+except _PackageNotFoundError:
     try:
         from mtl5._core import __version__  # noqa: F811
     except ImportError:
@@ -395,7 +395,7 @@ try:
     if HAS_PANDAS:
         from mtl5.pandas_ext import Posit16Array, Posit16Dtype  # noqa: F401
 except ImportError:
-    pass
+    HAS_PANDAS = False
 
 
 __all__ = [
@@ -509,6 +509,12 @@ __all__ = [
     "trsm",
     "trsv",
     # Operations
+    # Generators and range vectors
+    "generators",
+    "arange",
+    "geomspace",
+    "linspace",
+    "logspace",
     "bunch_kaufman",
     "cholesky",
     "ldlt",
@@ -552,3 +558,11 @@ __all__ = [
     "vector_lns16",
     "vector_lns32",
 ]
+
+
+# The pandas ExtensionDtype surface only exists when pandas is installed, so it
+# joins __all__ here rather than being listed statically — a static entry would
+# break `from mtl5 import *` on an install without pandas.
+__all__ += ["HAS_PANDAS"]
+if HAS_PANDAS:
+    __all__ += ["Posit16Array", "Posit16Dtype"]

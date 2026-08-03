@@ -1,5 +1,11 @@
 """Execute every notebook's code cells, so documentation cannot rot silently.
 
+Every file read and write here pins encoding="utf-8". The notebooks contain
+non-ASCII prose, and the default is locale-dependent: on the Windows runners it
+currently survives only because a cp1252 decode/encode round-trips the original
+UTF-8 bytes unchanged, which is luck rather than design — an ASCII or CJK
+locale would raise instead.
+
 Runs the cells as a plain script in a subprocess rather than through Jupyter:
 the notebooks are linear demonstrations with no cell-order tricks, so this
 catches the failure that matters (an API drifted and the notebook no longer
@@ -32,7 +38,7 @@ MTL5_IMPORT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(mtl5.__file__
 
 
 def notebook_to_script(path: Path) -> str:
-    nb = json.loads(path.read_text())
+    nb = json.loads(path.read_text(encoding="utf-8"))
     parts = [
         "import matplotlib",
         "matplotlib.use('Agg')",
@@ -58,7 +64,7 @@ def test_notebook_runs(path: Path):
 
     with tempfile.TemporaryDirectory() as work:
         script = Path(work) / "cells.py"
-        script.write_text(notebook_to_script(path))
+        script.write_text(notebook_to_script(path), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(script)],
             capture_output=True,
@@ -78,7 +84,7 @@ def test_notebook_runs(path: Path):
 def test_notebook_outputs_are_stripped(path: Path):
     """Committed outputs bloat diffs and go stale; the runner above is what
     proves the notebook works."""
-    nb = json.loads(path.read_text())
+    nb = json.loads(path.read_text(encoding="utf-8"))
     for i, cell in enumerate(nb["cells"]):
         if cell["cell_type"] == "code":
             assert not cell.get("outputs"), f"{path.name} cell {i} has stored outputs"

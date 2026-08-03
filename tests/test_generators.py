@@ -93,6 +93,13 @@ class TestPrescribedStructure:
         with pytest.raises(ValueError, match="must be positive"):
             g.randspd(3, [1.0, -2.0, 3.0])
 
+    @pytest.mark.parametrize("fn", ["randspd", "randsym"])
+    def test_rejects_zero_size(self, fn):
+        """n=0 with an empty spectrum would otherwise reach randorth(0), which
+        hands a zero leading dimension to LAPACK geqrf on a WITH_LAPACK build."""
+        with pytest.raises(ValueError, match="n must be >= 1"):
+            getattr(g, fn)(0, [])
+
     def test_randspd_rejects_wrong_count(self):
         with pytest.raises(ValueError, match="exactly n eigenvalues"):
             g.randspd(3, [1.0, 2.0])

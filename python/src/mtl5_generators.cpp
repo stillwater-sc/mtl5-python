@@ -200,6 +200,10 @@ void register_generators(nb::module_& m) {
     }, "n"_a, "Random orthogonal matrix (Q from a QR of a random matrix)");
 
     g.def("randspd", [](std::size_t n, const std::vector<double>& eigenvalues) {
+        // Before the size check: n = 0 with an empty spectrum would otherwise
+        // reach randorth(0), which hands a zero leading dimension to LAPACK's
+        // geqrf on a MTL5_WITH_LAPACK build.
+        require_positive(n, "randspd");
         if (eigenvalues.size() != n)
             throw std::invalid_argument("randspd: need exactly n eigenvalues");
         for (double e : eigenvalues)
@@ -211,6 +215,7 @@ void register_generators(nb::module_& m) {
        "way to build a matrix of a chosen condition number");
 
     g.def("randsym", [](std::size_t n, const std::vector<double>& eigenvalues) {
+        require_positive(n, "randsym");
         if (eigenvalues.size() != n)
             throw std::invalid_argument("randsym: need exactly n eigenvalues");
         nogil guard; return wrap(gen::randsym<double>(n, eigenvalues));
