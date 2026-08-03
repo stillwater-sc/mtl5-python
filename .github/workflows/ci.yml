@@ -110,6 +110,10 @@ jobs:
       - name: Install package with zlib enabled
         run: pip install ".[dev,notebooks]" -v -C cmake.define.MTL5_WITH_ZLIB=ON
       - name: Confirm zlib was actually compiled in
+        # From a neutral directory: at the repo root, `python -c` puts cwd on
+        # sys.path and imports the source `mtl5/` package, which has no compiled
+        # _core. pytest is unaffected because it inserts tests/, not the root.
+        working-directory: ${{ runner.temp }}
         run: |
           python -c "import mtl5, sys; ok = mtl5.build_info()['zlib']; print('zlib:', ok); sys.exit(0 if ok else 1)"
       - name: Run the I/O tests
