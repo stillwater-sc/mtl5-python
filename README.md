@@ -278,6 +278,58 @@ regression test asserts 20×tol to leave headroom. Treat `tol` as the knob:
 tighten it if you need an orthonormal `U` specifically, rather than relying on
 a particular multiple.
 
+## Complex numbers
+
+`mtl5.vector()` and `mtl5.matrix()` accept `complex64` and `complex128` arrays
+and give the same zero-copy views as the real types, with dtypes `c64`/`c128`:
+
+```python
+A = mtl5.matrix(np.array([[2 + 0j, 1 - 1j], [1 + 1j, 3 + 0j]]))
+b = mtl5.vector(np.array([3 + 1j, 1 + 4j]))
+x = mtl5.solve(A, b)  # complex LU with partial pivoting
+mtl5.norm(x, 2)  # a real float, not a complex
+A.real.to_numpy()  # real part, as a real matrix
+```
+
+Three things differ from the real case, and getting them wrong is quiet rather
+than loud, so they are worth stating.
+
+**`dot` is Hermitian.** It computes `sum(conj(a[i]) * b[i])`, conjugating the
+*first* argument — that is NumPy's `vdot`, not NumPy's `dot`. The unconjugated
+bilinear product is `mtl5.dot_real`, which is what `np.dot` does for 1-D
+complex. Both exist because both are wanted; the names say which is which.
+
+**`.T` does not conjugate.** MTL5's transpose is the plain one. `.H` (or
+`mtl5.adjoint`) is the conjugate transpose. For real elements the two coincide,
+which is exactly why the distinction has to be explicit here.
+
+**Hermitian and symmetric are different properties.** `mtl5.is_hermitian(A)`
+tests `A == Aᴴ` and `mtl5.is_symmetric(A)` tests `A == Aᵀ`; for complex those
+are not the same matrix, and which one you have decides which solver is right.
+
+What is available: containers and factories, all four norms, `dot`/`dot_real`,
+`matmul`/`matvec`, `solve`/`lu`/`inv`, `transpose`/`adjoint`/`conj`, and
+`ldlt_solve`. What is not: `cholesky`, `qr`, `lq`, `bunch_kaufman`, the eigen
+and SVD family, and the Krylov solvers — MTL5 has no complex implementation of
+any of them, and complex input raises a `TypeError` naming the alternative
+rather than silently taking a real part.
+
+`mtl5.ldlt_solve` is the one place a guard was needed. MTL5's `ldlt` is LDLᵀ
+with no conjugation, so it is correct for a complex *symmetric* matrix and
+wrong for a Hermitian one — and it reports success either way. Hermitian input
+is refused here; use `mtl5.solve`, which handles it correctly.
+
+```python
+S = mtl5.matrix(np.array([[2 + 1j, 1 - 1j], [1 - 1j, 3 + 2j]]))  # A == A^T
+mtl5.ldlt_solve(S, b)  # fine
+
+H = mtl5.matrix(np.array([[2 + 0j, 1 - 1j], [1 + 1j, 3 + 0j]]))  # A == A^H
+mtl5.ldlt_solve(H, b)  # ValueError, by design
+```
+
+Complex is not in `mtl5.dtypes()`, which lists what `mtl5.convert()` accepts —
+the Universal number systems are real-only, so there is no complex target.
+
 ## Sparse direct solvers
 
 Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:

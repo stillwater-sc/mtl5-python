@@ -17,6 +17,7 @@
 #include <universal/number/fixpnt/fixpnt.hpp>
 #include <universal/number/lns/lns.hpp>
 
+#include <complex>
 #include <cstddef>
 #include <string>
 
@@ -66,6 +67,15 @@ using fixpnt16 = sw::universal::fixpnt<16, 8, sw::universal::Saturate>;
 using lns16 = sw::universal::lns<16, 8>;
 using lns32 = sw::universal::lns<32, 16>;
 
+// Complex, named for NumPy's convention: the digits are the TOTAL width, so
+// c64 is a pair of float32 and c128 a pair of float64.
+using c64  = std::complex<float>;
+using c128 = std::complex<double>;
+
+template <typename T> struct is_complex : std::false_type {};
+template <typename T> struct is_complex<std::complex<T>> : std::true_type {};
+template <typename T> inline constexpr bool is_complex_v = is_complex<T>::value;
+
 // ---------------------------------------------------------------------------
 // Human-readable suffix for Python class names and dtype strings
 // ---------------------------------------------------------------------------
@@ -84,6 +94,8 @@ template <> constexpr const char* type_suffix<fixpnt8>() { return "fixpnt8"; }
 template <> constexpr const char* type_suffix<fixpnt16>(){ return "fixpnt16"; }
 template <> constexpr const char* type_suffix<lns16>()   { return "lns16"; }
 template <> constexpr const char* type_suffix<lns32>()   { return "lns32"; }
+template <> constexpr const char* type_suffix<c64>()     { return "c64"; }
+template <> constexpr const char* type_suffix<c128>()    { return "c128"; }
 
 // ===========================================================================
 // VectorView<T> — zero-copy wrapper around dense_vector<T>
@@ -161,6 +173,9 @@ void register_dense_factorizations(nb::module_& m);
 // SVD (and the condition/rank queries built on it) is withheld pending
 // stillwater-sc/mtl5#337.
 void register_dense_ops(nb::module_& m);
+
+// Registered by mtl5_complex.cpp — complex element types.
+void register_complex(nb::module_& m);
 
 // Registered by mtl5_io.cpp — Matrix Market I/O and spy PNG output.
 void register_io(nb::module_& m);
