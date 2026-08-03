@@ -69,7 +69,9 @@ jobs:
           echo "CXX=clang++-15" >> $GITHUB_ENV
 
       - name: Install package
-        run: pip install ".[dev]" -v
+        # matplotlib comes from the notebooks extra; tests/test_notebooks.py
+        # executes every notebook so the docs cannot rot, and skips without it.
+        run: pip install ".[dev,notebooks]" -v
 
       - name: Run tests
         run: pytest -v
@@ -83,7 +85,7 @@ jobs:
           python-version: "3.12"
       - name: Install with all optional dependencies
         run: |
-          pip install ".[dev]" -v
+          pip install ".[dev,notebooks]" -v
           pip install pandas scikit-learn
           # torch and jax are large; install CPU-only variants
           pip install torch --index-url https://download.pytorch.org/whl/cpu
