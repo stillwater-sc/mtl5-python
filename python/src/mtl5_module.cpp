@@ -1349,6 +1349,11 @@ NB_MODULE(_core, m) {
 #else
     constexpr bool has_highway = false;
 #endif
+#ifdef MTL5_HAS_ZLIB
+    constexpr bool has_zlib = true;   // transparent .gz Matrix Market reading
+#else
+    constexpr bool has_zlib = false;
+#endif
 
     // Dispatch order, highest preference first. "native" is MTL5's own blocked
     // GEMM / SIMD GEMV path (MTL5_NATIVE_FAST_GEMM); "reference" is the generic
@@ -1400,13 +1405,14 @@ NB_MODULE(_core, m) {
        "Assert that a compute backend is available (selection is compile-time)");
 
     m.def("build_info", [has_kpu, has_blas, has_lapack,
-                         has_native_fast_gemm, has_highway]() {
+                         has_native_fast_gemm, has_highway, has_zlib]() {
         nb::dict d;
         d["blas"]             = has_blas;
         d["lapack"]           = has_lapack;
         d["native_fast_gemm"] = has_native_fast_gemm;
         d["highway_simd"]     = has_highway;
         d["kpu"]              = has_kpu;
+        d["zlib"]             = has_zlib;
         return d;
     }, "Compile-time feature flags of this build, as a dict");
 
@@ -1483,6 +1489,9 @@ NB_MODULE(_core, m) {
 
     // ----- Test-matrix generators and range vectors --------------------------
     register_generators(m);
+
+    // ----- Matrix Market I/O and spy visualization ---------------------------
+    register_io(m);
 
     // ----- Universal number types (copy-converting from float64) -------------
     // Standard IEEE-style cfloat configurations

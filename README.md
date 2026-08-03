@@ -107,6 +107,37 @@ degrades the answer.
 through any factorization exposing `solve()` — the sparse direct factorizations
 below, or the ILU(0)/IC(0) preconditioners.
 
+## Matrix Market I/O and sparsity pictures
+
+```python
+A = mtl5.io.mm_read("circuit.mtx")  # -> CSR
+D = mtl5.io.mm_read_dense("small.mtx")  # -> dense
+mtl5.io.mm_write_sparse("out.mtx", A, "comment")
+
+mtl5.io.spy(A, "pattern.png")  # binary non-zero pattern
+mtl5.io.spy_magnitude(A, "mag.png", log_scale=True)
+mtl5.io.spy_density(A, "dens.png", max_pixels=512)
+```
+
+Two things differ from what a SciPy user expects.
+
+**The function picks the container, not the file.** `scipy.io.mmread` returns an
+ndarray for an `array` file and COO for a `coordinate` one. Here `mm_read`
+always gives CSR and `mm_read_dense` always gives dense, and *both* accept
+either file format — so reading a dense `.mtx` into CSR is a deliberate call
+rather than an error.
+
+**The PNGs are uncompressed.** MTL5 writes them with a from-scratch encoder
+emitting DEFLATE *stored* blocks, which is what lets `spy` work with no image
+library and no plotting stack in the process. File size is therefore about
+`width × height × channels` — the default `max_pixels=1024` on a large matrix
+gives roughly a 3 MB RGB file. Pipe it through any PNG optimizer if that
+matters.
+
+`.gz` inputs are read transparently only when MTL5 is built with zlib
+(`-C cmake.define.MTL5_WITH_ZLIB=ON`); `mtl5.build_info()["zlib"]` reports it,
+and without it a `.gz` path raises rather than silently mis-parsing.
+
 ## Test matrices
 
 A named catalog of matrices with known pathologies — the inputs a

@@ -388,6 +388,11 @@ logspace = _range_fn(_logspace, "logspace")
 geomspace = _range_fn(_geomspace, "geomspace")
 
 
+# `io` is a Python module wrapping _core.io — it adds NumPy coercion and
+# documents the two behaviours that differ from scipy.io. Importing it here
+# binds mtl5.io to the wrapper rather than the bare extension submodule.
+from mtl5 import io  # noqa: E402
+
 # Optional pandas extension types — only loaded if pandas is installed
 try:
     from mtl5.pandas_ext import HAS_PANDAS  # noqa: F401
@@ -509,6 +514,8 @@ __all__ = [
     "trsm",
     "trsv",
     # Operations
+    # I/O
+    "io",
     # Generators and range vectors
     "generators",
     "arange",

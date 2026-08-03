@@ -162,6 +162,9 @@ void register_dense_factorizations(nb::module_& m);
 // stillwater-sc/mtl5#337.
 void register_dense_ops(nb::module_& m);
 
+// Registered by mtl5_io.cpp — Matrix Market I/O and spy PNG output.
+void register_io(nb::module_& m);
+
 // Registered by mtl5_generators.cpp — named test matrices and range vectors.
 void register_generators(nb::module_& m);
 
