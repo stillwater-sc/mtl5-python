@@ -107,6 +107,49 @@ degrades the answer.
 through any factorization exposing `solve()` — the sparse direct factorizations
 below, or the ILU(0)/IC(0) preconditioners.
 
+## Test matrices
+
+A named catalog of matrices with known pathologies — the inputs a
+mixed-precision experiment actually wants, and tedious to hand-roll correctly:
+
+```python
+g = mtl5.generators
+
+g.hilbert(8)  # cond ~1.5e10 — the canonical ill-conditioned matrix
+g.clement(7)  # eigenvalues exactly -6,-4,-2,0,2,4,6
+g.randspd(4, [1, 10, 100, 1000])  # SPD with exactly that spectrum
+g.randsym(4, [-5, -1, 2, 7])  # controlled *indefinite* matrix
+g.randsvd(20, 20, kappa=1e6)  # condition number exactly 1e6
+g.laplacian_2d(64, 64)  # sparse, the usual solver benchmark
+```
+
+Also `frank`, `pascal`, `wilkinson`, `rosser`, `magic`, `lehmer`, `lotkin`,
+`minij`, `ones`, `forsythe`, `kahan`, `moler`, `companion`, `vandermonde`,
+`randorth`, `laplacian_1d`, `poisson2d`, and the published catalog via
+`testsuite_names()` / `testsuite_kappa(name)`.
+
+Every dense generator takes `dtype=`, which is what makes them useful here:
+
+```python
+H = g.hilbert(8, dtype="posit16")  # correctly rounded posit16 Hilbert
+mtl5.cholesky(H)  # ...then watch it fail
+```
+
+Generation happens in float64 and `dtype=` rounds. That is the right semantics
+for a test matrix — the definitions are over the reals, so you want the
+correctly rounded representation of the exact entry, not the result of
+evaluating the formula in low-precision arithmetic.
+
+Range vectors follow NumPy, and take `dtype=` too:
+
+```python
+mtl5.linspace(0, 1, 5)
+mtl5.arange(0, 10, 3)
+mtl5.logspace(0, 3, 4)
+mtl5.geomspace(1, 1000, 4)  # 1, 10, 100, 1000 — a true geometric
+# progression, not logspace's exponents
+```
+
 ## Dense factorizations
 
 ```python
