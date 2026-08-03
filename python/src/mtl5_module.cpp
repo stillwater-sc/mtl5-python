@@ -10,7 +10,9 @@
 #include <mtl/operation/operators.hpp>
 #include <mtl/operation/lu.hpp>
 #include <mtl/operation/cholesky.hpp>
+#include <mtl/mat/coordinate2D.hpp>
 #include <mtl/operation/mult.hpp>
+#include <mtl/operation/trans.hpp>
 #include <mtl/operation/inv.hpp>
 #include <mtl/mat/compressed2D.hpp>
 
@@ -1082,6 +1084,51 @@ void register_sparse_matrix(nb::module_& m) {
             }
             return VV(std::move(y));
         }, "x"_a)
+        // Transpose product, native. mtl::trans gives a lightweight view that
+        // mult reads column-wise, so this needs no second copy of the matrix
+        // and no round trip through scipy -- which is what mtl5.sparse's
+        // LinearOperator had to do for rmatvec before this existed. The view
+        // borrows A and is consumed here, so its lifetime is contained.
+        .def("rmatvec", [](const SMat& A, const VV& x) {
+            if (A.num_rows() != x.vec.size())
+                throw std::invalid_argument("rmatvec: A.num_rows must equal len(x)");
+            mtl::vec::dense_vector<T> y(A.num_cols());
+            {
+                nogil guard;
+                mtl::mult(mtl::trans(A), x.vec, y);
+            }
+            return VV(std::move(y));
+        }, "x"_a, "Transpose product: y = A.T @ x")
+        .def("rmatvec", [](const SMat& A,
+                           nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
+            if (A.num_rows() != x_np.shape(0))
+                throw std::invalid_argument("rmatvec: A.num_rows must equal len(x)");
+            const std::size_t n = x_np.shape(0);
+            const T* xp = x_np.data();
+            mtl::vec::dense_vector<T> y(A.num_cols());
+            {
+                nogil guard;
+                mtl::vec::dense_vector<T> x(n);
+                for (std::size_t i = 0; i < n; ++i) x[i] = xp[i];
+                mtl::mult(mtl::trans(A), x, y);
+            }
+            return VV(std::move(y));
+        }, "x"_a)
+        .def("tocoo", [](const SMat& A) {
+            mtl::mat::coordinate2D<T> out(A.num_rows(), A.num_cols());
+            {
+                nogil guard;
+                out.reserve(A.nnz());
+                const auto& starts = A.ref_major();
+                const auto& idx    = A.ref_minor();
+                const auto& val    = A.ref_data();
+                for (std::size_t i = 0; i < A.num_rows(); ++i)
+                    for (std::size_t k = starts[i]; k < starts[i + 1]; ++k)
+                        out.insert(i, idx[k], val[k]);
+                out.sort();
+            }
+            return out;
+        }, "Convert to COO (triplet) form")
         .def("__repr__", [](const SMat& A) {
             std::ostringstream os;
             os << "mtl5.SparseMatrix_" << type_suffix<T>()
@@ -1492,6 +1539,9 @@ NB_MODULE(_core, m) {
 
     // ----- Matrix Market I/O and spy visualization ---------------------------
     register_io(m);
+
+    // ----- Alternative sparse storage formats: COO and ELL --------------------
+    register_sparse_formats(m);
 
     // ----- Complex element types (c64, c128) ---------------------------------
     // Registered after the real overloads so that a complex NumPy array matches
