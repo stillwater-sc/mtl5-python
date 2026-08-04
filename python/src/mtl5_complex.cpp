@@ -40,6 +40,7 @@
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 
+#include <mtl/operation/cholesky.hpp>
 #include <mtl/operation/conj.hpp>
 #include <mtl/operation/dot.hpp>
 #include <mtl/operation/inv.hpp>
@@ -601,13 +602,98 @@ void register_complex_lu(nb::module_& m) {
 }
 
 // ---------------------------------------------------------------------------
-// LDL^T -- guarded
+// Hermitian Cholesky, A = L L^H
 //
-// MTL5's ldlt has no conjugation anywhere in it, so it computes A = L D L^T.
-// That is the right thing for a complex *symmetric* matrix and the wrong thing
-// for a Hermitian one, where the answer comes back with info=0 and no warning.
-// Verified: on [[2, 1-i], [1+i, 3]] it returns x = [1.9+0.3i, -0.2+0.6i] where
-// the answer is [1, i]. So refuse that input here instead of returning it.
+// MTL5's plain `cholesky_factor` computes A = L L^T and orders the diagonal to
+// test positive definiteness, neither of which means anything for a complex
+// element type -- it static_asserts against complex and points here. This is
+// upstream's answer to stillwater-sc/mtl5#353, and it also accepts real
+// symmetric input, so it is a superset rather than a parallel path.
+// ---------------------------------------------------------------------------
+template <typename T>
+struct ComplexCholesky {
+    mtl::mat::dense2D<T> L;
+    std::size_t n;
+
+    explicit ComplexCholesky(mtl::mat::dense2D<T> A) : L(std::move(A)), n(L.num_rows()) {
+        const int info = mtl::cholesky_h_factor(L);
+        if (info == mtl::CHOLESKY_NOT_HERMITIAN)
+            throw std::invalid_argument(
+                "cholesky: the matrix is not Hermitian -- its diagonal has a "
+                "non-real entry, which A = L L^H cannot produce. Use "
+                "mtl5.solve() for a general complex system.");
+        if (info != 0)
+            throw std::runtime_error(
+                "cholesky: matrix is not Hermitian positive definite (failure at "
+                "row " + std::to_string(info - 1) + ")");
+    }
+};
+
+template <typename T>
+void register_complex_cholesky(nb::module_& m) {
+    using CF = ComplexCholesky<T>;
+    const std::string name = std::string("CholeskyFactor_") + type_suffix<T>();
+
+    nb::class_<CF>(m, name.c_str())
+        .def_prop_ro("n", [](const CF& f) { return f.n; })
+        .def_prop_ro("dtype", [](const CF&) { return type_suffix<T>(); })
+        .def_prop_ro("shape", [](const CF& f) {
+            return std::pair<std::size_t, std::size_t>(f.n, f.n);
+        })
+        .def("solve", [](const CF& f, const VectorView<T>& b) {
+            if (b.vec.size() != f.n)
+                throw std::invalid_argument("cholesky.solve: dimension mismatch");
+            mtl::vec::dense_vector<T> x(f.n);
+            {
+                nogil guard;
+                mtl::cholesky_h_solve(f.L, x, owned_copy(b));
+            }
+            return VectorView<T>(std::move(x));
+        }, "b"_a, "Solve A x = b using the Hermitian Cholesky factor")
+        .def("__repr__", [name](const CF& f) {
+            return "mtl5." + name + "(n=" + std::to_string(f.n) + ")";
+        });
+
+    m.def("cholesky", [](const MatrixView<T>& A) {
+        require_square(A.mat, "cholesky");
+        nogil guard;
+        return CF(owned_copy(A));
+    }, "A"_a,
+       "Cholesky factorization A = L L^H of a Hermitian positive definite "
+       "matrix. Complex uses MTL5's cholesky_h; the plain L L^T form is not "
+       "meaningful for complex elements.");
+
+    m.def("cholesky", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
+        if (a.shape(0) != a.shape(1))
+            throw std::invalid_argument("cholesky: A must be square");
+        const std::size_t n = a.shape(0);
+        const T* src = a.data();
+        mtl::mat::dense2D<T> A(n, n);
+        {
+            nogil guard;
+            for (std::size_t i = 0; i < n; ++i)
+                for (std::size_t j = 0; j < n; ++j)
+                    A(i, j) = src[i * n + j];
+        }
+        return CF(std::move(A));
+    }, "A"_a);
+}
+
+// ---------------------------------------------------------------------------
+// LDL^T / LDL^H -- dispatched on the matrix
+//
+// MTL5 has both: `ldlt` computes A = L D L^T, correct for a complex *symmetric*
+// matrix, and `ldlt_h` computes A = L D L^H, correct for a *Hermitian* one.
+// Those are different factorizations of different matrices, and feeding either
+// the other's input gives a wrong answer -- which is what stillwater-sc/mtl5#352
+// was: before `ldlt_h` existed, plain `ldlt` accepted Hermitian input and
+// returned x = [1.9+0.3i, -0.2+0.6i] on [[2, 1-i], [1+i, 3]] where the answer is
+// [1, i], reporting info = 0 throughout.
+//
+// This binding used to refuse Hermitian input for exactly that reason. Now that
+// upstream provides LDL^H it dispatches instead, so both cases are served and
+// neither can reach the wrong kernel. A matrix that is both (a real-valued
+// complex matrix) takes the Hermitian branch, where the two coincide.
 // ---------------------------------------------------------------------------
 template <typename T>
 void register_complex_ldlt(nb::module_& m) {
@@ -623,31 +709,32 @@ void register_complex_ldlt(nb::module_& m) {
             symmetric = mtl::is_symmetric(A_mv.mat);
             hermitian = mtl::is_hermitian(A_mv.mat);
         }
-        if (!symmetric) {
+        if (!symmetric && !hermitian)
             throw std::invalid_argument(
-                hermitian
-                    ? "ldlt_solve: this is LDL^T, not LDL^H, and the matrix is "
-                      "Hermitian but not symmetric. LDL^T would return a wrong "
-                      "answer without reporting an error. Use mtl5.solve(), "
-                      "which is a general complex LU and handles this correctly."
-                    : "ldlt_solve: matrix must be complex symmetric (A == A^T)");
-        }
+                "ldlt_solve: matrix must be complex symmetric (A == A^T) or "
+                "Hermitian (A == A^H). Use mtl5.solve() for a general complex "
+                "system.");
 
         mtl::vec::dense_vector<T> x(n);
         {
             nogil guard;
             auto LD = owned_copy(A_mv);
-            int info = mtl::ldlt_factor(LD);
+            // Hermitian first: when a matrix is both, the two factorizations
+            // agree, and LDL^H is the one whose D is real.
+            const int info = hermitian ? mtl::ldlt_h_factor(LD)
+                                       : mtl::ldlt_factor(LD);
             if (info != 0)
                 throw std::runtime_error(
                     "ldlt_solve: zero pivot at row " + std::to_string(info - 1));
-            mtl::ldlt_solve(LD, x, owned_copy(b_vv));
+            if (hermitian) mtl::ldlt_h_solve(LD, x, owned_copy(b_vv));
+            else           mtl::ldlt_solve(LD, x, owned_copy(b_vv));
         }
         return VectorView<T>(std::move(x));
     }, "A"_a, "b"_a,
-       "Solve A x = b by LDL^T for a complex SYMMETRIC matrix (A == A^T). "
-       "Hermitian input is refused: MTL5's ldlt does not conjugate, so it "
-       "would silently return the wrong answer. Use mtl5.solve() for those.");
+       "Solve A x = b by LDL^T for a complex symmetric matrix (A == A^T) or by "
+       "LDL^H for a Hermitian one (A == A^H), chosen from the matrix. Those are "
+       "different factorizations; sending either input to the other's kernel "
+       "gives a wrong answer, so anything that is neither is refused.");
 }
 
 template <typename T>
@@ -659,6 +746,7 @@ void register_for(nb::module_& m) {
     register_complex_dot<T>(m);
     register_complex_ops<T>(m);
     register_complex_lu<T>(m);
+    register_complex_cholesky<T>(m);
     register_complex_ldlt<T>(m);
 }
 

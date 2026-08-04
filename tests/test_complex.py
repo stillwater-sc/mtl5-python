@@ -312,10 +312,12 @@ class TestSolve:
             mtl5.inv(A)
 
 
-class TestLdltIsTransposeNotHermitian:
-    """MTL5's ldlt has no conjugation in it, so it computes A = L D L^T. That is
-    right for a complex symmetric matrix and silently wrong for a Hermitian one
-    — it returns info=0 and a bad answer. The binding refuses that input."""
+class TestLdltDispatchesOnTheMatrix:
+    """MTL5 has both LDL^T (complex symmetric) and LDL^H (Hermitian), so the
+    binding chooses from the matrix. Before LDL^H existed upstream, plain LDL^T
+    accepted Hermitian input and returned a wrong answer with info=0
+    (stillwater-sc/mtl5#352); this binding refused it rather than pass it
+    through, and now routes it instead."""
 
     def test_correct_on_complex_symmetric(self, cdtype):
         np_dt, _, tol = cdtype
@@ -323,44 +325,55 @@ class TestLdltIsTransposeNotHermitian:
         b = mtl5.vector((SYMMETRIC @ X_TRUE).astype(np_dt))
         np.testing.assert_allclose(mtl5.ldlt_solve(A, b).to_numpy(), X_TRUE, rtol=tol, atol=tol)
 
-    def test_hermitian_input_is_refused(self):
-        A = mtl5.matrix(HERMITIAN)
-        b = mtl5.vector(HERMITIAN @ X_TRUE)
-        with pytest.raises(ValueError, match="LDL\\^T, not LDL\\^H"):
-            mtl5.ldlt_solve(A, b)
+    def test_correct_on_hermitian(self, cdtype):
+        """The exact case from mtl5#352, which used to give
+        [1.9+0.3i, -0.2+0.6i] upstream and a ValueError here."""
+        np_dt, _, tol = cdtype
+        A = mtl5.matrix(HERMITIAN.astype(np_dt))
+        b = mtl5.vector((HERMITIAN @ X_TRUE).astype(np_dt))
+        np.testing.assert_allclose(mtl5.ldlt_solve(A, b).to_numpy(), X_TRUE, rtol=tol, atol=tol)
 
-    def test_the_refusal_is_not_theoretical(self):
-        """The wrong answer LDL^T would have given is genuinely wrong, so the
-        guard is load-bearing rather than defensive."""
+    def test_the_two_kernels_really_are_different(self):
+        """If LDL^T and LDL^H coincided, dispatching would be pointless. They do
+        not: solving with A^T in place of A^H gives a different answer."""
         assert not np.allclose(
             np.linalg.solve(HERMITIAN, HERMITIAN @ X_TRUE),
             np.linalg.solve(HERMITIAN.T, HERMITIAN @ X_TRUE),
         )
 
-    def test_general_matrix_is_refused(self):
+    def test_a_matrix_that_is_neither_is_refused(self):
         A = mtl5.matrix(np.array([[1 + 0j, 2 + 0j], [3 + 0j, 4 + 0j]]))
         b = mtl5.vector(np.ones(2, dtype=np.complex128))
-        with pytest.raises(ValueError, match="symmetric"):
+        with pytest.raises(ValueError, match="symmetric.*Hermitian"):
             mtl5.ldlt_solve(A, b)
+
+    def test_a_real_valued_complex_matrix_works(self):
+        """Both properties hold at once; the Hermitian branch is taken and the
+        two factorizations agree there."""
+        R = np.array([[4 + 0j, 1 + 0j], [1 + 0j, 3 + 0j]])
+        b = R @ X_TRUE
+        np.testing.assert_allclose(
+            mtl5.ldlt_solve(mtl5.matrix(R), mtl5.vector(b)).to_numpy(), X_TRUE, atol=1e-13
+        )
 
 
 class TestUnsupportedOperationsRefuse:
-    """Cholesky does not compile for complex in MTL5 (it compares a complex
-    against a complex where a magnitude is meant), `ldlt` is LDL^T rather than
-    LDL^H, and there is no complex eigensolver or SVD. Complex input must earn a
-    clear message that names a working alternative, not a confusing one from
-    deep inside.
+    """`mtl5.ldlt` returns a factor object built on LDL^T, which is not the
+    right factorization for a Hermitian matrix — complex callers go through
+    `ldlt_solve`, which dispatches. `bunch_kaufman` has no complex form at all,
+    and there is no complex eigensolver or SVD. Each must earn a clear message
+    naming a working alternative, not a confusing one from deep inside.
 
-    QR and LQ are deliberately absent from this list: MTL5 gained a complex
-    Householder, and they are bound — see TestComplexQRAndLQ.
+    QR, LQ and Cholesky are deliberately absent from this list: MTL5 gained a
+    complex Householder and a Hermitian Cholesky, and all three are bound.
     """
 
-    @pytest.mark.parametrize("fn", ["cholesky", "ldlt", "bunch_kaufman"])
+    @pytest.mark.parametrize("fn", ["ldlt", "bunch_kaufman"])
     def test_factorizations_reject_complex_clearly(self, fn):
         with pytest.raises(TypeError, match="complex128"):
             getattr(mtl5, fn)(HERMITIAN)
 
-    @pytest.mark.parametrize("fn", ["cholesky", "ldlt", "bunch_kaufman"])
+    @pytest.mark.parametrize("fn", ["ldlt", "bunch_kaufman"])
     def test_an_mtl5_complex_matrix_is_refused_too(self, fn):
         """Not just NumPy input — a DenseMatrix_c128 takes a different branch."""
         with pytest.raises(TypeError, match="c128"):
@@ -368,7 +381,72 @@ class TestUnsupportedOperationsRefuse:
 
     def test_the_message_points_somewhere_useful(self):
         with pytest.raises(TypeError, match="mtl5.solve"):
-            mtl5.cholesky(HERMITIAN)
+            mtl5.bunch_kaufman(HERMITIAN)
+
+
+class TestHermitianCholesky:
+    """MTL5's plain `cholesky_factor` computes A = L L^T and orders the diagonal
+    to test definiteness — neither is meaningful for complex, and it
+    static_asserts against it. `cholesky_h` (upstream's answer to mtl5#353)
+    computes A = L L^H, and `mtl5.cholesky` routes complex there."""
+
+    # Hermitian positive definite: eigenvalues 1 and 4.
+    H = np.array([[2 + 0j, 1 - 1j], [1 + 1j, 3 + 0j]])
+
+    def test_solves_correctly(self, cdtype):
+        np_dt, suffix, tol = cdtype
+        f = mtl5.cholesky(self.H.astype(np_dt))
+        assert f.dtype == suffix
+        assert f.n == 2
+        assert f.shape == (2, 2)
+        b = (self.H @ X_TRUE).astype(np_dt)
+        x = f.solve(mtl5.vector(b)).to_numpy()
+        np.testing.assert_allclose(x, X_TRUE, rtol=tol, atol=tol)
+
+    def test_matches_numpy(self):
+        b = self.H @ X_TRUE
+        x = mtl5.cholesky(self.H).solve(mtl5.vector(b)).to_numpy()
+        np.testing.assert_allclose(x, np.linalg.solve(self.H, b), atol=1e-13)
+
+    def test_accepts_an_mtl5_matrix(self):
+        b = self.H @ X_TRUE
+        x = mtl5.cholesky(mtl5.matrix(self.H)).solve(mtl5.vector(b)).to_numpy()
+        np.testing.assert_allclose(x, X_TRUE, atol=1e-13)
+
+    def test_non_hermitian_is_refused(self):
+        """A non-real diagonal cannot come from L L^H, and upstream reports it
+        as CHOLESKY_NOT_HERMITIAN rather than as a definiteness failure — the
+        message should say which of the two went wrong."""
+        with pytest.raises(ValueError, match="not Hermitian"):
+            mtl5.cholesky(SYMMETRIC)
+
+    def test_not_positive_definite_is_refused(self):
+        """Hermitian but indefinite: eigenvalues 4 and -2."""
+        indefinite = np.array([[1 + 0j, 3 + 0j], [3 + 0j, 1 + 0j]])
+        with pytest.raises(RuntimeError, match="positive definite"):
+            mtl5.cholesky(indefinite)
+
+    def test_repeated_solves_reuse_the_factor(self):
+        f = mtl5.cholesky(self.H)
+        for x_true in (X_TRUE, np.array([2 + 0j, 1 - 3j])):
+            b = self.H @ x_true
+            np.testing.assert_allclose(f.solve(mtl5.vector(b)).to_numpy(), x_true, atol=1e-13)
+
+    def test_the_factor_classes_are_exported(self):
+        for name in ("CholeskyFactor_c64", "CholeskyFactor_c128"):
+            assert name in mtl5.__all__, f"{name} missing from __all__"
+            assert hasattr(mtl5, name)
+
+    def test_the_real_path_is_untouched(self):
+        """Real input must still go through the plain cholesky, which also
+        accepts the Universal dtypes — routing everything through cholesky_h
+        would have changed that."""
+        R = np.array([[4.0, 1.0], [1.0, 3.0]])
+        f = mtl5.cholesky(R)
+        assert "f64" in repr(f)
+        np.testing.assert_allclose(
+            f.solve(mtl5.vector(np.array([5.0, 4.0]))).to_numpy(), [1.0, 1.0], atol=1e-13
+        )
 
 
 class TestComplexQRAndLQ:

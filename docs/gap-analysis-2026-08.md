@@ -221,29 +221,40 @@ checking the answer, not just the compile:
 | `lu_factor`/`lu_solve`, `inv` | ✅ |
 | `trans` (**plain** transpose — does not conjugate) | ✅ |
 | `conj`, `is_hermitian`, `is_symmetric` | ✅ |
-| `ldlt` | ⚠️ LDLᵀ, not LDLᴴ — see below |
+| `ldlt` / `ldlt_h` | ✅ both, dispatched on the matrix |
 | `qr`, `lq` (Householder, incl. least squares) | ✅ since MTL5 `aa3b52c` |
-| `cholesky` | ❌ does not compile |
+| `cholesky` (Hermitian, A = L·Lᴴ) | ✅ since MTL5 `95270f7` |
 | `eigenvalue`, `svd` | ❌ would need `complex<complex>` |
 | `cg` / `gmres` / `bicgstab` and the preconditioners | ❌ Krylov layer is real-only |
 
-Two findings worth carrying upstream:
+Three gaps were found here and all three were fixed upstream:
 
-* **`ldlt` is silently wrong on Hermitian input.** `operation/ldlt.hpp` contains no
-  conjugation anywhere, so it computes A = L D Lᵀ. That is correct for a complex
-  *symmetric* matrix and wrong for a Hermitian one — and it returns `info = 0` either way.
-  Measured on `[[2, 1-i], [1+i, 3]]` it gives `x = [1.9+0.3i, -0.2+0.6i]` where the answer
-  is `[1, i]`. The binding refuses Hermitian-but-not-symmetric input rather than passing it
-  through; there is no LDLᴴ to offer instead.
-* **`qr`/`lq`: fixed upstream, now bound.** Filed as
+* **`ldlt` was silently wrong on Hermitian input** — `operation/ldlt.hpp` had no
+  conjugation anywhere, so it computed A = L D Lᵀ and returned `info = 0` on Hermitian
+  input too. Measured on `[[2, 1-i], [1+i, 3]]`: `x = [1.9+0.3i, -0.2+0.6i]` where the
+  answer is `[1, i]`. Filed as
+  [stillwater-sc/mtl5#352](https://github.com/stillwater-sc/mtl5/issues/352) and fixed in
+  MTL5 `95270f7`, which added `ldlt_h_factor`/`ldlt_h_solve` (A = L D Lᴴ) — the most
+  ambitious of the three resolutions offered, since it adds the capability rather than only
+  refusing the input. Re-verified: the reproducer now returns `[1, i]` exactly, and
+  non-Hermitian input gets `LDLT_NOT_HERMITIAN` (-2). `mtl5.ldlt_solve` dispatched on the
+  matrix from that point on, replacing the refusal it had shipped with.
+* **`qr`/`lq` did not compile** — filed as
   [stillwater-sc/mtl5#353](https://github.com/stillwater-sc/mtl5/issues/353) and implemented
   in MTL5 `aa3b52c` ("complex Householder, QR and LQ"). Re-verified for the answer, not the
   compile: on a 4×2 complex matrix ‖QR − A‖ = 1.4e-15, ‖QᴴQ − I‖ = 4.4e-16, and `qr_solve`'s
   least-squares residual is orthogonal to range(A) to 3.5e-15 — which is what confirms it
   applies Qᴴ rather than Qᵀ. Bound as `mtl5.qr` / `mtl5.lq`.
-* **`cholesky` still does not compile**, at `cholesky.hpp:47` (`operator<=`), and its inner
-  product is unconjugated besides. #353 was closed on the QR half only, so this half remains
-  open.
+* **`cholesky` did not compile either**, and #353 was initially closed on the QR half only.
+  MTL5 `95270f7` added `cholesky_h_factor`/`cholesky_h_solve` (A = L·Lᴴ) and made
+  `cholesky_factor` `static_assert` against complex with a message naming them. Re-verified:
+  err 2.29e-16 on the Hermitian test matrix, ‖L·Lᴴ − H‖ = 4.44e-16, and a non-real diagonal
+  reports `CHOLESKY_NOT_HERMITIAN` (-2) rather than a definiteness failure. `mtl5.cholesky`
+  routes complex there; the real path is untouched, since it also serves the Universal dtypes.
+
+Both Hermitian variants also accept real symmetric input, so they are supersets rather than
+parallel paths — but the real bindings still use the original entry points, which are the
+ones instantiated for the Universal number systems.
 
 `hermitian_view` exists but has no binding.
 
