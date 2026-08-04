@@ -45,7 +45,7 @@ namespace {
 /// the container. Keeps `.solve()` consistent with `mtl5.solve` for each family.
 template <typename T>
 auto wrap_vector(mtl::vec::dense_vector<T>&& v) {
-    if constexpr (std::is_arithmetic_v<T>)
+    if constexpr (uses_view_wrapper_v<T>)
         return VectorView<T>(std::move(v));
     else
         return std::move(v);
@@ -53,7 +53,7 @@ auto wrap_vector(mtl::vec::dense_vector<T>&& v) {
 
 template <typename T>
 auto wrap_matrix(mtl::mat::dense2D<T>&& m) {
-    if constexpr (std::is_arithmetic_v<T>)
+    if constexpr (uses_view_wrapper_v<T>)
         return MatrixView<T>(std::move(m));
     else
         return std::move(m);
@@ -63,7 +63,7 @@ auto wrap_matrix(mtl::mat::dense2D<T>&& m) {
 template <typename T, typename Src>
 mtl::mat::dense2D<T> owned_copy(const Src& src) {
     const auto& A = [&]() -> const mtl::mat::dense2D<T>& {
-        if constexpr (std::is_arithmetic_v<T>) return src.mat;
+        if constexpr (uses_view_wrapper_v<T>) return src.mat;
         else                                   return src;
     }();
     mtl::mat::dense2D<T> out(A.num_rows(), A.num_cols());
@@ -75,16 +75,16 @@ mtl::mat::dense2D<T> owned_copy(const Src& src) {
 
 /// The Python-facing argument type for a matrix of element type T.
 template <typename T>
-using MatArg = std::conditional_t<std::is_arithmetic_v<T>, MatrixView<T>, mtl::mat::dense2D<T>>;
+using MatArg = std::conditional_t<uses_view_wrapper_v<T>, MatrixView<T>, mtl::mat::dense2D<T>>;
 
 /// ...and for a vector.
 template <typename T>
-using VecArg = std::conditional_t<std::is_arithmetic_v<T>,
+using VecArg = std::conditional_t<uses_view_wrapper_v<T>,
                                   VectorView<T>, mtl::vec::dense_vector<T>>;
 
 template <typename T>
 const mtl::vec::dense_vector<T>& as_vector(const VecArg<T>& v) {
-    if constexpr (std::is_arithmetic_v<T>) return v.vec;
+    if constexpr (uses_view_wrapper_v<T>) return v.vec;
     else                                   return v;
 }
 
@@ -423,6 +423,18 @@ void register_float_only(nb::module_& m) {
 void register_dense_factorizations(nb::module_& m) {
     register_float_only<float>(m);
     register_float_only<double>(m);
+
+    // QR and LQ for complex, but not Bunch-Kaufman. MTL5 gained a complex
+    // Householder in aa3b52c, and both factorizations were verified to give the
+    // right answer, not merely to compile: on a 4x2 complex matrix
+    // ||QR - A|| = 1.4e-15 and ||Q^H Q - I|| = 4.4e-16, and qr_solve's
+    // least-squares residual is orthogonal to range(A) to 3.5e-15, which is
+    // what confirms it applies Q^H rather than Q^T. Complex cholesky and
+    // ldlt_bk still do not compile upstream.
+    register_qr<c64>(m);
+    register_qr<c128>(m);
+    register_lq<c64>(m);
+    register_lq<c128>(m);
 
     // LDL^T everywhere — the point of #18 is comparing number systems.
     register_ldlt<float>(m);
