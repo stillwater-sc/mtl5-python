@@ -398,9 +398,8 @@ column's update chain, and each L/U entry is still rounded once on the way out.
 This is the mixed-precision knob a fixed-precision library structurally cannot
 offer.
 
-Because the mechanism is "fewer intermediate roundings per column", the benefit
-grows with fill. On a badly scaled random sparse matrix (n = 400, cond ≈ 2.8e10)
-factored in float32, forward error of the direct solve:
+On a badly scaled random sparse matrix (n = 400, cond ≈ 2.8e10) factored in
+float32, forward error of the direct solve — measured on x86-64 Linux:
 
 | ordering | nnz(L+U) | `f32` | `f64` | gain |
 |---|---|---|---|---|
@@ -408,7 +407,14 @@ factored in float32, forward error of the direct solve:
 | `amd` | 92 026 | 5.35 × 10⁻² | 3.17 × 10⁻² | 1.69× |
 | `natural` | 98 729 | 3.52 × 10⁻² | 1.39 × 10⁻² | 2.54× |
 
-A 1.3–2.5× improvement is worth having but is not the headline. The headline is
+The *direction* is robust — a wider accumulator gives a smaller forward error in
+every ordering, matrix and platform tried, and the test suite asserts that. The
+*magnitude* is not: it ranges from roughly 1.3× to 3.3×, and which ordering
+benefits most changes between platforms, so read the column above as one
+measurement rather than a trend. (An earlier draft of this section claimed the
+gain grows with fill; that held on Linux and reversed on macOS.)
+
+A 1.3–3× improvement is worth having but is not the headline. The headline is
 what it does to iterative refinement, which is what you would actually pair a
 narrow factor with — same matrix, `natural` ordering, refined against a float64
 residual:

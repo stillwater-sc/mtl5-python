@@ -13,9 +13,10 @@ This submodule provides:
   `LinearOperator`, enabling use with scipy.sparse.linalg iterative solvers
 - `accumulator=` on `splu`/`klu`/`supernodal_lu`/`supernodal_ldlt` — type the
   dense numeric workspace, so a float32 factor accumulates in float64. Measured
-  on an ill-conditioned matrix (cond ~2.8e10) factored in float32: 1.3-2.5x
-  better forward error directly, and paired with `mtl5.mixed.iterative_refine`,
-  4 iterations to 1.4e-10 instead of 6 to 2.0e-9. See the README.
+  on an ill-conditioned matrix (cond ~2.8e10) factored in float32, the forward
+  error always improves; by how much varies with ordering and platform (roughly
+  1.3x-3x). Paired with `mtl5.mixed.iterative_refine` it is 4 iterations to
+  1.4e-10 instead of 6 to 2.0e-9. See the README.
 - `cg`, `gmres`, `bicgstab` — iterative Krylov solvers returning (x, info)
 - `ilu0`, `ic0` — incomplete LU/Cholesky preconditioners
 
