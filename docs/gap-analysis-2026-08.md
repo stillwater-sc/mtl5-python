@@ -271,14 +271,17 @@ time; 1–4 are instantiated and rank 5+ raises rather than silently flattening.
 
 Four things did not come across, each for a stated reason:
 
-* **`ndarray::reshape` is unsound for a non-C-contiguous array.** It guards on
-  `is_contiguous()`, which means "contiguous in *either* C or F order" (`shape.hpp:158`), and
-  then rebuilds with the array's own `Order`. A transposed C-order array is F-contiguous, so
-  it passes the guard and is read back with C-order strides. Measured:
-  `[[1,2,3],[4,5,6]].transpose().reshape(6)` returns `[1,2,3,4,5,6]` where NumPy gives
-  `[1,4,2,5,3,6]`, with no error. The binding does not call it — it checks contiguity in the
-  array's own order, aliases when that holds and packs a logical-order copy otherwise, which
-  is also NumPy's contract.
+* **`ndarray::reshape` was unsound for a non-C-contiguous array — fixed upstream.** It
+  guarded on `is_contiguous()`, meaning "contiguous in *either* C or F order"
+  (`shape.hpp:158`), then rebuilt with the array's own `Order`; a transposed C-order array is
+  F-contiguous, so it passed the guard and was read back with C-order strides. Measured:
+  `[[1,2,3],[4,5,6]].transpose().reshape(6)` returned `[1,2,3,4,5,6]` where NumPy gives
+  `[1,4,2,5,3,6]`, with no error. Filed as
+  [stillwater-sc/mtl5#359](https://github.com/stillwater-sc/mtl5/issues/359) and fixed — it
+  now tests own-order contiguity and throws on the case it cannot alias. The binding still
+  does not call it, for a different reason: throwing is right for a C++ caller but not
+  NumPy's contract, where reshape never errors. So `mtl5.array` computes it — a view when it
+  can alias, a copy otherwise.
 * **`mtl::array::slice` is unreachable from Python.** It derives the result rank at compile
   time from the argument *types* (`count_kept_dims<Args...>`), so a runtime index tuple would
   need every {int, range, all} combination instantiated — 3^N per rank per dtype. `__getitem__`
@@ -287,13 +290,15 @@ Four things did not come across, each for a stated reason:
 * **Broadcasting is same-rank only.** `broadcast_shape` takes two `shape<N>` of equal `N`, so
   an extent of 1 stretches but NumPy's rank promotion does not. Reshape the operand first.
 
-* **`flatten` is wrong on an F-contiguous array, for the same reason.** It walks elements via
-  `for_each_element`, whose fast path triggers on the same `is_contiguous()` and then indexes
-  raw memory. Measured: flatten of the transpose of `[[1,2,3],[4,5,6]]` gives `[1,2,3,4,5,6]`
-  where NumPy gives `[1,4,2,5,3,6]`. The commutative reductions share that code path but are
-  unaffected — `sum`/`prod`/`min`/`max`/`mean` do not care what order they visit in — and
-  `sum_axis`/`mean_axis` index explicitly and are correct on strided input. `mtl5.array`
-  exposes `ravel` (view when possible) and `flatten` (always a copy), both in logical order.
+* **`flatten` was wrong on an F-contiguous array, from the same root cause — also fixed.** It
+  walked elements via `for_each_element`, whose fast path triggered on the same
+  `is_contiguous()` and then indexed raw memory: flatten of the transpose of
+  `[[1,2,3],[4,5,6]]` gave `[1,2,3,4,5,6]` where NumPy gives `[1,4,2,5,3,6]`. Part of #359 and
+  now correct. Worth recording, because it kept the fix narrow: the commutative reductions
+  share that code path but were never affected — `sum`/`prod`/`min`/`max`/`mean` do not care
+  what order they visit in — and `sum_axis`/`mean_axis` index explicitly and were correct on
+  strided input throughout. `mtl5.array` exposes `ravel` (a view when possible) and `flatten`
+  (always a copy), splitting NumPy's two behaviours, which upstream has no equivalent of.
 
 `transform`/`reduce` are not bound: they take C++ callables, so exposing them would mean a
 Python call per element — `to_numpy()` is the better answer.

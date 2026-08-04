@@ -5,17 +5,22 @@
 // float32 and float64; `mtl5.array.asarray` dispatches on the input's ndim and
 // refuses rank 5+ rather than silently flattening.
 //
-// Two upstream behaviours are worked around rather than passed through.
+// Two things differ from a direct pass-through of the upstream calls.
 //
-// **reshape.** `ndarray::reshape` guards on `is_contiguous()`, which means
-// "contiguous in *either* C or F order" (`shape.hpp:158`), and then builds the
-// result using the array's own `Order`. A transposed C-order array is
-// F-contiguous, so it passes that guard and is then read back with C-order
-// strides. Measured: `[[1,2,3],[4,5,6]].transpose().reshape(6)` gives
-// `[1,2,3,4,5,6]` -- raw memory order -- where NumPy gives `[1,4,2,5,3,6]`, and
-// nothing is raised. So `reshape` here checks contiguity in the array's *own*
-// order, returns a view when that holds and materialises a logical-order copy
-// otherwise. That is also NumPy's contract, which never errors on reshape.
+// **reshape.** `ndarray::reshape` used to guard on `is_contiguous()` -- meaning
+// "contiguous in *either* C or F order" -- and then build the result using the
+// array's own `Order`, so a transposed C-order array passed the guard and was
+// read back with the wrong strides:
+// `[[1,2,3],[4,5,6]].transpose().reshape(6)` returned `[1,2,3,4,5,6]` where
+// NumPy gives `[1,4,2,5,3,6]`, with nothing raised. Filed as
+// stillwater-sc/mtl5#359 and fixed upstream: it now tests contiguity in the
+// array's own order and throws on the case it cannot alias.
+//
+// This binding still does not call it, for a different reason. Throwing is the
+// right answer for a C++ caller but not NumPy's contract, where reshape never
+// errors -- it returns a view when the layout allows and a copy when it does
+// not. So `reshape` here checks own-order contiguity, aliases when that holds
+// and materialises a logical-order copy otherwise.
 //
 // **Slicing.** `mtl::array::slice` derives the result rank at compile time from
 // the argument *types* (`count_kept_dims<Args...>`), so a Python caller, whose
@@ -381,15 +386,15 @@ void register_ndarray(nb::module_& m) {
        "Reshape to any rank in 1..4. A view when the array is C-contiguous, a "
        "copy otherwise -- as NumPy does, and never an error.");
 
-    // MTL5's `flatten` has the same root cause as its reshape: it walks
-    // elements through `for_each_element`, whose fast path triggers on
-    // `is_contiguous()` (either order) and then indexes raw memory. On an
-    // F-contiguous array -- any transpose of a C array -- that yields memory
-    // order rather than logical order. Measured: flatten of the transpose of
-    // [[1,2,3],[4,5,6]] gives [1,2,3,4,5,6] where NumPy gives [1,4,2,5,3,6].
-    // (The commutative reductions are unaffected: sum/prod/min/max/mean do not
-    // care what order they visit in.) Both entry points below go through the
-    // logical-order path instead.
+    // `ravel` and `flatten` split NumPy's two behaviours: ravel returns a view
+    // when it can, flatten always copies. Both walk in logical order.
+    //
+    // MTL5's own `flatten` once shared the reshape defect above -- it walked
+    // elements through `for_each_element`, whose fast path triggered on
+    // `is_contiguous()` (either order) and then indexed raw memory, so on an
+    // F-contiguous array it produced memory order. That was part of
+    // stillwater-sc/mtl5#359 and is fixed upstream; these stay as they are
+    // because ravel's view-when-possible behaviour has no upstream equivalent.
     cls.def("ravel", [](nb::handle self) {
         NV& v = nb::cast<NV&>(self);
         if (is_c_contiguous(v.arr)) {

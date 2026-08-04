@@ -4,9 +4,10 @@ Nearly every assertion here is written against NumPy rather than against a
 hand-computed constant, because the whole point of the layer is to agree with
 NumPy about shapes, strides and element order. Two areas get extra attention:
 
-  * **reshape of a non-C-contiguous array.** MTL5's own `ndarray::reshape`
-    returns raw memory order there while reporting success — see
-    TestReshapeMatchesNumpy. The binding packs into logical order instead, and
+  * **reshape of a non-C-contiguous array.** MTL5's own `ndarray::reshape` used
+    to return raw memory order there while reporting success (mtl5#359, since
+    fixed upstream, where it now throws). The binding gives NumPy's semantics
+    instead — a view when it can alias, a copy otherwise, never an error — and
     these tests are what hold that line.
   * **views versus copies.** A slice or transpose must alias its source, and a
     reshape that cannot alias must not.
@@ -194,11 +195,10 @@ class TestTranspose:
 
 
 class TestReshapeMatchesNumpy:
-    """MTL5's `ndarray::reshape` guards on "contiguous in either order" and then
-    reads back with the array's own order. A transposed C array is F-contiguous,
-    so it passes and is misread — it returns raw memory order, with no error.
-    The binding packs into logical order instead. These are the tests that would
-    fail if that workaround were ever dropped.
+    """Reshape follows NumPy: a view when the layout allows aliasing, a copy
+    when it does not, and never an error. Upstream once returned raw memory
+    order here (mtl5#359) and now throws; neither is NumPy's contract, so the
+    binding computes it. These tests hold that line.
     """
 
     def test_contiguous_reshape_is_a_view(self):
@@ -209,7 +209,8 @@ class TestReshapeMatchesNumpy:
         assert a[0, 0] == 55.0, "a contiguous reshape should alias"
 
     def test_transposed_reshape_matches_numpy(self):
-        """The regression. Raw memory order would give [0,1,2,3,4,5]."""
+        """Raw memory order would give [0,1,2,3,4,5]; throwing, as upstream now
+        does, would not be NumPy's contract either."""
         a = arange(2, 3)
         got = A.asarray(a).T.reshape([6]).to_numpy()
         np.testing.assert_array_equal(got, a.T.reshape(6))
@@ -246,11 +247,9 @@ class TestReshapeMatchesNumpy:
 
 
 class TestRavelAndFlatten:
-    """MTL5's own `flatten` walks elements via `for_each_element`, whose fast
-    path triggers on `is_contiguous()` (either order) and then indexes raw
-    memory — so on a transposed array it returns memory order, not logical
-    order. Same root cause as the reshape bug. Both entry points here take the
-    logical-order path.
+    """NumPy's two behaviours, kept distinct: `ravel` returns a view when it
+    can, `flatten` always copies. Both walk in logical order — which upstream's
+    `flatten` did not, until mtl5#359 was fixed.
     """
 
     def test_ravel_of_a_contiguous_array_is_a_view(self):
@@ -262,7 +261,7 @@ class TestRavelAndFlatten:
         assert a[0, 0] == 21.0
 
     def test_ravel_of_a_transpose_matches_numpy(self):
-        """The regression. Memory order would give [0,1,2,3,4,5]."""
+        """Memory order would give [0,1,2,3,4,5]."""
         a = arange(2, 3)
         got = A.asarray(a).T.ravel().to_numpy()
         np.testing.assert_array_equal(got, a.T.ravel())

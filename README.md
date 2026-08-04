@@ -399,8 +399,9 @@ works, but NumPy's rank promotion — `(2,3) + (3,)` — does not, because MTL5'
 
 `reshape` and `ravel` return a view when the layout allows it and a copy
 otherwise, and never error; `flatten` always copies. All three give NumPy's
-element order even for a transposed or sliced source, which MTL5's own
-`reshape`/`flatten` do not — see `docs/gap-analysis-2026-08.md` §3.9.
+element order even for a transposed or sliced source. MTL5's own `reshape`
+throws rather than copying in that case, which is right for a C++ caller but is
+not NumPy's contract — see `docs/gap-analysis-2026-08.md` §3.9.
 
 ## Accumulator policy on the sparse factorizations
 
