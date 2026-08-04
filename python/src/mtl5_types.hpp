@@ -19,6 +19,8 @@
 
 #include <complex>
 #include <cstddef>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace nb = nanobind;
@@ -173,6 +175,37 @@ void register_dense_factorizations(nb::module_& m);
 // SVD (and the condition/rank queries built on it) is withheld pending
 // stillwater-sc/mtl5#337.
 void register_dense_ops(nb::module_& m);
+
+// ===========================================================================
+// Accumulator vocabulary
+//
+// Shared between the mixed-precision operations and the sparse factorizations
+// so that `accumulator=` means the same thing everywhere it appears.
+// ===========================================================================
+enum class AccKind { Default, F32, F64, FMA32, FMA64, Quire };
+
+inline constexpr const char* kAccumulatorHelp =
+    "valid accumulators: None (element precision), 'f32', 'f64', "
+    "'fma32', 'fma64'/'fma', 'quire'";
+
+inline AccKind parse_acc(const std::optional<std::string>& spec,
+                         const char* dtype, bool quire_ok) {
+    if (!spec || *spec == "none" || *spec == "default") return AccKind::Default;
+    const std::string& a = *spec;
+    if (a == "f32" || a == "float32") return AccKind::F32;
+    if (a == "f64" || a == "float64") return AccKind::F64;
+    if (a == "fma32")                 return AccKind::FMA32;
+    if (a == "fma" || a == "fma64")   return AccKind::FMA64;
+    if (a == "quire") {
+        if (!quire_ok)
+            throw std::invalid_argument(
+                std::string("accumulator='quire' is not available for dtype '") + dtype +
+                "': Universal provides a quire only for the posit, cfloat, lns and "
+                "fixpnt families. Use 'f64' to accumulate in double instead.");
+        return AccKind::Quire;
+    }
+    throw std::invalid_argument("unknown accumulator '" + a + "'; " + kAccumulatorHelp);
+}
 
 // Registered by mtl5_ndarray.cpp — the N-D array layer (mtl/array).
 void register_ndarray_layer(nb::module_& m);

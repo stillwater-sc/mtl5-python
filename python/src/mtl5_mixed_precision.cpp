@@ -87,34 +87,6 @@ struct quire_for<sw::universal::fixpnt<nbits, rbits, arithmetic, bt>> {
     using type = sw::universal::quire<sw::universal::fixpnt<nbits, rbits, arithmetic, bt>>;
 };
 
-// ===========================================================================
-// Runtime accumulator / result selection
-// ===========================================================================
-enum class AccKind { Default, F32, F64, FMA32, FMA64, Quire };
-
-const char* const kAccumulatorHelp =
-    "valid accumulators: None (element precision), 'f32', 'f64', "
-    "'fma32', 'fma64'/'fma', 'quire'";
-
-AccKind parse_acc(const std::optional<std::string>& spec,
-                  const char* dtype, bool quire_ok) {
-    if (!spec || *spec == "none" || *spec == "default") return AccKind::Default;
-    const std::string& a = *spec;
-    if (a == "f32" || a == "float32") return AccKind::F32;
-    if (a == "f64" || a == "float64") return AccKind::F64;
-    if (a == "fma32")                 return AccKind::FMA32;
-    if (a == "fma" || a == "fma64")   return AccKind::FMA64;
-    if (a == "quire") {
-        if (!quire_ok)
-            throw std::invalid_argument(
-                std::string("accumulator='quire' is not available for dtype '") + dtype +
-                "': Universal provides a quire only for the posit, cfloat, lns and "
-                "fixpnt families. Use 'f64' to accumulate in double instead.");
-        return AccKind::Quire;
-    }
-    throw std::invalid_argument("unknown accumulator '" + a + "'; " + kAccumulatorHelp);
-}
-
 bool parse_result_is_element(const std::optional<std::string>& spec) {
     if (!spec || *spec == "f64" || *spec == "float64") return false;
     if (*spec == "element") return true;
