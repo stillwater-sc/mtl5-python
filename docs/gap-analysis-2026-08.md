@@ -222,7 +222,8 @@ checking the answer, not just the compile:
 | `trans` (**plain** transpose — does not conjugate) | ✅ |
 | `conj`, `is_hermitian`, `is_symmetric` | ✅ |
 | `ldlt` | ⚠️ LDLᵀ, not LDLᴴ — see below |
-| `cholesky`, `qr` | ❌ do not compile |
+| `qr`, `lq` (Householder, incl. least squares) | ✅ since MTL5 `aa3b52c` |
+| `cholesky` | ❌ does not compile |
 | `eigenvalue`, `svd` | ❌ would need `complex<complex>` |
 | `cg` / `gmres` / `bicgstab` and the preconditioners | ❌ Krylov layer is real-only |
 
@@ -234,10 +235,15 @@ Two findings worth carrying upstream:
   Measured on `[[2, 1-i], [1+i, 3]]` it gives `x = [1.9+0.3i, -0.2+0.6i]` where the answer
   is `[1, i]`. The binding refuses Hermitian-but-not-symmetric input rather than passing it
   through; there is no LDLᴴ to offer instead.
-* **`cholesky` and `qr` are one `.real()`/`std::abs()` away from compiling.** They fail at
-  `cholesky.hpp:47` (`operator<=`) and `householder.hpp:42` (`operator>`), each comparing a
-  complex against a complex where a magnitude is meant. For a Hermitian matrix the Cholesky
-  pivot is real by construction, so this is a near-miss rather than a design limit.
+* **`qr`/`lq`: fixed upstream, now bound.** Filed as
+  [stillwater-sc/mtl5#353](https://github.com/stillwater-sc/mtl5/issues/353) and implemented
+  in MTL5 `aa3b52c` ("complex Householder, QR and LQ"). Re-verified for the answer, not the
+  compile: on a 4×2 complex matrix ‖QR − A‖ = 1.4e-15, ‖QᴴQ − I‖ = 4.4e-16, and `qr_solve`'s
+  least-squares residual is orthogonal to range(A) to 3.5e-15 — which is what confirms it
+  applies Qᴴ rather than Qᵀ. Bound as `mtl5.qr` / `mtl5.lq`.
+* **`cholesky` still does not compile**, at `cholesky.hpp:47` (`operator<=`), and its inner
+  product is unconjugated besides. #353 was closed on the QR half only, so this half remains
+  open.
 
 `hermitian_view` exists but has no binding.
 

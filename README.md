@@ -308,11 +308,26 @@ tests `A == Aᴴ` and `mtl5.is_symmetric(A)` tests `A == Aᵀ`; for complex thos
 are not the same matrix, and which one you have decides which solver is right.
 
 What is available: containers and factories, all four norms, `dot`/`dot_real`,
-`matmul`/`matvec`, `solve`/`lu`/`inv`, `transpose`/`adjoint`/`conj`, and
-`ldlt_solve`. What is not: `cholesky`, `qr`, `lq`, `bunch_kaufman`, the eigen
+`matmul`/`matvec`, `solve`/`lu`/`inv`, `transpose`/`adjoint`/`conj`,
+`ldlt_solve`, and `qr`/`lq`. What is not: `cholesky`, `bunch_kaufman`, the eigen
 and SVD family, and the Krylov solvers — MTL5 has no complex implementation of
 any of them, and complex input raises a `TypeError` naming the alternative
 rather than silently taking a real part.
+
+**Complex least squares** works through `qr`, which uses MTL5's complex
+Householder:
+
+```python
+f = mtl5.qr(A)  # A complex, num_rows >= num_cols
+x = f.solve(mtl5.vector(b))  # min ||Ax - b||_2
+f.Q, f.R  # Q is unitary: Q^H Q = I
+```
+
+`lq` is the row-space counterpart, for the underdetermined case. Both were
+checked for the answer rather than the compile: the least-squares residual is
+orthogonal to range(A) to 3.5e-15, which is what distinguishes a solve applying
+Qᴴ from one applying Qᵀ — the latter would reconstruct `A = QR` perfectly and
+still solve the wrong problem.
 
 `mtl5.ldlt_solve` is the one place a guard was needed. MTL5's `ldlt` is LDLᵀ
 with no conjugation, so it is correct for a complex *symmetric* matrix and

@@ -59,11 +59,17 @@ from mtl5._core import (
     DenseVector_posit16,
     DenseVector_posit32,
     DenseVector_posit64,
+    # QR / LQ factorization objects — complex only; the real ones are reached
+    # through mtl5.qr()/mtl5.lq(), which dispatch on dtype.
+    LQFactor_c64,
+    LQFactor_c128,
     # LU factorization objects
     LUFactor_c64,
     LUFactor_c128,
     LUFactor_f32,
     LUFactor_f64,
+    QRFactor_c64,
+    QRFactor_c128,
     # Complex operations
     adjoint,
     # N-dimensional array layer (mtl/array)
@@ -191,28 +197,35 @@ _UNIVERSAL_DTYPES = (
 )
 
 
-_NUMPY_TO_MTL5 = {"float32": "f32", "float64": "f64"}
+_NUMPY_TO_MTL5 = {
+    "float32": "f32",
+    "float64": "f64",
+    "complex64": "c64",
+    "complex128": "c128",
+}
 
-_COMPLEX_DTYPES = ("complex64", "complex128", "c64", "c128")
+_COMPLEX_SUFFIXES = ("c64", "c128")
 
 
-def _reject_complex(name: str, A) -> None:
+def _reject_complex(name: str, prefix: str, suffix: str, shown: str = "") -> None:
     """Raise for complex input to a factorization that has no complex form.
 
-    MTL5's cholesky and qr compare a complex against a complex where a
-    magnitude is meant, so they do not compile for complex at all, and its ldlt
-    is LDL^T rather than LDL^H. Without this the caller gets either nanobind's
-    overload dump or, worse, a wrong answer — so name the alternative instead.
+    QR and LQ do have one — MTL5 gained a complex Householder — so the test is
+    whether the instantiation exists rather than a fixed list. Cholesky still
+    does not compile for complex upstream, and `ldlt` is LDL^T rather than
+    LDL^H; without this the caller would get nanobind's overload dump instead of
+    somewhere to go.
     """
-    dt = getattr(A, "dtype", None)
-    dt_name = dt if isinstance(dt, str) else getattr(dt, "name", None)
-    if dt_name in _COMPLEX_DTYPES:
-        raise TypeError(
-            f"{name}: not available for {dt_name} — MTL5 has no complex {name}. "
-            "Complex is supported for solve/lu/inv/matmul/matvec/norm/dot; use "
-            "mtl5.solve() for a general complex system, or mtl5.ldlt_solve() "
-            "for a complex symmetric one."
-        )
+    if suffix not in _COMPLEX_SUFFIXES:
+        return
+    if hasattr(_core, f"{prefix}_{suffix}"):
+        return
+    raise TypeError(
+        f"{name}: not available for {shown or suffix} — MTL5 has no complex {name}. "
+        "Complex is supported for qr/lq/solve/lu/inv/matmul/matvec/norm/dot; "
+        "use mtl5.solve() for a general complex system, or mtl5.ldlt_solve() "
+        "for a complex symmetric one."
+    )
 
 
 def _as_mtl5_matrix(name: str, prefix: str, A):
@@ -230,7 +243,6 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
     if isinstance(A, _np.ndarray):
         suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
         if suffix is None:
-            _reject_complex(name, A)
             # Only suggest convert() for the factorizations that actually have
             # Universal instantiations — qr/lq are float32/float64 only, so
             # sending a user there would just earn them a second TypeError.
@@ -242,6 +254,7 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
             raise TypeError(
                 f"{name}: NumPy arrays must be float32 or float64, got {A.dtype.name}.{hint}"
             )
+        _reject_complex(name, prefix, suffix, A.dtype.name)
         return matrix(_np.ascontiguousarray(A)), suffix
 
     dt = getattr(A, "dtype", None)
@@ -250,7 +263,7 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
             f"{name}: expected an MTL5 matrix (from mtl5.matrix() or "
             f"mtl5.convert()) or a NumPy array, got {type(A).__name__}"
         )
-    _reject_complex(name, A)
+    _reject_complex(name, prefix, dt)
     return A, dt
 
 
@@ -344,7 +357,11 @@ def cholesky(A):  # noqa: F811
     dt = getattr(A, "dtype", None)
     if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
         return getattr(_core, f"CholeskyFactor_{dt}")(A)
-    _reject_complex("cholesky", A)
+    if isinstance(dt, str):
+        _reject_complex("cholesky", "CholeskyFactor", dt)
+    else:
+        shown = getattr(dt, "name", "")
+        _reject_complex("cholesky", "CholeskyFactor", _NUMPY_TO_MTL5.get(shown, ""), shown)
     return _native_cholesky(A)
 
 
@@ -490,6 +507,10 @@ __all__ = [
     "DenseMatrix_lns16",
     "DenseMatrix_lns32",
     # Factorization classes
+    "LQFactor_c64",
+    "LQFactor_c128",
+    "QRFactor_c64",
+    "QRFactor_c128",
     "LUFactor",
     "LUFactor_c64",
     "LUFactor_c128",

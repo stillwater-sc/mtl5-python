@@ -78,6 +78,14 @@ template <typename T> struct is_complex : std::false_type {};
 template <typename T> struct is_complex<std::complex<T>> : std::true_type {};
 template <typename T> inline constexpr bool is_complex_v = is_complex<T>::value;
 
+// True when element type T is bound to Python through a VectorView/MatrixView
+// wrapper rather than as a bare MTL5 container. The native and complex types
+// are; the Universal number systems are bound as containers directly. Several
+// helpers need to know which, and `std::is_arithmetic_v` was standing in for it
+// before complex arrived -- which is no longer the same question.
+template <typename T>
+inline constexpr bool uses_view_wrapper_v = std::is_arithmetic_v<T> || is_complex_v<T>;
+
 // ---------------------------------------------------------------------------
 // Human-readable suffix for Python class names and dtype strings
 // ---------------------------------------------------------------------------

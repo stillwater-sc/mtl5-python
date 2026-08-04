@@ -345,17 +345,22 @@ class TestLdltIsTransposeNotHermitian:
 
 
 class TestUnsupportedOperationsRefuse:
-    """Cholesky and QR do not compile for complex in MTL5 (they compare a
-    complex against a complex where a magnitude is meant), and there is no
-    complex eigensolver or SVD. Complex input must earn a clear message that
-    names a working alternative, not a confusing one from deep inside."""
+    """Cholesky does not compile for complex in MTL5 (it compares a complex
+    against a complex where a magnitude is meant), `ldlt` is LDL^T rather than
+    LDL^H, and there is no complex eigensolver or SVD. Complex input must earn a
+    clear message that names a working alternative, not a confusing one from
+    deep inside.
 
-    @pytest.mark.parametrize("fn", ["qr", "lq", "cholesky", "ldlt", "bunch_kaufman"])
+    QR and LQ are deliberately absent from this list: MTL5 gained a complex
+    Householder, and they are bound — see TestComplexQRAndLQ.
+    """
+
+    @pytest.mark.parametrize("fn", ["cholesky", "ldlt", "bunch_kaufman"])
     def test_factorizations_reject_complex_clearly(self, fn):
         with pytest.raises(TypeError, match="complex128"):
             getattr(mtl5, fn)(HERMITIAN)
 
-    @pytest.mark.parametrize("fn", ["qr", "lq", "cholesky", "ldlt", "bunch_kaufman"])
+    @pytest.mark.parametrize("fn", ["cholesky", "ldlt", "bunch_kaufman"])
     def test_an_mtl5_complex_matrix_is_refused_too(self, fn):
         """Not just NumPy input — a DenseMatrix_c128 takes a different branch."""
         with pytest.raises(TypeError, match="c128"):
@@ -364,6 +369,84 @@ class TestUnsupportedOperationsRefuse:
     def test_the_message_points_somewhere_useful(self):
         with pytest.raises(TypeError, match="mtl5.solve"):
             mtl5.cholesky(HERMITIAN)
+
+
+class TestComplexQRAndLQ:
+    """MTL5 gained a complex Householder (upstream aa3b52c), so QR and LQ work
+    for complex. Verified for the answer, not just the compile: the least-squares
+    residual must be orthogonal to range(A), which is what distinguishes a solve
+    that applies Q^H from one that applies Q^T. A Q^T implementation would
+    reconstruct A = QR perfectly and still solve the wrong problem.
+    """
+
+    # 4x2 overdetermined, full column rank.
+    A = np.array([[1 + 1j, 2 - 1j], [0 + 2j, 1 + 0j], [3 + 0j, 0 + 1j], [-1 + 1j, 2 + 2j]])
+
+    def test_qr_reconstructs_a(self, cdtype):
+        np_dt, suffix, tol = cdtype
+        f = mtl5.qr(self.A.astype(np_dt))
+        assert f.dtype == suffix
+        assert f.shape == (4, 2)
+        Q, R = f.Q.to_numpy(), f.R.to_numpy()
+        np.testing.assert_allclose(Q @ R, self.A, rtol=1e-4, atol=1e-4)
+
+    def test_qr_q_is_unitary(self, cdtype):
+        """Unitary (Q^H Q = I), not merely orthogonal (Q^T Q = I) — for complex
+        those are different matrices."""
+        np_dt, _, _ = cdtype
+        Q = mtl5.qr(self.A.astype(np_dt)).Q.to_numpy()
+        np.testing.assert_allclose(Q.conj().T @ Q, np.eye(4), rtol=1e-4, atol=1e-4)
+
+    def test_qr_solves_a_consistent_system_exactly(self, cdtype):
+        np_dt, _, _ = cdtype
+        x_true = np.array([1 - 2j, 0 + 1j])
+        b = self.A @ x_true
+        f = mtl5.qr(self.A.astype(np_dt))
+        x = f.solve(mtl5.vector(b.astype(np_dt))).to_numpy()
+        np.testing.assert_allclose(x, x_true, rtol=1e-4, atol=1e-4)
+
+    def test_qr_least_squares_residual_is_orthogonal(self):
+        """The load-bearing check. For an inconsistent system the residual must
+        satisfy A^H (Ax - b) = 0; using Q^T would leave it non-orthogonal."""
+        b = np.array([1 + 0j, 0 + 1j, 2 - 1j, -1 + 3j])
+        x = mtl5.qr(self.A).solve(mtl5.vector(b)).to_numpy()
+        residual = self.A @ x - b
+        np.testing.assert_allclose(self.A.conj().T @ residual, np.zeros(2), atol=1e-12)
+
+    def test_qr_least_squares_matches_numpy(self):
+        b = np.array([1 + 0j, 0 + 1j, 2 - 1j, -1 + 3j])
+        x = mtl5.qr(self.A).solve(mtl5.vector(b)).to_numpy()
+        np.testing.assert_allclose(x, np.linalg.lstsq(self.A, b, rcond=None)[0], atol=1e-12)
+
+    def test_qr_accepts_an_mtl5_matrix(self):
+        f = mtl5.qr(mtl5.matrix(self.A))
+        np.testing.assert_allclose(f.Q.to_numpy() @ f.R.to_numpy(), self.A, atol=1e-12)
+
+    def test_qr_still_needs_rows_ge_cols(self):
+        with pytest.raises(ValueError, match="num_rows >= num_cols"):
+            mtl5.qr(self.A.T)
+
+    def test_lq_reconstructs_a(self, cdtype):
+        np_dt, suffix, _ = cdtype
+        B = self.A.conj().T  # 2x4, underdetermined
+        g = mtl5.lq(B.astype(np_dt))
+        assert g.dtype == suffix
+        L, Q = g.L.to_numpy(), g.Q.to_numpy()
+        np.testing.assert_allclose(L @ Q, B, rtol=1e-4, atol=1e-4)
+
+    def test_lq_q_is_unitary(self, cdtype):
+        np_dt, _, _ = cdtype
+        Q = mtl5.lq(self.A.conj().T.astype(np_dt)).Q.to_numpy()
+        np.testing.assert_allclose(Q.conj().T @ Q, np.eye(4), rtol=1e-4, atol=1e-4)
+
+    def test_lq_l_is_lower_trapezoidal(self):
+        L = mtl5.lq(self.A.conj().T).L.to_numpy()
+        np.testing.assert_allclose(np.triu(L, 1), np.zeros_like(np.triu(L, 1)), atol=1e-14)
+
+    def test_the_factor_classes_are_exported(self):
+        for name in ("QRFactor_c64", "QRFactor_c128", "LQFactor_c64", "LQFactor_c128"):
+            assert name in mtl5.__all__, f"{name} missing from __all__"
+            assert hasattr(mtl5, name)
 
 
 class TestPublicSurface:
