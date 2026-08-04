@@ -20,10 +20,12 @@
 #include "mtl5_types.hpp"
 #include "mtl5_sparse_refine.hpp"
 
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/pair.h>
 
+#include <mtl/math/accumulator_traits.hpp>
 #include <mtl/sparse/factorization/sparse_lu.hpp>
 #include <mtl/sparse/factorization/native_klu.hpp>
 #include <mtl/sparse/factorization/sparse_cholesky.hpp>
@@ -36,6 +38,7 @@
 #include <mtl/sparse/ordering/rcm.hpp>
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -82,11 +85,92 @@ fact::lu_symbolic symbolic_for(const mtl::mat::compressed2D<T>& A,
 // ===========================================================================
 // SparseLU<T> — Gilbert-Peierls left-looking LU with threshold partial pivoting
 // ===========================================================================
+// ===========================================================================
+// Accumulator policy for the numeric factorizations
+//
+// sparse_lu_numeric, native_klu_factor, supernodal_lu_numeric and
+// supernodal_ldlt_numeric each take an Accumulator template parameter that
+// types their dense numeric workspace -- `std::vector<Accumulator> x(n)` in the
+// left-looking solve -- and round once, via accumulator_traits::value(), when a
+// value is written into L or U. So a float32 factor can accumulate its updates
+// in float64: the factor stays narrow (every one of these returns a type
+// parameterized on Value alone, not on Accumulator), while the arithmetic that
+// produced it is wider. That is the capability a fixed-precision library like
+// SuiteSparse structurally cannot offer.
+//
+// Because the result type does not depend on the accumulator, one wrapper class
+// per element type is still enough; only the construction call dispatches.
+//
+// The quire is deliberately absent: SparseMatrix is float32/float64 only, and
+// Universal defines a quire only for its own number systems. parse_acc already
+// says so when asked.
+template <typename T>
+AccKind parse_sparse_acc(const std::optional<std::string>& spec) {
+    const AccKind kind = parse_acc(spec, type_suffix<T>(), /*quire_ok=*/false);
+    if constexpr (std::is_same_v<T, double>) {
+        if (kind == AccKind::F32 || kind == AccKind::FMA32)
+            throw std::invalid_argument(
+                "accumulator='f32'/'fma32' is narrower than the float64 element "
+                "type, so it would lose precision rather than gain it. Use "
+                "'f64', 'fma64', or None for the element precision.");
+    }
+    return kind;
+}
+
+/// The canonical name for a parsed accumulator. Storing this rather than the
+/// caller's spelling keeps the aliases consistent: 'none' and 'default' are the
+/// same policy, as are 'fma' and 'fma64', and refactor's default-only check
+/// compares against one spelling.
+inline const char* acc_name(AccKind kind) {
+    switch (kind) {
+        case AccKind::Default: return "default";
+        case AccKind::F32:     return "f32";
+        case AccKind::F64:     return "f64";
+        case AccKind::FMA32:   return "fma32";
+        case AccKind::FMA64:   return "fma64";
+        case AccKind::Quire:   return "quire";
+    }
+    return "default";
+}
+
+/// Invoke `f.template operator()<Acc>()` for the selected accumulator. Every
+/// branch yields the same type, since the factor type depends only on T.
+template <typename T, typename F>
+decltype(auto) with_acc(AccKind kind, F&& f) {
+    using fma32 = mtl::math::fma_accumulator<float>;
+    using fma64 = mtl::math::fma_accumulator<double>;
+    if (kind == AccKind::Default) return f.template operator()<T>();
+    if (kind == AccKind::F64)     return f.template operator()<double>();
+    if (kind == AccKind::FMA64)   return f.template operator()<fma64>();
+    if constexpr (std::is_same_v<T, float>) {
+        // For a float64 element these are rejected in parse_sparse_acc, so
+        // guarding here keeps them from being instantiated at all.
+        if (kind == AccKind::F32)   return f.template operator()<float>();
+        if (kind == AccKind::FMA32) return f.template operator()<fma32>();
+    }
+    throw std::invalid_argument("unsupported accumulator for a sparse factorization");
+}
+
+/// Refactor reuses the stored pivot sequence through an entry point that takes
+/// no Accumulator, so it cannot honour a non-default policy. Refusing is the
+/// honest option: silently refactoring in element precision would quietly undo
+/// what the caller asked for.
+inline void require_default_acc_for_refactor(const std::string& acc, const char* what) {
+    if (acc != "default")
+        throw std::invalid_argument(
+            std::string("refactor: this factorization was built with "
+                        "accumulator='") + acc + "', and " + what +
+            " reuses the stored pivot sequence through an entry point that takes "
+            "no accumulator -- it would silently drop back to element precision. "
+            "Construct a new factorization instead.");
+}
+
 template <typename T>
 struct SparseLU {
     fact::lu_numeric<T> num;
     std::string ordering;
     std::size_t n;
+    std::string accumulator;
 
     const fact::lu_numeric<T>& factor() const { return num; }
 };
@@ -98,6 +182,7 @@ template <typename T>
 struct KLU {
     fact::klu_numeric<T> num;
     std::size_t n;
+    std::string accumulator;
 
     const fact::klu_numeric<T>& factor() const { return num; }
 };
@@ -128,22 +213,32 @@ void register_sparse_lu(nb::module_& m) {
 
     nb::class_<Wrap>(m, name.c_str())
         .def("__init__", [](Wrap* self, const SMat& A, const std::string& ordering,
-                            double threshold, double pivot_perturb) {
+                            double threshold, double pivot_perturb,
+                            std::optional<std::string> accumulator) {
             if (A.num_rows() != A.num_cols())
                 throw std::invalid_argument("SparseLU: matrix must be square");
+            const AccKind acc = parse_sparse_acc<T>(accumulator);
             // Validate the ordering name before doing any work, so a typo is a
             // clean error rather than a wasted factorization.
             fact::lu_symbolic sym = symbolic_for(A, ordering);
             fact::lu_numeric<T> num;
             {
                 nogil guard;
-                num = fact::sparse_lu_numeric(A, sym, static_cast<T>(threshold),
-                                              static_cast<T>(pivot_perturb));
+                num = with_acc<T>(acc, [&]<typename Acc>() {
+                    return fact::sparse_lu_numeric<T, mtl::mat::parameters<>, Acc>(
+                        A, sym, static_cast<T>(threshold),
+                        static_cast<T>(pivot_perturb));
+                });
             }
-            new (self) Wrap{std::move(num), ordering, A.num_rows()};
+            new (self) Wrap{std::move(num), ordering, A.num_rows(), acc_name(acc)};
         }, "A"_a, "ordering"_a = "colamd", "threshold"_a = 1.0, "pivot_perturb"_a = 0.0,
+           "accumulator"_a = nb::none(),
            "Analyze and factor a square CSR matrix (Gilbert-Peierls LU with "
-           "threshold partial pivoting)")
+           "threshold partial pivoting).\n\n"
+           "`accumulator=` types the dense numeric workspace, so a float32 "
+           "factor can accumulate its updates in float64 ('f64') or with an FMA "
+           "('fma32'/'fma64'). The factor itself stays in the element type; only "
+           "the arithmetic that built it widens.")
         .def_prop_ro("n", [](const Wrap& s) { return s.n; })
         .def_prop_ro("shape", [](const Wrap& s) {
             return std::pair<std::size_t, std::size_t>(s.n, s.n);
@@ -155,6 +250,8 @@ void register_sparse_lu(nb::module_& m) {
         }, "Nonzeros in L plus U — the fill the ordering produced")
         .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; },
                      "Pivots replaced by perturbation; 0 means a clean factor")
+        .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
+                     "The accumulator policy this factor was built with")
         .def("solve", [](const Wrap& s,
                          nb::ndarray<double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {
@@ -164,6 +261,7 @@ void register_sparse_lu(nb::module_& m) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
+            require_default_acc_for_refactor(s.accumulator, "sparse_lu_refactor");
             nogil guard;
             // Numeric-only: reuses the ordering, symbolic structure and pivot
             // sequence. Assign only after it succeeds, so a failed refactor
@@ -188,20 +286,28 @@ void register_klu(nb::module_& m) {
 
     nb::class_<Wrap>(m, name.c_str())
         .def("__init__", [](Wrap* self, const SMat& A, double threshold,
-                            bool scale, double pivot_perturb) {
+                            bool scale, double pivot_perturb,
+                            std::optional<std::string> accumulator) {
             if (A.num_rows() != A.num_cols())
                 throw std::invalid_argument("KLU: matrix must be square");
+            const AccKind acc = parse_sparse_acc<T>(accumulator);
             fact::klu_numeric<T> num;
             {
                 nogil guard;
-                num = fact::native_klu_factor(A, static_cast<T>(threshold), scale,
-                                              static_cast<T>(pivot_perturb));
+                num = with_acc<T>(acc, [&]<typename Acc>() {
+                    return fact::native_klu_factor<T, mtl::mat::parameters<>, Acc>(
+                        A, static_cast<T>(threshold), scale,
+                        static_cast<T>(pivot_perturb));
+                });
             }
-            new (self) Wrap{std::move(num), A.num_rows()};
+            new (self) Wrap{std::move(num), A.num_rows(), acc_name(acc)};
         }, "A"_a, "threshold"_a = 1.0, "scale"_a = true, "pivot_perturb"_a = 0.0,
+           "accumulator"_a = nb::none(),
            "Factor a square CSR matrix with native KLU: Dulmage-Mendelsohn block "
            "triangular form, AMD per block, then a left-looking LU of each "
-           "diagonal block")
+           "diagonal block.\n\n"
+           "`accumulator=` types the dense numeric workspace of each block's LU "
+           "-- see SparseLU.")
         .def_prop_ro("n", [](const Wrap& s) { return s.n; })
         .def_prop_ro("shape", [](const Wrap& s) {
             return std::pair<std::size_t, std::size_t>(s.n, s.n);
@@ -210,6 +316,8 @@ void register_klu(nb::module_& m) {
         .def_prop_ro("nblocks", [](const Wrap& s) { return s.num.nblocks(); },
                      "Diagonal blocks found by the block triangular form; more "
                      "blocks means more reducible structure to exploit")
+        .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
+                     "The accumulator policy this factor was built with")
         .def_prop_ro("nnz", [](const Wrap& s) {
             // Summed over the diagonal blocks: the off-diagonal blocks are not
             // factored, which is exactly where BTF saves work.
@@ -230,6 +338,7 @@ void register_klu(nb::module_& m) {
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            require_default_acc_for_refactor(s.accumulator, "native_klu_refactor");
             auto fresh = fact::native_klu_refactor(A, s.num);
             s.num = std::move(fresh);
         }, "A"_a,
@@ -333,6 +442,7 @@ struct SupernodalLU {
     bool scale;
     double pivot_perturb;
     std::size_t n;
+    std::string accumulator;
     const fact::supernodal_lu_factor<T>& factor() const { return num; }
 };
 
@@ -342,6 +452,7 @@ struct SupernodalLDLT {
     fact::supernodal_ldlt_factor<T> num;
     std::string ordering;
     std::size_t n;
+    std::string accumulator;
     const fact::supernodal_ldlt_factor<T>& factor() const { return num; }
 };
 
@@ -524,21 +635,25 @@ void register_supernodal_lu(nb::module_& m) {
     nb::class_<Wrap>(m, name.c_str())
         .def("__init__", [](Wrap* self, const SMat& A, const std::string& ordering,
                             double threshold, std::size_t max_super, bool scale,
-                            double pivot_perturb) {
+                            double pivot_perturb,
+                            std::optional<std::string> accumulator) {
             if (A.num_rows() != A.num_cols())
                 throw std::invalid_argument("SupernodalLU: matrix must be square");
+            const AccKind acc = parse_sparse_acc<T>(accumulator);
             auto sym = snlu_symbolic(A, ordering);
             fact::supernodal_lu_factor<T> num;
             {
                 nogil guard;
-                num = fact::supernodal_lu_numeric(A, sym, static_cast<T>(threshold),
-                                                  max_super, scale,
-                                                  static_cast<T>(pivot_perturb));
+                num = with_acc<T>(acc, [&]<typename Acc>() {
+                    return fact::supernodal_lu_numeric<T, mtl::mat::parameters<>, Acc>(
+                        A, sym, static_cast<T>(threshold), max_super, scale,
+                        static_cast<T>(pivot_perturb));
+                });
             }
             new (self) Wrap{std::move(num), ordering, threshold, max_super, scale,
-                            pivot_perturb, A.num_rows()};
+                            pivot_perturb, A.num_rows(), acc_name(acc)};
         }, "A"_a, "ordering"_a = "colamd", "threshold"_a = 1.0, "max_super"_a = 64,
-           "scale"_a = false, "pivot_perturb"_a = 0.0,
+           "scale"_a = false, "pivot_perturb"_a = 0.0, "accumulator"_a = nb::none(),
            "Supernodal LU: columns are grouped into supernodes and applied as "
            "dense block updates, with threshold partial pivoting. `scale=True` "
            "row-equilibrates first, which matters most in low precision.")
@@ -555,6 +670,8 @@ void register_supernodal_lu(nb::module_& m) {
             return s.num.factorL().nnz() + s.num.factorU().nnz();
         }, "Nonzeros in L plus U")
         .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; })
+        .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
+                     "The accumulator policy this factor was built with")
         .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_lu_factor<T>, T>(
@@ -565,6 +682,8 @@ void register_supernodal_lu(nb::module_& m) {
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            require_default_acc_for_refactor(s.accumulator,
+                                             "supernodal_lu_refactor");
             auto fresh = fact::supernodal_lu_refactor(A, s.num);
             s.num = std::move(fresh);
         }, "A"_a,
@@ -583,17 +702,22 @@ void register_supernodal_ldlt(nb::module_& m) {
     const std::string name = std::string("SupernodalLDLT_") + type_suffix<T>();
 
     nb::class_<Wrap>(m, name.c_str())
-        .def("__init__", [](Wrap* self, const SMat& A, const std::string& ordering) {
+        .def("__init__", [](Wrap* self, const SMat& A, const std::string& ordering,
+                            std::optional<std::string> accumulator) {
             if (A.num_rows() != A.num_cols())
                 throw std::invalid_argument("SupernodalLDLT: matrix must be square");
+            const AccKind acc = parse_sparse_acc<T>(accumulator);
             auto sym = snldlt_symbolic(A, ordering);
             fact::supernodal_ldlt_factor<T> num;
             {
                 nogil guard;
-                num = fact::supernodal_ldlt_numeric(A, sym);
+                num = with_acc<T>(acc, [&]<typename Acc>() {
+                    return fact::supernodal_ldlt_numeric<T, mtl::mat::parameters<>, Acc>(A, sym);
+                });
             }
-            new (self) Wrap{std::move(sym), std::move(num), ordering, A.num_rows()};
-        }, "A"_a, "ordering"_a = "amd",
+            new (self) Wrap{std::move(sym), std::move(num), ordering, A.num_rows(),
+                            acc_name(acc)};
+        }, "A"_a, "ordering"_a = "amd", "accumulator"_a = nb::none(),
            "Supernodal LDL^T of a symmetric matrix, applying each supernode as a "
            "dense block update")
         .def_prop_ro("n", [](const Wrap& s) { return s.n; })
@@ -603,6 +727,8 @@ void register_supernodal_ldlt(nb::module_& m) {
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); })
+        .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
+                     "The accumulator policy this factor was built with")
         .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_ldlt_factor<T>, T>(
@@ -613,7 +739,14 @@ void register_supernodal_ldlt(nb::module_& m) {
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
-            auto fresh = fact::supernodal_ldlt_numeric(A, s.sym);
+            // Unlike the LU refactors, this one re-runs the full numeric
+            // factorization, so the accumulator policy carries through.
+            auto fresh = with_acc<T>(parse_sparse_acc<T>(
+                s.accumulator == "default" ? std::optional<std::string>{}
+                                           : std::optional<std::string>{s.accumulator}),
+                [&]<typename Acc>() {
+                    return fact::supernodal_ldlt_numeric<T, mtl::mat::parameters<>, Acc>(A, s.sym);
+                });
             s.num = std::move(fresh);
         }, "A"_a,
            "Recompute the numeric factor for a matrix with the SAME sparsity "

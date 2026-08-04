@@ -380,6 +380,69 @@ otherwise, and never error; `flatten` always copies. All three give NumPy's
 element order even for a transposed or sliced source, which MTL5's own
 `reshape`/`flatten` do not — see `docs/gap-analysis-2026-08.md` §3.9.
 
+## Accumulator policy on the sparse factorizations
+
+The four sparse direct factorizations that use a dense numeric workspace —
+`splu`, `klu`, `supernodal_lu`, `supernodal_ldlt` — take an `accumulator=`
+argument that types that workspace. A float32 factor can accumulate its updates
+in float64:
+
+```python
+f = ms.splu(A32, accumulator="f64")  # narrow factor, wide arithmetic
+f.accumulator  # 'f64'
+```
+
+The factor itself stays in the element type. Only the arithmetic that produced
+it widens: the accumulator removes the intermediate roundings inside each
+column's update chain, and each L/U entry is still rounded once on the way out.
+This is the mixed-precision knob a fixed-precision library structurally cannot
+offer.
+
+On a badly scaled random sparse matrix (n = 400, cond ≈ 2.8e10) factored in
+float32, forward error of the direct solve — measured on x86-64 Linux:
+
+| ordering | nnz(L+U) | `f32` | `f64` | gain |
+|---|---|---|---|---|
+| `colamd` | 81 712 | 8.19 × 10⁻³ | 6.39 × 10⁻³ | 1.28× |
+| `amd` | 92 026 | 5.35 × 10⁻² | 3.17 × 10⁻² | 1.69× |
+| `natural` | 98 729 | 3.52 × 10⁻² | 1.39 × 10⁻² | 2.54× |
+
+The *direction* is robust — a wider accumulator gives a smaller forward error in
+every ordering, matrix and platform tried, and the test suite asserts that. The
+*magnitude* is not: it ranges from roughly 1.3× to 3.3×, and which ordering
+benefits most changes between platforms, so read the column above as one
+measurement rather than a trend. (An earlier draft of this section claimed the
+gain grows with fill; that held on Linux and reversed on macOS.)
+
+A 1.3–3× improvement is worth having but is not the headline. The headline is
+what it does to iterative refinement, which is what you would actually pair a
+narrow factor with — same matrix, `natural` ordering, refined against a float64
+residual:
+
+| accumulator | iterations | forward error |
+|---|---|---|
+| `f32` | 6 | 2.0 × 10⁻⁹ |
+| `f64` | **4** | **1.4 × 10⁻¹⁰** |
+
+A third fewer iterations and 14× closer, from a factor occupying the same
+memory.
+
+Valid accumulators are `"f32"`, `"f64"`, `"fma32"`, `"fma64"`, or `None` for the
+element type. `fma64` is measurably identical to `f64` here. Two are refused
+rather than accepted quietly:
+
+* **narrower than the element type** — `f32` on a float64 matrix loses precision
+  rather than gaining it
+* **`quire`** — `SparseMatrix` is float32/float64 only, and Universal defines a
+  quire only for its own number systems
+
+One asymmetry worth knowing: `refactor()` replays the stored pivot sequence
+through an upstream entry point that takes no accumulator, so on `splu`, `klu`
+and `supernodal_lu` it **refuses** when a non-default accumulator is in effect
+rather than silently reverting to element precision — construct a new
+factorization instead. `supernodal_ldlt.refactor()` re-runs the full numeric
+factorization, so it carries the policy through.
+
 ## Sparse storage formats
 
 CSR is the default and what every solver here takes. Two other formats are

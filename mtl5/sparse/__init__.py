@@ -11,6 +11,12 @@ This submodule provides:
 - `ell_matrix(A)` — fixed-width layout, for near-uniform row widths
 - `as_linear_operator(A)` — wrap an MTL5 sparse matrix as a SciPy
   `LinearOperator`, enabling use with scipy.sparse.linalg iterative solvers
+- `accumulator=` on `splu`/`klu`/`supernodal_lu`/`supernodal_ldlt` — type the
+  dense numeric workspace, so a float32 factor accumulates in float64. Measured
+  on an ill-conditioned matrix (cond ~2.8e10) factored in float32, the forward
+  error always improves; by how much varies with ordering and platform (roughly
+  1.3x-3x). Paired with `mtl5.mixed.iterative_refine` it is 4 iterations to
+  1.4e-10 instead of 6 to 2.0e-9. See the README.
 - `cg`, `gmres`, `bicgstab` — iterative Krylov solvers returning (x, info)
 - `ilu0`, `ic0` — incomplete LU/Cholesky preconditioners
 
@@ -426,7 +432,13 @@ def ic0(A):
 # ===========================================================================
 
 
-def splu(A, ordering: str = "colamd", threshold: float = 1.0, pivot_perturb: float = 0.0):
+def splu(
+    A,
+    ordering: str = "colamd",
+    threshold: float = 1.0,
+    pivot_perturb: float = 0.0,
+    accumulator: str | None = None,
+):
     """LU-factorize a square sparse matrix (Gilbert-Peierls, threshold pivoting).
 
     Accepts an MTL5 or scipy sparse matrix. The dtype of `A` selects the
@@ -443,13 +455,25 @@ def splu(A, ordering: str = "colamd", threshold: float = 1.0, pivot_perturb: flo
     `.num_perturbed` afterwards.
 
     The returned object exposes `.solve(b)` and `.refactor(A2)`.
+
+    `accumulator=` types the dense numeric workspace, so a float32 factor can
+    accumulate its updates in float64 ("f64") or with an FMA ("fma32"/"fma64").
+    The factor itself stays in the element type — only the arithmetic that
+    produced it widens. This is the mixed-precision knob a fixed-precision
+    library cannot offer; see `mtl5.sparse` module docs for the measurement.
     """
     mat = _coerce_matrix(A)
     cls = SparseLU_f32 if mat.dtype == "f32" else SparseLU_f64
-    return cls(mat, ordering, threshold, pivot_perturb)
+    return cls(mat, ordering, threshold, pivot_perturb, accumulator)
 
 
-def klu(A, threshold: float = 1.0, scale: bool = True, pivot_perturb: float = 0.0):
+def klu(
+    A,
+    threshold: float = 1.0,
+    scale: bool = True,
+    pivot_perturb: float = 0.0,
+    accumulator: str | None = None,
+):
     """Factor a square sparse matrix with native KLU.
 
     Permutes to block triangular form (Dulmage-Mendelsohn), orders each
@@ -461,10 +485,16 @@ def klu(A, threshold: float = 1.0, scale: bool = True, pivot_perturb: float = 0.
     matters most in low precision; the RHS is scaled inside `.solve()`.
 
     The returned object exposes `.solve(b)` and `.refactor(A2)`.
+
+    `accumulator=` types the dense numeric workspace, so a float32 factor can
+    accumulate its updates in float64 ("f64") or with an FMA ("fma32"/"fma64").
+    The factor itself stays in the element type — only the arithmetic that
+    produced it widens. This is the mixed-precision knob a fixed-precision
+    library cannot offer; see `mtl5.sparse` module docs for the measurement.
     """
     mat = _coerce_matrix(A)
     cls = KLU_f32 if mat.dtype == "f32" else KLU_f64
-    return cls(mat, threshold, scale, pivot_perturb)
+    return cls(mat, threshold, scale, pivot_perturb, accumulator)
 
 
 def cholesky(A, ordering: str = "amd"):
@@ -515,6 +545,7 @@ def supernodal_lu(
     max_super: int = 64,
     scale: bool = False,
     pivot_perturb: float = 0.0,
+    accumulator: str | None = None,
 ):
     """Supernodal LU: columns grouped into supernodes, applied as dense blocks.
 
@@ -527,20 +558,27 @@ def supernodal_lu(
     natural-ordering path upstream.
 
     The returned object exposes `.solve(b)` and `.refactor(A2)`.
+
+    `accumulator=` types the dense numeric workspace — see `splu`.
     """
     mat = _coerce_matrix(A)
     cls = SupernodalLU_f32 if mat.dtype == "f32" else SupernodalLU_f64
-    return cls(mat, ordering, threshold, max_super, scale, pivot_perturb)
+    return cls(mat, ordering, threshold, max_super, scale, pivot_perturb, accumulator)
 
 
-def supernodal_ldlt(A, ordering: str = "amd"):
+def supernodal_ldlt(A, ordering: str = "amd", accumulator: str | None = None):
     """Supernodal LDL^T of a symmetric matrix, using dense block updates.
 
     The returned object exposes `.solve(b)` and `.refactor(A2)`.
+
+    `accumulator=` types the dense numeric workspace — see `splu`. This is the
+    one factorization here whose `.refactor()` carries the policy through,
+    because it re-runs the full numeric factorization rather than replaying a
+    stored pivot sequence.
     """
     mat = _coerce_matrix(A)
     cls = SupernodalLDLT_f32 if mat.dtype == "f32" else SupernodalLDLT_f64
-    return cls(mat, ordering)
+    return cls(mat, ordering, accumulator)
 
 
 def ordering(A, name: str = "amd"):
