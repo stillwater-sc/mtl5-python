@@ -19,6 +19,8 @@ except _PackageNotFoundError:
 
 from mtl5._core import (
     # Cholesky factorization objects
+    CholeskyFactor_c64,
+    CholeskyFactor_c128,
     CholeskyFactor_f32,
     CholeskyFactor_f64,
     # Complex types (zero-copy views over complex64/complex128)
@@ -517,6 +519,8 @@ __all__ = [
     "LUFactor_f32",
     "LUFactor_f64",
     "CholeskyFactor",
+    "CholeskyFactor_c64",
+    "CholeskyFactor_c128",
     "CholeskyFactor_f32",
     "CholeskyFactor_f64",
     # Device & backend management

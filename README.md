@@ -309,7 +309,7 @@ are not the same matrix, and which one you have decides which solver is right.
 
 What is available: containers and factories, all four norms, `dot`/`dot_real`,
 `matmul`/`matvec`, `solve`/`lu`/`inv`, `transpose`/`adjoint`/`conj`,
-`ldlt_solve`, and `qr`/`lq`. What is not: `cholesky`, `bunch_kaufman`, the eigen
+`ldlt_solve`, `cholesky`, and `qr`/`lq`. What is not: `bunch_kaufman`, the eigen
 and SVD family, and the Krylov solvers — MTL5 has no complex implementation of
 any of them, and complex input raises a `TypeError` naming the alternative
 rather than silently taking a real part.
@@ -329,18 +329,25 @@ orthogonal to range(A) to 3.5e-15, which is what distinguishes a solve applying
 Qᴴ from one applying Qᵀ — the latter would reconstruct `A = QR` perfectly and
 still solve the wrong problem.
 
-`mtl5.ldlt_solve` is the one place a guard was needed. MTL5's `ldlt` is LDLᵀ
-with no conjugation, so it is correct for a complex *symmetric* matrix and
-wrong for a Hermitian one — and it reports success either way. Hermitian input
-is refused here; use `mtl5.solve`, which handles it correctly.
+**Symmetric and Hermitian need different factorizations**, and `mtl5.ldlt_solve`
+picks from the matrix: LDLᵀ for a complex symmetric one, LDLᴴ for a Hermitian
+one. They are not interchangeable — sending either input to the other's kernel
+gives a wrong answer — so a matrix that is neither is refused rather than
+guessed at.
 
 ```python
 S = mtl5.matrix(np.array([[2 + 1j, 1 - 1j], [1 - 1j, 3 + 2j]]))  # A == A^T
-mtl5.ldlt_solve(S, b)  # fine
+mtl5.ldlt_solve(S, b)  # LDL^T
 
 H = mtl5.matrix(np.array([[2 + 0j, 1 - 1j], [1 + 1j, 3 + 0j]]))  # A == A^H
-mtl5.ldlt_solve(H, b)  # ValueError, by design
+mtl5.ldlt_solve(H, b)  # LDL^H
 ```
+
+`mtl5.cholesky` follows the same principle. For complex it computes A = L·Lᴴ,
+since the plain L·Lᵀ form and its diagonal ordering test mean nothing for
+complex elements — MTL5 `static_assert`s against that and this routes to its
+Hermitian variant. A non-real diagonal is reported as *not Hermitian* rather
+than as a definiteness failure, since those are different mistakes.
 
 Complex is not in `mtl5.dtypes()`, which lists what `mtl5.convert()` accepts —
 the Universal number systems are real-only, so there is no complex target.
