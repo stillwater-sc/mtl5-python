@@ -117,6 +117,22 @@ AccKind parse_sparse_acc(const std::optional<std::string>& spec) {
     return kind;
 }
 
+/// The canonical name for a parsed accumulator. Storing this rather than the
+/// caller's spelling keeps the aliases consistent: 'none' and 'default' are the
+/// same policy, as are 'fma' and 'fma64', and refactor's default-only check
+/// compares against one spelling.
+inline const char* acc_name(AccKind kind) {
+    switch (kind) {
+        case AccKind::Default: return "default";
+        case AccKind::F32:     return "f32";
+        case AccKind::F64:     return "f64";
+        case AccKind::FMA32:   return "fma32";
+        case AccKind::FMA64:   return "fma64";
+        case AccKind::Quire:   return "quire";
+    }
+    return "default";
+}
+
 /// Invoke `f.template operator()<Acc>()` for the selected accumulator. Every
 /// branch yields the same type, since the factor type depends only on T.
 template <typename T, typename F>
@@ -214,8 +230,7 @@ void register_sparse_lu(nb::module_& m) {
                         static_cast<T>(pivot_perturb));
                 });
             }
-            new (self) Wrap{std::move(num), ordering, A.num_rows(),
-                            accumulator.value_or("default")};
+            new (self) Wrap{std::move(num), ordering, A.num_rows(), acc_name(acc)};
         }, "A"_a, "ordering"_a = "colamd", "threshold"_a = 1.0, "pivot_perturb"_a = 0.0,
            "accumulator"_a = nb::none(),
            "Analyze and factor a square CSR matrix (Gilbert-Peierls LU with "
@@ -285,8 +300,7 @@ void register_klu(nb::module_& m) {
                         static_cast<T>(pivot_perturb));
                 });
             }
-            new (self) Wrap{std::move(num), A.num_rows(),
-                            accumulator.value_or("default")};
+            new (self) Wrap{std::move(num), A.num_rows(), acc_name(acc)};
         }, "A"_a, "threshold"_a = 1.0, "scale"_a = true, "pivot_perturb"_a = 0.0,
            "accumulator"_a = nb::none(),
            "Factor a square CSR matrix with native KLU: Dulmage-Mendelsohn block "
@@ -637,8 +651,7 @@ void register_supernodal_lu(nb::module_& m) {
                 });
             }
             new (self) Wrap{std::move(num), ordering, threshold, max_super, scale,
-                            pivot_perturb, A.num_rows(),
-                            accumulator.value_or("default")};
+                            pivot_perturb, A.num_rows(), acc_name(acc)};
         }, "A"_a, "ordering"_a = "colamd", "threshold"_a = 1.0, "max_super"_a = 64,
            "scale"_a = false, "pivot_perturb"_a = 0.0, "accumulator"_a = nb::none(),
            "Supernodal LU: columns are grouped into supernodes and applied as "
@@ -703,7 +716,7 @@ void register_supernodal_ldlt(nb::module_& m) {
                 });
             }
             new (self) Wrap{std::move(sym), std::move(num), ordering, A.num_rows(),
-                            accumulator.value_or("default")};
+                            acc_name(acc)};
         }, "A"_a, "ordering"_a = "amd", "accumulator"_a = nb::none(),
            "Supernodal LDL^T of a symmetric matrix, applying each supernode as a "
            "dense block update")

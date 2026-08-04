@@ -122,12 +122,16 @@ class TestItActuallyChangesTheAnswer:
         x_f32 = ms.splu(A32, ordering="natural", accumulator="f32").solve(b)
         np.testing.assert_array_equal(x_def, x_f32)
 
-    def test_fma64_matches_f64(self):
+    def test_fma64_tracks_f64(self):
+        """They agree to well within the float32 factor's own accuracy. Not
+        bitwise: a fused multiply-add rounds once where separate operations
+        round twice, so an FMA accumulator is entitled to differ slightly and
+        still be correct."""
         A, _, b = hard_matrix()
         A32 = as_f32(A)
         x_f64 = ms.splu(A32, ordering="natural", accumulator="f64").solve(b)
         x_fma = ms.splu(A32, ordering="natural", accumulator="fma64").solve(b)
-        np.testing.assert_array_equal(x_f64, x_fma)
+        np.testing.assert_allclose(x_fma, x_f64, rtol=1e-6, atol=1e-9)
 
     def test_it_helps_iterative_refinement_converge(self):
         """The actual use case: factor narrow, refine in double. A better factor
@@ -145,6 +149,33 @@ class TestItActuallyChangesTheAnswer:
             )
         assert out["f64"][0] <= out["f32"][0], f"iterations should not increase: {out}"
         assert out["f64"][1] < out["f32"][1], f"refined error should improve: {out}"
+
+
+class TestAccumulatorNamesAreCanonical:
+    """`parse_acc` accepts aliases; the stored name must be the canonical one,
+    or two spellings of the same policy behave differently — 'none' used to be
+    stored verbatim and then rejected by refactor's default-only check."""
+
+    @pytest.mark.parametrize(
+        ("given", "canonical"),
+        [
+            ("none", "default"),
+            ("default", "default"),
+            ("float32", "f32"),
+            ("float64", "f64"),
+            ("fma", "fma64"),
+            ("fma64", "fma64"),
+        ],
+    )
+    def test_aliases_normalize(self, given, canonical):
+        A32 = as_f32(spd_matrix())
+        assert ms.splu(A32, accumulator=given).accumulator == canonical
+
+    def test_none_is_the_default_policy_for_refactor_too(self):
+        A32 = as_f32(spd_matrix())
+        f = ms.splu(A32, accumulator="none")
+        f.refactor(A32)  # must not raise: 'none' IS the default policy
+        assert f.accumulator == "default"
 
 
 class TestRejections:
