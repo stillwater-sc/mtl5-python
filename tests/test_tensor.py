@@ -253,6 +253,29 @@ class TestSymmetricStorage:
             S[3, 0]
 
 
+class TestTheDocstringExamplesRun:
+    """The module docstring shipped with a `lower_index(x_3d, minkowski_metric())`
+    call, which cannot work — the metric is 4-D. Caught in review rather than by
+    the suite, so the examples are executed here."""
+
+    def test_module_docstring_examples(self):
+        A_ = mtt.asarray(np.arange(9.0).reshape(3, 3))
+        x_ = mtt.asarray(np.array([1.0, 2.0, 3.0]))
+        mtt.contract(A_, "ij", x_, "j")
+        mtt.contract(A_, "ji", x_, "j")
+        mtt.lower_index(x_, mtt.euclidean_metric(3))
+
+        v = mtt.asarray(np.array([1.0, 2.0, 3.0, 4.0]))
+        np.testing.assert_allclose(
+            mtt.lower_index(v, mtt.minkowski_metric()).to_numpy(), [-1.0, 2, 3, 4]
+        )
+
+    def test_a_metric_of_the_wrong_dimension_is_refused(self):
+        x_ = mtt.asarray(np.array([1.0, 2.0, 3.0]))
+        with pytest.raises(TypeError):
+            mtt.lower_index(x_, mtt.minkowski_metric())
+
+
 class TestPublicSurface:
     def test_tensor_is_exported(self):
         assert "tensor" in mtl5.__all__

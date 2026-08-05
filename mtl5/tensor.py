@@ -15,7 +15,15 @@ x = mtt.asarray(np.array([1.0, 2.0, 3.0]))
 
 mtt.contract(A, "ij", x, "j")      # A @ x
 mtt.contract(A, "ji", x, "j")      # A.T @ x
-mtt.lower_index(x, mtt.minkowski_metric())   # needs dim 4
+mtt.lower_index(x, mtt.euclidean_metric(3))
+```
+
+A metric must match its vector's dimension. `minkowski_metric()` is 4-D, so it
+pairs with a four-component vector:
+
+```python
+v = mtt.asarray(np.array([1.0, 2.0, 3.0, 4.0]))
+mtt.lower_index(v, mtt.minkowski_metric())   # [-1, 2, 3, 4]
 ```
 
 `contract` takes its index strings at runtime. MTL5's own `contract` takes index
