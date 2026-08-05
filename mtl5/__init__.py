@@ -17,6 +17,7 @@ except _PackageNotFoundError:
     except ImportError:
         __version__ = "0.0.0-dev"
 
+from mtl5 import tensor  # noqa: F401  -- submodule, imported for mtl5.tensor
 from mtl5._core import (
     # Cholesky factorization objects
     CholeskyFactor_c64,
@@ -535,6 +536,7 @@ __all__ = [
     # Mixed precision
     "array",
     "mg",
+    "tensor",
     "view",
     "mixed",
     "convert",
