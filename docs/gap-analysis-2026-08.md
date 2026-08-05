@@ -411,7 +411,7 @@ where that matters it is named in the notes. **Was** is the audit-time figure.
 | Smoothers / multigrid | functions | 0 | 12 | 12 | ✅ full |
 | Views / expressions | class templates | 0 | 8 | ~8 | ✅ full |
 | `mtl/array` N-D layer | functions | 0 | 5 | ~8 | ✅ 63% |
-| `mtl/tensor` | functions | 0 | 0 | ~7 | ❌ 0% |
+| `mtl/tensor` | functions | 0 | 7 | ~7 | ✅ full |
 | I/O | functions | 0 | 7 | ~8 | ✅ 88% |
 | Generators | generators | 0 | 25 | ~28 | ✅ 89% |
 | Build acceleration | CMake options | 0 | 5 | 5 | ✅ full |
@@ -455,9 +455,16 @@ Notes on the rows that are easy to miscount:
   `MTL5_WITH_ZLIB` was added afterwards for gzip Matrix Market input and is a sixth,
   outside the audited five.
 
-**What is left.** One module: `mtl/tensor` — index-notation tensor algebra, distinct from
-the NumPy-shaped `mtl/array` that is bound. Everything else this audit inventoried is
-reachable from Python.
+**Nothing is left.** Every module this audit inventoried is reachable from Python.
+
+`mtl/tensor` was bound in #44. Its contraction was the one place where a compile-time
+interface could be reached anyway: `contract` takes index names as `char` template
+parameters, which a runtime index string cannot supply, but the repeated index sits in one
+of two positions on each side — so four instantiations cover every rank-2 contraction up
+to relabelling and Python reaches MTL5's own kernel rather than a reimplementation. That
+is the opposite outcome to `mtl::array::slice`, where the argument space was 3^N per rank
+and reimplementing was the only option; the difference is worth remembering when the next
+compile-time interface comes up.
 
 Views were bound in #42. They materialise rather than aliasing: upstream each holds a
 `const Matrix&`, which is a lifetime hazard for a caller passing a temporary — the same
