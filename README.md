@@ -522,6 +522,52 @@ A.rmatvec(x)  # A.T @ x, no second copy of the matrix
 `mtl5.sparse.as_linear_operator(A)` uses it, so both directions of a SciPy
 `LinearOperator` now stay inside MTL5.
 
+## Krylov solvers and preconditioners
+
+Ten solvers and eight preconditioners, in any combination:
+
+```python
+import mtl5.sparse as ms
+
+x, info = ms.gmres(A, b, M=ms.ilu0(A))
+x, info = ms.cg(A, b, M=ms.ic0(A), rtol=1e-12)
+x, info = ms.iterative_solve(A, b, solver="idr_s", M=ms.ssor(A, omega=1.4), s=8)
+```
+
+`ms.solvers()` and `ms.preconditioners()` list them:
+
+| | |
+|---|---|
+| **symmetric** | `cg`, `minres` |
+| **general** | `bicgstab`, `bicgstab_ell`, `cgs`, `gmres`, `idr_s`, `tfqmr`, `bicg`, `qmr` |
+| **preconditioners** | `identity`, `diagonal`, `ic0`, `ildl`, `ilu0`, `ssor`, `ilut`, `block_diagonal` |
+
+`M=` defaults to `identity`, so omitting it runs unpreconditioned. Solver-specific
+knobs are `restart=` (gmres), `ell=` (bicgstab_ell) and `s=` (idr_s).
+
+The preconditioner is type-erased rather than being a template parameter of each
+solver, so the pairing is chosen at runtime. Binding the cross product directly
+would have meant 10 × 8 × 2 dtypes = **160** instantiations of a full iterative
+solver; this is 20.
+
+**`bicg` and `qmr` require a symmetric preconditioner.** They are the only two
+that apply Mᵀ, and MTL5 implements a preconditioner's adjoint as its forward
+solve — exact when M is symmetric, wrong otherwise. `identity`, `diagonal`,
+`ic0` and `ildl` are always symmetric; `ilu0`, `ssor`, `ilut` and
+`block_diagonal` are symmetric only when A is, which each one determines at
+construction and reports as `.is_symmetric`. A pairing that would break down is
+refused rather than run:
+
+```python
+ms.bicg(nonsymmetric_A, b, M=ms.ilu0(nonsymmetric_A))  # ValueError, by design
+ms.bicg(nonsymmetric_A, b, M=ms.diagonal(nonsymmetric_A))  # fine
+```
+
+One behaviour worth knowing: **TFQMR can stagnate** unpreconditioned — it
+plateaus rather than converging slowly, and more iterations do not help. Giving
+it any real preconditioner fixes it. That is a property of the method, not of
+this binding.
+
 ## Sparse direct solvers
 
 Seven factorizations, one interface — construct, `.solve(b)`, `.refactor(A2)`:

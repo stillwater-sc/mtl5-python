@@ -38,12 +38,24 @@ from __future__ import annotations
 import numpy as np
 
 from mtl5._core import (
+    BlockDiagonal_f32,
+    BlockDiagonal_f64,
+    Diagonal_f32,
+    Diagonal_f64,
     IC0_f32,
     IC0_f64,
+    Identity_f32,
+    Identity_f64,
+    ILDL_f32,
+    ILDL_f64,
     ILU0_f32,
     ILU0_f64,
+    ILUT_f32,
+    ILUT_f64,
     KLU_f32,
     KLU_f64,
+    Preconditioner_f32,
+    Preconditioner_f64,
     SparseCholesky_f32,
     SparseCholesky_f64,
     SparseLDLT_f32,
@@ -58,15 +70,17 @@ from mtl5._core import (
     SparseMatrixELL_f64,
     SparseQR_f32,
     SparseQR_f64,
+    SSOR_f32,
+    SSOR_f64,
     SupernodalLDLT_f32,
     SupernodalLDLT_f64,
     SupernodalLU_f32,
     SupernodalLU_f64,
+    _krylov,
     _ordering,
-    _sparse_bicgstab,
-    _sparse_cg,
-    _sparse_gmres,
     orderings,
+    preconditioners,
+    solvers,
 )
 from mtl5._core import vector as _vector
 
@@ -264,7 +278,7 @@ def _coerce_vector(b, expected_dtype: np.dtype):
     return _vector(arr)
 
 
-def _check_unsupported_kwargs(M, callback, device):
+def _check_unsupported_kwargs(callback, device):
     """Validate optional kwargs reserved for future support.
 
     These parameters are reserved on the public API surface so that callers
@@ -272,15 +286,6 @@ def _check_unsupported_kwargs(M, callback, device):
     kernel gains preconditioner / callback / device-dispatch support, without
     breaking the function signature later.
     """
-    if M is not None:
-        # TODO(#7-followup): Plumb the preconditioner directly into the C++
-        # solver loop. For now users should pass MTL5 preconditioners through
-        # scipy: scipy_cg(A, b, M=msp.as_preconditioner_lo(msp.ilu0(A), n))
-        raise NotImplementedError(
-            "M= preconditioner not yet plumbed into mtl5.sparse solvers. "
-            "Use scipy.sparse.linalg.cg with M=mtl5.sparse.as_preconditioner_lo("
-            "mtl5.sparse.ilu0(A), n) for now."
-        )
     if callback is not None:
         # TODO(#7-followup): Add per-iteration callback dispatching to Python.
         raise NotImplementedError(
@@ -294,34 +299,22 @@ def _check_unsupported_kwargs(M, callback, device):
         )
 
 
-def cg(
-    A,
-    b,
-    *,
-    rtol: float = 1e-10,
-    maxiter: int = 1000,
-    M=None,
-    callback=None,
-    device=None,
-):
-    """Conjugate Gradient solver for symmetric positive-definite systems.
-
-    Solves `A @ x = b` using CG. Accepts MTL5 or scipy.sparse matrices.
-
+_SOLVER_DOC = """
     Parameters
     ----------
     A : MTL5 SparseMatrix or scipy.sparse matrix
     b : array-like
     rtol : float
-        Relative tolerance.
+        Relative residual tolerance.
     maxiter : int
-        Maximum number of iterations.
+        Iteration cap. `info` is 1 if it is reached without converging.
     M : preconditioner, optional
-        Reserved for future preconditioner support. Currently raises
-        NotImplementedError — use scipy.sparse.linalg.cg with
-        as_preconditioner_lo() to apply MTL5 preconditioners.
+        Any object from this module's preconditioner factories — `ilu0`,
+        `ic0`, `diagonal`, `ssor`, `ilut`, `ildl`, `block_diagonal`,
+        `identity`. Defaults to `identity`, i.e. unpreconditioned.
     callback : callable, optional
-        Reserved for per-iteration monitoring. Currently raises NotImplementedError.
+        Reserved for per-iteration monitoring. Currently raises
+        NotImplementedError.
     device : str, optional
         Reserved for KPU dispatch. Currently raises NotImplementedError for
         anything other than 'cpu'.
@@ -331,61 +324,155 @@ def cg(
     x : np.ndarray
         Solution vector.
     info : int
-        0 on convergence, 1 if max_iter exceeded.
+        0 on convergence, nonzero otherwise.
     """
-    _check_unsupported_kwargs(M, callback, device)
+
+
+def _run(name, A, b, rtol, maxiter, M, callback, device, restart=30, ell=2, s=4):
+    """Shared body: coerce, default the preconditioner, dispatch."""
+    _check_unsupported_kwargs(callback, device)
     mat = _coerce_matrix(A)
     dtype = np.float64 if mat.dtype == "f64" else np.float32
     bv = _coerce_vector(b, dtype)
-    x_view, info, _iters, _resid = _sparse_cg(mat, bv, rtol, maxiter)
+    if M is None:
+        M = identity(mat)
+    elif not isinstance(M, (Preconditioner_f32, Preconditioner_f64)):
+        raise TypeError(
+            f"M must be an mtl5.sparse preconditioner (one of {preconditioners()}), "
+            f"got {type(M).__name__}. A scipy LinearOperator cannot be used here — "
+            "it would have to be applied from Python once per iteration."
+        )
+    x_view, info, _iters, _resid = _krylov(name, mat, M, bv, rtol, maxiter, restart, ell, s)
     return x_view.to_numpy(), info
 
 
-def gmres(
+def iterative_solve(
     A,
     b,
     *,
-    rtol: float = 1e-10,
-    maxiter: int = 1000,
-    restart: int = 30,
+    solver="gmres",
+    rtol=1e-10,
+    maxiter=1000,
     M=None,
     callback=None,
     device=None,
+    restart=30,
+    ell=2,
+    s=4,
 ):
-    """GMRES solver for general non-symmetric systems.
+    """Solve `A @ x = b` with any of the Krylov solvers in `solvers()`.
 
-    Returns (x, info) following scipy convention. See `cg` for parameter docs;
-    `M`, `callback`, and `device` are reserved for future support.
+    The named wrappers below — `cg`, `gmres`, and the rest — are thin calls
+    onto this. Use this form when the solver is chosen at runtime.
+
+    `restart` applies to gmres, `ell` to bicgstab_ell and `s` to idr_s; each is
+    ignored by the others.
     """
-    _check_unsupported_kwargs(M, callback, device)
-    mat = _coerce_matrix(A)
-    dtype = np.float64 if mat.dtype == "f64" else np.float32
-    bv = _coerce_vector(b, dtype)
-    x_view, info, _iters, _resid = _sparse_gmres(mat, bv, rtol, maxiter, restart)
-    return x_view.to_numpy(), info
+    if solver not in solvers():
+        raise ValueError(f"unknown solver {solver!r}; valid: {solvers()}")
+    return _run(solver, A, b, rtol, maxiter, M, callback, device, restart, ell, s)
 
 
-def bicgstab(
-    A,
-    b,
-    *,
-    rtol: float = 1e-10,
-    maxiter: int = 1000,
-    M=None,
-    callback=None,
-    device=None,
-):
-    """BiCGSTAB solver for general non-symmetric systems.
-
-    Returns (x, info) following scipy convention. See `cg` for parameter docs;
-    `M`, `callback`, and `device` are reserved for future support.
+def cg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """Conjugate Gradient, for symmetric positive definite systems.
     """
-    _check_unsupported_kwargs(M, callback, device)
-    mat = _coerce_matrix(A)
-    dtype = np.float64 if mat.dtype == "f64" else np.float32
-    bv = _coerce_vector(b, dtype)
-    x_view, info, _iters, _resid = _sparse_bicgstab(mat, bv, rtol, maxiter)
-    return x_view.to_numpy(), info
+        + _SOLVER_DOC
+    )
+    return _run("cg", A, b, rtol, maxiter, M, callback, device)
+
+
+def minres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """MINRES, for symmetric systems that may be indefinite — where CG does not
+    apply.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("minres", A, b, rtol, maxiter, M, callback, device)
+
+
+def bicgstab(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """BiCGSTAB, for general non-symmetric systems. A good default.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("bicgstab", A, b, rtol, maxiter, M, callback, device)
+
+
+def bicgstab_ell(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, ell=2):
+    (
+        """BiCGSTAB(ell), which smooths BiCGSTAB's irregular convergence by taking
+    `ell` minimal-residual steps at a time.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("bicgstab_ell", A, b, rtol, maxiter, M, callback, device, ell=ell)
+
+
+def cgs(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """Conjugate Gradient Squared, for non-symmetric systems. Avoids A^T but
+    converges more erratically than BiCGSTAB.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("cgs", A, b, rtol, maxiter, M, callback, device)
+
+
+def gmres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, restart=30):
+    (
+        """GMRES with restarts, for general non-symmetric systems. `restart` bounds
+    the Krylov subspace, trading memory against convergence.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("gmres", A, b, rtol, maxiter, M, callback, device, restart=restart)
+
+
+def idr_s(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, s=4):
+    (
+        """IDR(s), for non-symmetric systems. Larger `s` usually means fewer
+    iterations and more memory.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("idr_s", A, b, rtol, maxiter, M, callback, device, s=s)
+
+
+def tfqmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """Transpose-free QMR, for non-symmetric systems.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("tfqmr", A, b, rtol, maxiter, M, callback, device)
+
+
+def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """BiCG, for non-symmetric systems.
+
+    Needs a **symmetric** preconditioner. BiCG and QMR are the only solvers
+    here that apply M^T, and MTL5 implements a preconditioner's adjoint as its
+    forward solve — exact when M is symmetric, wrong otherwise. A non-symmetric
+    ILU(0) or SSOR is refused rather than allowed to break down; `identity`,
+    `diagonal`, `ic0` and `ildl` are always safe.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("bicg", A, b, rtol, maxiter, M, callback, device)
+
+
+def qmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    (
+        """QMR, for non-symmetric systems. Needs a symmetric preconditioner — see
+    `bicg` for why.
+    """
+        + _SOLVER_DOC
+    )
+    return _run("qmr", A, b, rtol, maxiter, M, callback, device)
 
 
 # ===========================================================================
@@ -394,16 +481,54 @@ def bicgstab(
 # ===========================================================================
 
 
+def _pc(f32_cls, f64_cls, A, *args, **kwargs):
+    """Build a preconditioner of the class matching A's element type."""
+    mat = _coerce_matrix(A)
+    cls = f32_cls if mat.dtype == "f32" else f64_cls
+    return cls(mat, *args, **kwargs)
+
+
+def identity(A):
+    """Identity preconditioner — a no-op, for running a solver unpreconditioned.
+
+    This is the default when a solver is called without `M=`.
+    """
+    return _pc(Identity_f32, Identity_f64, A)
+
+
+def diagonal(A):
+    """Jacobi (diagonal) preconditioner: M = diag(A)."""
+    return _pc(Diagonal_f32, Diagonal_f64, A)
+
+
 def ilu0(A):
     """Incomplete LU factorization with no fill-in.
 
-    Accepts an MTL5 or scipy sparse matrix and returns an ILU0 preconditioner
-    object with a .solve(r) method.
+    Accepts an MTL5 or scipy sparse matrix and returns a preconditioner object
+    with a `.solve(r)` method, usable as `M=` on any solver.
     """
-    mat = _coerce_matrix(A)
-    if mat.dtype == "f32":
-        return ILU0_f32(mat)
-    return ILU0_f64(mat)
+    return _pc(ILU0_f32, ILU0_f64, A)
+
+
+def ildl(A):
+    """Incomplete LDL^T, for a symmetric indefinite matrix."""
+    return _pc(ILDL_f32, ILDL_f64, A)
+
+
+def ssor(A, omega: float = 1.0):
+    """Symmetric successive over-relaxation. `omega` must lie in (0, 2)."""
+    return _pc(SSOR_f32, SSOR_f64, A, omega)
+
+
+def ilut(A, fill: int = 10, tau: float = 1e-4):
+    """Incomplete LU with a drop threshold `tau` and at most `fill` entries
+    kept per row — more accurate than ILU(0), and more expensive."""
+    return _pc(ILUT_f32, ILUT_f64, A, fill, tau)
+
+
+def block_diagonal(A, block_size: int):
+    """Block Jacobi: invert each diagonal block of size `block_size`."""
+    return _pc(BlockDiagonal_f32, BlockDiagonal_f64, A, block_size)
 
 
 def ic0(A):
@@ -662,11 +787,29 @@ __all__ = [
     "SparseMatrixCOO_f64",
     "SparseMatrixELL_f32",
     "SparseMatrixELL_f64",
+    "BlockDiagonal_f32",
+    "BlockDiagonal_f64",
+    "Diagonal_f32",
+    "Diagonal_f64",
+    "ILDL_f32",
+    "ILDL_f64",
+    "ILUT_f32",
+    "ILUT_f64",
+    "Identity_f32",
+    "Identity_f64",
+    "Preconditioner_f32",
+    "Preconditioner_f64",
+    "SSOR_f32",
+    "SSOR_f64",
     "amd",
     "as_linear_operator",
     "as_preconditioner_lo",
+    "bicg",
     "bicgstab",
+    "bicgstab_ell",
+    "block_diagonal",
     "cg",
+    "cgs",
     "cholesky",
     "colamd",
     "coo_matrix",
@@ -675,11 +818,23 @@ __all__ = [
     "from_scipy",
     "gmres",
     "ic0",
+    "identity",
+    "idr_s",
+    "ildl",
     "ilu0",
+    "ilut",
+    "iterative_solve",
     "klu",
     "ldlt",
+    "diagonal",
+    "minres",
     "ordering",
     "orderings",
+    "preconditioners",
+    "qmr",
+    "solvers",
+    "ssor",
+    "tfqmr",
     "qr",
     "rcm",
     "splu",

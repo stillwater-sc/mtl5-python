@@ -1249,7 +1249,7 @@ void register_sparse_solvers(nb::module_& m) {
 // ===========================================================================
 template <typename T>
     requires std::is_floating_point_v<T>
-void register_preconditioners(nb::module_& m) {
+[[maybe_unused]] void register_preconditioners(nb::module_& m) {
     using SMat = mtl::mat::compressed2D<T>;
     using Vec  = mtl::vec::dense_vector<T>;
     using VV   = VectorView<T>;
@@ -1515,8 +1515,10 @@ NB_MODULE(_core, m) {
     register_sparse_solvers<double>(m);
 
     // ----- Preconditioners (ILU0, IC0) ---------------------------------------
-    register_preconditioners<float>(m);
-    register_preconditioners<double>(m);
+    // ILU(0) and IC(0) are registered by mtl5_krylov.cpp instead, as part of
+    // the type-erased preconditioner hierarchy every Krylov solver accepts.
+    // register_preconditioners<T> here is retained only for its ILU0/IC0
+    // class shape and is no longer called.
 
     // ----- Mixed precision (separate TU; see mtl5_mixed_precision.cpp) -------
     // Registered after the containers above so the classes it takes and returns
@@ -1545,6 +1547,9 @@ NB_MODULE(_core, m) {
 
     // ----- N-dimensional array layer (mtl/array) ------------------------------
     register_ndarray_layer(m);
+
+    // ----- Krylov solver / preconditioner dispatch ----------------------------
+    register_krylov(m);
 
     // ----- Complex element types (c64, c128) ---------------------------------
     // Registered after the real overloads so that a complex NumPy array matches

@@ -24,7 +24,8 @@ nanobind_add_module(_core
     src/mtl5_io.cpp
     src/mtl5_complex.cpp
     src/mtl5_sparse_formats.cpp
-    src/mtl5_ndarray.cpp)
+    src/mtl5_ndarray.cpp
+    src/mtl5_krylov.cpp)
 
 # The MTL5 + Universal composition headers we own (mtl/math/quire_accumulator.hpp
 # bridges Universal's quire into MTL5's accumulator_traits). Kept under an
