@@ -108,6 +108,12 @@ struct PCRef {
 
 template <typename PCType, typename T>
 struct PCImpl : PCBase<T> {
+    // A is copied and the preconditioner built from that copy, because some of
+    // them keep a reference to it -- pc::ssor stores `const Matrix& A_` and
+    // consults it on every apply. The Python matrix a caller passes is often a
+    // temporary (mtl5.sparse coerces scipy input), so borrowing would dangle.
+    // Declared first so it outlives pc_.
+    SMat<T> A_;
     PCType pc_;
     std::size_t n;          // named for sparse_refine_through, which reads M.n
     bool sym_;
@@ -115,7 +121,8 @@ struct PCImpl : PCBase<T> {
 
     template <typename... Args>
     PCImpl(const SMat<T>& A, bool sym, const char* kind, Args&&... args)
-        : pc_(A, std::forward<Args>(args)...), n(A.num_rows()), sym_(sym), kind_(kind) {}
+        : A_(A), pc_(A_, std::forward<Args>(args)...), n(A.num_rows()),
+          sym_(sym), kind_(kind) {}
 
     void apply(Vec<T>& x, const Vec<T>& b) const override { pc_.solve(x, b); }
     void apply_adjoint(Vec<T>& x, const Vec<T>& b) const override {
