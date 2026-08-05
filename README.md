@@ -73,9 +73,7 @@ quire is available for the posit, cfloat, lns and fixpnt families; `f32`/`f64`
 have none (Universal defines no quire for the native types). Exactness varies by
 family — it is genuinely exact for posit and fixpnt, while the cfloat and lns
 quires have known upstream limitations documented in
-`python/include/mtl/math/quire_accumulator.hpp`. The accumulated norms are
-computed locally rather than through `mtl::two_norm<Acc>`, which cannot take a
-quire ([stillwater-sc/mtl5#324](https://github.com/stillwater-sc/mtl5/issues/324)).
+`python/include/mtl/math/quire_accumulator.hpp`.
 
 `accumulator=` is available on `dot`, `norm` (ord=2), `frobenius_norm`,
 `matvec` and `matmul`.

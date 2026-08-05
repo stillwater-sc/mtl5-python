@@ -138,60 +138,15 @@ double mixed_dot(const V& a, const V& b, AccKind kind, bool result_element) {
     });
 }
 
-// The sum-of-squares norms are accumulated here rather than through
-// mtl::two_norm<Acc> / mtl::frobenius_norm<Acc>, and they stay that way even
-// now that stillwater-sc/mtl5#324 is fixed.
-//
-// The upstream fix was the right one for a C++ caller: it rounds the
-// accumulator out to the accumulator's own arithmetic precision and then casts
-// to mag_t, so `two_norm<Acc>(v)` hands back the ELEMENT type, matching every
-// other MTL5 operation. But at the Python boundary we return a float
-// regardless, and that final cast throws away exactly what the accumulator
-// bought. Measured on 4000 posit16 values, against the exact norm of the same
-// posit16 data:
-//
-//     accumulator     upstream two_norm<Acc>     these loops
-//     f64             rel 1.19e-04               exact
-//     quire           rel 1.19e-04               exact
-//
-// Both accumulators give the SAME answer upstream, because posit16's
-// resolution swamps the difference — which makes `accumulator=` unobservable
-// from Python, and the tests asserting that a wider accumulator is strictly
-// better would be asserting nothing.
-//
-// The clean fix is a Result parameter on the norms, mirroring the one
-// dot<Accumulator, Result> already has; requested as an upstream enhancement.
-// Until then these two loops are deliberate, not vestigial.
-//
-// All element types bound here are real, so |x|^2 == x*x and the magnitude type
-// is the element type.
-template <typename T, typename Acc, typename V>
-double sumsq_vec(const V& v) {
-    using AT = mtl::math::accumulator_traits<Acc, T>;
-    Acc acc{};
-    AT::clear(acc);
-    for (typename V::size_type i = 0; i < v.size(); ++i) {
-        using std::abs;
-        T a = abs(v(i));
-        AT::add_product(acc, a, a);
-    }
-    return AT::template value<double>(acc);
-}
-
-template <typename T, typename Acc, typename M>
-double sumsq_mat(const M& m) {
-    using AT = mtl::math::accumulator_traits<Acc, T>;
-    Acc acc{};
-    AT::clear(acc);
-    for (typename M::size_type r = 0; r < m.num_rows(); ++r)
-        for (typename M::size_type c = 0; c < m.num_cols(); ++c) {
-            using std::abs;
-            T a = abs(m(r, c));
-            AT::add_product(acc, a, a);
-        }
-    return AT::template value<double>(acc);
-}
-
+// These went through local sum-of-squares loops until stillwater-sc/mtl5#379
+// landed (MTL5 03c77ee). Before it, `two_norm<Acc>` rounded the accumulated
+// value out to the ELEMENT type -- correct for a C++ caller, and what #324
+// settled on -- which at the Python boundary threw away exactly what the
+// accumulator bought: measured on 4000 posit16 values, f64 and quire
+// accumulation both landed on rel err 1.19e-04, so `accumulator=` was
+// unobservable. #379 added the Result parameter that `dot<Accumulator, Result>`
+// already had, so `two_norm<Acc, double>` now delivers the accumulated value at
+// double precision and the loops are gone.
 template <typename T, typename V>
 double mixed_two_norm(const V& v, AccKind kind) {
     nogil guard;
@@ -199,7 +154,7 @@ double mixed_two_norm(const V& v, AccKind kind) {
         if constexpr (std::is_same_v<Acc, void>)
             return static_cast<double>(mtl::two_norm(v));
         else
-            return std::sqrt(sumsq_vec<T, Acc>(v));
+            return static_cast<double>(mtl::two_norm<Acc, double>(v));
     });
 }
 
@@ -210,7 +165,7 @@ double mixed_frobenius_norm(const M& m, AccKind kind) {
         if constexpr (std::is_same_v<Acc, void>)
             return static_cast<double>(mtl::frobenius_norm(m));
         else
-            return std::sqrt(sumsq_mat<T, Acc>(m));
+            return static_cast<double>(mtl::frobenius_norm<Acc, double>(m));
     });
 }
 
