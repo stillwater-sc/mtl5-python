@@ -145,8 +145,40 @@ class TestAccumulatorPolicy:
 
 
 class TestAccumulatedNorms:
-    """These exercise the local sum-of-squares loops that work around
-    stillwater-sc/mtl5#324 (two_norm<Acc>/frobenius_norm<Acc>)."""
+    """`norm(ord=2)` and `frobenius_norm` go through
+    `mtl::two_norm<Acc, double>` / `mtl::frobenius_norm<Acc, double>`.
+
+    Until stillwater-sc/mtl5#379 added the `Result` parameter they could not:
+    `two_norm<Acc>` rounded back to the element type, so every accumulator
+    returned the same number and `accumulator=` was unobservable. The ordering
+    test below is the one that could not be written then — it would have passed
+    trivially while asserting nothing.
+    """
+
+    def test_a_wider_accumulator_is_strictly_better(self):
+        """posit16 elements, where the accumulator has room to matter. Measured
+        against the exact norm of the same posit16 data, so the only error is
+        the accumulation."""
+        rng = np.random.default_rng(0)
+        v = mtl5.convert(rng.standard_normal(4000), "posit16")
+        elements = np.array([float(v[i]) for i in range(len(v))], dtype=np.longdouble)
+        exact = float(np.sqrt((elements * elements).sum()))
+
+        err = {
+            acc: abs(mtl5.mixed.norm(v, 2, accumulator=acc) - exact) / exact
+            for acc in ("f32", "f64", "quire")
+        }
+        assert err["f64"] < err["f32"], err
+        assert err["quire"] <= err["f64"], err
+        assert err["quire"] == 0.0, f"the quire should be exact, got {err['quire']}"
+
+    def test_the_accumulator_beats_no_accumulator(self):
+        """Without one, the sum is carried in posit16 and loses badly."""
+        rng = np.random.default_rng(0)
+        v = mtl5.convert(rng.standard_normal(4000), "posit16")
+        none = mtl5.mixed.norm(v, 2)
+        wide = mtl5.mixed.norm(v, 2, accumulator="quire")
+        assert abs(none - wide) / wide > 1e-2, (none, wide)
 
     def test_norm_matches_numpy_with_wide_accumulator(self):
         rng = np.random.default_rng(5)
