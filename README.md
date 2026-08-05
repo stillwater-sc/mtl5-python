@@ -522,6 +522,47 @@ A.rmatvec(x)  # A.T @ x, no second copy of the matrix
 `mtl5.sparse.as_linear_operator(A)` uses it, so both directions of a SciPy
 `LinearOperator` now stay inside MTL5.
 
+## Matrix views
+
+Eight ways to read part of a matrix:
+
+```python
+mtl5.view.lower(A)  # and upper, strict_lower, strict_upper
+mtl5.view.transposed(A)
+mtl5.view.banded(A, 1, 1)  # tridiagonal
+mtl5.view.map(A, [2, 0], [1, 2])  # out[i, j] = A[rows[i], cols[j]]
+mtl5.view.hermitian(A)
+```
+
+These **materialise** — each returns an ordinary `DenseMatrix` that every other
+binding accepts. Upstream they are lazy accessors holding a `const Matrix&`,
+which buys nothing here (Python has no expression template to feed) and is a
+lifetime hazard: a caller passing a NumPy array or a converted scipy matrix
+hands over a temporary the view would outlive.
+
+Two carry a trap worth knowing.
+
+**`banded` takes bandwidths, not signed diagonal offsets.** `banded(A, 1, 1)` is
+tridiagonal and `banded(A, 0, 0)` the diagonal. Writing `-1` for "one
+subdiagonal" reads plausibly but asks upstream for the wrong region entirely —
+negative values are refused rather than silently returning a band you did not
+mean.
+
+**`hermitian` is not the adjoint.** It reads the **upper triangle** and mirrors
+it conjugated into the lower, discarding whatever was stored there — the usual
+"this matrix is Hermitian, only one triangle is meaningful" convention. For Aᴴ
+use `mtl5.adjoint(A)`. The two agree only when the input is already Hermitian,
+which is exactly the case you would reach for first when checking:
+
+```python
+Z = np.array([[1 + 0j, 2 - 1j], [9 + 9j, 4 + 0j]])  # lower triangle inconsistent on purpose
+mtl5.view.hermitian(mtl5.matrix(Z))  # [[1, 2-1j], [2+1j, 4]] — lower discarded
+mtl5.adjoint(mtl5.matrix(Z))  # [[1, 9-9j], [2+1j, 4]] — a real transpose
+```
+
+A non-real diagonal is refused: the view leaves the diagonal alone, so it would
+produce a matrix that is not in fact Hermitian.
+
 ## Multigrid and smoothers
 
 ```python

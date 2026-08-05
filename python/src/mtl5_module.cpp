@@ -1554,6 +1554,9 @@ NB_MODULE(_core, m) {
     // ----- Smoothers, grid transfer and multigrid -----------------------------
     register_multigrid(m);
 
+    // ----- Matrix views -------------------------------------------------------
+    register_views(m);
+
     // ----- Complex element types (c64, c128) ---------------------------------
     // Registered after the real overloads so that a complex NumPy array matches
     // a complex overload in nanobind's first (no-convert) pass rather than
