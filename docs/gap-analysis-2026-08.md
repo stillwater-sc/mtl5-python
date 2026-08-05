@@ -409,7 +409,7 @@ where that matters it is named in the notes. **Was** is the audit-time figure.
 | Krylov solvers | solvers | 3 | 10 | 10 | ✅ full |
 | Preconditioners | preconditioners | 2 | 8 | 8 | ✅ full |
 | Smoothers / multigrid | functions | 0 | 12 | 12 | ✅ full |
-| Views / expressions | class templates | 0 | 0 | ~8 | ❌ 0% |
+| Views / expressions | class templates | 0 | 8 | ~8 | ✅ full |
 | `mtl/array` N-D layer | functions | 0 | 5 | ~8 | ✅ 63% |
 | `mtl/tensor` | functions | 0 | 0 | ~7 | ❌ 0% |
 | I/O | functions | 0 | 7 | ~8 | ✅ 88% |
@@ -455,10 +455,16 @@ Notes on the rows that are easy to miscount:
   `MTL5_WITH_ZLIB` was added afterwards for gzip Matrix Market input and is a sixth,
   outside the audited five.
 
-**What is left.** Two modules, neither of them numerical kernels. Views and expressions
-are unbound, and `hermitian_view` is the one most obviously wanted since complex became
-supported throughout. `mtl/tensor` — index-notation tensor algebra, distinct from the
-NumPy-shaped `mtl/array` — is untouched.
+**What is left.** One module: `mtl/tensor` — index-notation tensor algebra, distinct from
+the NumPy-shaped `mtl/array` that is bound. Everything else this audit inventoried is
+reachable from Python.
+
+Views were bound in #42. They materialise rather than aliasing: upstream each holds a
+`const Matrix&`, which is a lifetime hazard for a caller passing a temporary — the same
+shape as the bug that segfaulted `pc::ssor` — and the laziness buys nothing without an
+expression template to feed. Two carry traps worth knowing and are guarded: `banded` takes
+bandwidths rather than signed diagonal offsets, and `hermitian` reconstructs a Hermitian
+matrix from the upper triangle rather than being the adjoint.
 
 Smoothers and multigrid were bound in #40, with two additions upstream does not have: a
 sparse `galerkin(R, A, P)`, because `R * A * P` through `operator*` returns a *dense*
