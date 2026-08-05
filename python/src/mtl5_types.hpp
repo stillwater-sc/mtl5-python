@@ -215,6 +215,9 @@ inline AccKind parse_acc(const std::optional<std::string>& spec,
     throw std::invalid_argument("unknown accumulator '" + a + "'; " + kAccumulatorHelp);
 }
 
+// Registered by mtl5_views.cpp — matrix views.
+void register_views(nb::module_& m);
+
 // Registered by mtl5_multigrid.cpp — smoothers, grid transfer, multigrid.
 void register_multigrid(nb::module_& m);
 

@@ -179,6 +179,8 @@ from mtl5._core import (
     vector_posit16,
     vector_posit32,
     vector_posit64,
+    # Matrix views
+    view,
 )
 from mtl5._core import arange as _arange
 from mtl5._core import det as _det
@@ -533,6 +535,7 @@ __all__ = [
     # Mixed precision
     "array",
     "mg",
+    "view",
     "mixed",
     "convert",
     "dtypes",
