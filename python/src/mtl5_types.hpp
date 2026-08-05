@@ -215,6 +215,9 @@ inline AccKind parse_acc(const std::optional<std::string>& spec,
     throw std::invalid_argument("unknown accumulator '" + a + "'; " + kAccumulatorHelp);
 }
 
+// Registered by mtl5_multigrid.cpp — smoothers, grid transfer, multigrid.
+void register_multigrid(nb::module_& m);
+
 // Registered by mtl5_krylov.cpp — Krylov solver / preconditioner dispatch.
 void register_krylov(nb::module_& m);
 
