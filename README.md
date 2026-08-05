@@ -522,6 +522,57 @@ A.rmatvec(x)  # A.T @ x, no second copy of the matrix
 `mtl5.sparse.as_linear_operator(A)` uses it, so both directions of a SciPy
 `LinearOperator` now stay inside MTL5.
 
+## Multigrid and smoothers
+
+```python
+import mtl5, mtl5.sparse as ms
+
+M = mtl5.mg.multigrid_1d(A, n_levels=5)  # builds the whole hierarchy
+x = M.vcycle(mtl5.vector(x0), mtl5.vector(b), cycles=10)
+M.level_sizes  # [127, 63, 31, 15, 7]
+```
+
+On 1-D Poisson the residual drops by a factor of about **0.03 per V-cycle**, and
+that factor holds as the problem grows — mesh independence is what separates
+multigrid from a lone smoother, and the test suite asserts it rather than just
+checking the residual went down.
+
+`multigrid_1d` builds the hierarchy for you: standard 1-D coarsening, Galerkin
+coarse operators, the chosen smoother at every level. `n_levels` is an upper
+bound — coarsening stops before a level would fall below 4 rows, so check
+`level_sizes`. `wcycle` is also available.
+
+The seven smoothers are reachable directly, for use outside a hierarchy:
+
+```python
+x = mtl5.mg.smooth(A, x, b, kind="symmetric_gauss_seidel", sweeps=5)
+mtl5.mg.smoothers()
+# ['jacobi', 'gauss_seidel', 'backward_gauss_seidel',
+#  'symmetric_gauss_seidel', 'sor', 'backward_sor', 'symmetric_sor']
+```
+
+`omega` applies to the SOR variants; at `omega=1.0` SOR is exactly Gauss-Seidel,
+which the tests use to confirm the parameter reaches the kernel.
+
+**Jacobi is a poor multigrid smoother**, and that is a property of the method
+rather than of this binding. Multigrid needs a smoother that damps
+*high-frequency* error — the part the coarse grid cannot represent — and
+undamped Jacobi leaves the highest modes almost untouched. The usual remedy is
+damped Jacobi at `omega ≈ 2/3`, which MTL5's `jacobi` has no parameter for. Use
+a Gauss-Seidel or SOR variant in a hierarchy.
+
+Grid transfer is exposed too, along with a sparse Galerkin product:
+
+```python
+R = mtl5.mg.make_restriction_1d(127)  # 63 x 127, full weighting
+P = mtl5.mg.make_prolongation_1d(63)  # 127 x 63, linear interpolation
+Ac = mtl5.mg.galerkin(R, A, P)  # the coarse operator, still sparse
+```
+
+`galerkin` exists because spelling it `R @ A @ P` would go through a
+sparse-times-sparse product that returns a **dense** matrix — a fine-sized
+intermediate, which is exactly what you cannot afford in a hierarchy.
+
 ## Krylov solvers and preconditioners
 
 Ten solvers and eight preconditioners, in any combination:

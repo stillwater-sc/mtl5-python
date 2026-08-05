@@ -144,6 +144,8 @@ from mtl5._core import (
     matrix_posit32,
     matrix_posit64,
     matvec,
+    # Smoothers, grid transfer and multigrid
+    mg,
     # Mixed-precision submodule (element / accumulator / result precisions)
     mixed,
     norm,
@@ -530,6 +532,7 @@ __all__ = [
     "set_backend",
     # Mixed precision
     "array",
+    "mg",
     "mixed",
     "convert",
     "dtypes",
