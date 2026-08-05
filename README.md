@@ -522,6 +522,54 @@ A.rmatvec(x)  # A.T @ x, no second copy of the matrix
 `mtl5.sparse.as_linear_operator(A)` uses it, so both directions of a SciPy
 `LinearOperator` now stay inside MTL5.
 
+## Tensor algebra
+
+`mtl5.tensor` is index-notation tensor algebra — distinct from `mtl5.array`,
+which is NumPy-shaped N-D data. This one has fixed dimensions, Einstein
+summation and a metric:
+
+```python
+import numpy as np, mtl5.tensor as mtt
+
+A = mtt.asarray(np.arange(9.0).reshape(3, 3))
+x = mtt.asarray(np.array([1.0, 2.0, 3.0]))
+
+mtt.contract(A, "ij", x, "j")  # A @ x
+mtt.contract(A, "ji", x, "j")  # A.T @ x
+mtt.outer(x, x)  # rank 2
+```
+
+Rank and dimension are both compile-time in MTL5, so each pair is a separate
+type. **Ranks 1, 2 and 4 over dimensions 2, 3 and 4** cover the module: nothing
+upstream uses rank 3, and rank 4 arises only as `outer(rank2, rank2)`. Anything
+else raises rather than silently reshaping — use `mtl5.array` for general N-D
+data.
+
+**Index strings are read at runtime**, which MTL5's own `contract` cannot do —
+it takes index names as compile-time template parameters. The space is small
+enough to enumerate, though: the repeated index sits in one of two positions on
+each side, so four instantiations cover every rank-2 contraction up to
+relabelling. Python therefore reaches MTL5's real contraction rather than a
+reimplementation. The letters are arbitrary; only which positions they share
+matters, so `contract(A, "pq", B, "qr")` and `contract(A, "ij", B, "jk")` agree.
+
+A trace (`"ii"`), two shared indices, or none at all are each refused with a
+message naming which it was.
+
+The metric operations cover raising and lowering. `raise` is a Python keyword,
+so the rank-1 pair is `raise_index` / `lower_index`, alongside upstream's
+`raise_first` / `lower_second` for rank 2:
+
+```python
+g = mtt.minkowski_metric()  # signature (-, +, +, +)
+v = mtt.asarray(np.array([1.0, 2.0, 3.0, 4.0]))
+mtt.lower_index(v, g)  # [-1, 2, 3, 4]
+mtt.raise_index(mtt.lower_index(v, g), g)  # back to v
+```
+
+`is_symmetric` and `is_antisymmetric` take a tolerance, and
+`SymmetricTensor_d{dim}_{dtype}` stores D(D+1)/2 components instead of D².
+
 ## Matrix views
 
 Eight ways to read part of a matrix:

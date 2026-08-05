@@ -1557,6 +1557,9 @@ NB_MODULE(_core, m) {
     // ----- Matrix views -------------------------------------------------------
     register_views(m);
 
+    // ----- Index-notation tensor algebra --------------------------------------
+    register_tensor_algebra(m);
+
     // ----- Complex element types (c64, c128) ---------------------------------
     // Registered after the real overloads so that a complex NumPy array matches
     // a complex overload in nanobind's first (no-convert) pass rather than
