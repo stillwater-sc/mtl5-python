@@ -191,7 +191,7 @@ The whole #244 module (`matrix_properties.hpp`, `vector_properties.hpp`,
 Cheap to bind, and `condition_number`/`rcond`/`numerical_rank` map directly onto
 `np.linalg.cond` / `np.linalg.matrix_rank` expectations.
 
-### 3.7 Iterative solvers — P2, 3 of 10 Krylov, 2 of 8 preconditioners (unchanged — the largest remaining gap)
+### 3.7 Iterative solvers — 10 of 10 Krylov, 8 of 8 preconditioners (#38)
 
 **Missing Krylov:** `bicg`, `bicgstab_ell`, `cgs`, `idr_s`, `minres`, `qmr`, `tfqmr`.
 **Missing preconditioners:** `diagonal` (Jacobi), `block_diagonal`, `ildl`, `ilut`, `ssor`,
@@ -406,8 +406,8 @@ where that matters it is named in the notes. **Was** is the audit-time figure.
 | Sparse containers | class templates | 1 | 3 | 6 | ⚠️ 50% (CSR, COO, ELL) |
 | Sparse direct solvers | functions | 0 | 7 | ~9 | ✅ 78% |
 | Sparse ordering / analysis | functions | 0 | 5 | ~9 | ⚠️ 56% |
-| Krylov solvers | solvers | 3 | 3 | 10 | ⚠️ 30% |
-| Preconditioners | preconditioners | 2 | 2 | 8 | ⚠️ 25% |
+| Krylov solvers | solvers | 3 | 10 | 10 | ✅ full |
+| Preconditioners | preconditioners | 2 | 8 | 8 | ✅ full |
 | Smoothers / multigrid | functions | 0 | 0 | 12 | ❌ 0% |
 | Views / expressions | class templates | 0 | 0 | ~8 | ❌ 0% |
 | `mtl/array` N-D layer | functions | 0 | 5 | ~8 | ✅ 63% |
@@ -455,13 +455,24 @@ Notes on the rows that are easy to miscount:
   `MTL5_WITH_ZLIB` was added afterwards for gzip Matrix Market input and is a sixth,
   outside the audited five.
 
-**What is left, in priority order.** Krylov solvers (3 of 10) and preconditioners
-(2 of 8) are the largest remaining numerical gap, and §3.7's note still applies: the
-binding pattern wants refactoring to a solver/preconditioner dispatch before expanding
-from 3×2 to 10×8 combinations. Smoothers and multigrid are untouched. Views and
-expressions are unbound, and `hermitian_view` is the one most obviously wanted now that
-complex is supported. `mtl/tensor` — index-notation tensor algebra, distinct from the
-NumPy-shaped `mtl/array` — is untouched.
+**What is left, in priority order.** Smoothers and multigrid (0 of 12) are now the
+largest remaining numerical gap. Views and expressions are unbound, and `hermitian_view`
+is the one most obviously wanted since complex became supported throughout. `mtl/tensor`
+— index-notation tensor algebra, distinct from the NumPy-shaped `mtl/array` — is
+untouched.
+
+The cross-cutting item is done: §3.7's note called for refactoring the binding pattern to
+a solver/preconditioner dispatch *before* expanding from 3×2 to 10×8, and #38 did exactly
+that. Type-erasing the preconditioner made it 20 instantiations rather than 160. The sweep
+that preceded the design also turned up
+[stillwater-sc/mtl5#392](https://github.com/stillwater-sc/mtl5/issues/392) — `bicg`
+computed `rho` from the wrong vectors and worked only with the identity preconditioner —
+which was fixed upstream before the binding was built on it.
+
+One limit remains, and it is upstream: every MTL5 preconditioner implements
+`adjoint_solve` as its forward solve, which is exact for a symmetric preconditioner and
+wrong otherwise. `bicg` and `qmr` are the only solvers that apply Mᵀ, so they refuse a
+preconditioner measured to be non-symmetric rather than break down.
 
 ---
 
