@@ -295,7 +295,7 @@ ones instantiated for the Universal number systems.
 
 `hermitian_view` exists but has no binding.
 
-### 3.9 Tensor / N-D array layer — `mtl/array` bound in Phase 4e; `mtl/tensor` still P2
+### 3.9 Tensor / N-D array layer — `mtl/array` bound in Phase 4e, `mtl/tensor` in #44
 
 **`mtl/array/*` — bound.** `mtl5.array` exposes `ndarray` at ranks 1–4 for float32/float64:
 zero-copy `asarray` from any strided NumPy layout, `to_numpy` that carries the strides back,
@@ -340,9 +340,20 @@ Four things did not come across, each for a stated reason:
 `transform`/`reduce` are not bound: they take C++ callables, so exposing them would mean a
 Python call per element — `to_numpy()` is the better answer.
 
-**`mtl/tensor/*` — still unbound, P2.** Rank-N `tensor`, `Index`/`contract`/`outer`/`bind`,
-metric raise/lower, symmetric/antisymmetric storage. Distinct from `mtl/array`: index-notation
-tensor algebra rather than NumPy-shaped N-D data.
+**`mtl/tensor/*` — bound in #44, 12 of its 13 namespace-scope functions.** Index-notation
+tensor algebra, distinct from `mtl/array`'s NumPy-shaped N-D data.
+
+Exposed: `contract`, `outer`, `euclidean_metric`, `minkowski_metric`, `lower` and `raise`
+(as `lower_index`/`raise_index`, since `raise` is a Python keyword), `lower_first`,
+`lower_second`, `raise_first`, `raise_second`, `is_symmetric`, `is_antisymmetric`.
+
+Not exposed: `bind`, which exists only to attach index names to a tensor so that `contract`
+can find the repeated one at compile time. The Python `contract` takes index strings
+directly, so there is nothing for a caller to bind.
+
+Rank and dimension are both compile-time, so each pair is a separate type; ranks 1, 2 and 4
+over dimensions 2, 3 and 4 cover the module, because nothing upstream consumes rank 3 and
+rank 4 arises only as `outer(rank2, rank2)`.
 
 ### 3.10 I/O — 7 of ~8 exposed (Phase 4b, #28)
 
@@ -411,13 +422,15 @@ where that matters it is named in the notes. **Was** is the audit-time figure.
 | Smoothers / multigrid | functions | 0 | 12 | 12 | ✅ full |
 | Views / expressions | class templates | 0 | 8 | ~8 | ✅ full |
 | `mtl/array` N-D layer | functions | 0 | 5 | ~8 | ✅ 63% |
-| `mtl/tensor` | functions | 0 | 7 | ~7 | ✅ full |
+| `mtl/tensor` | functions | 0 | 12 | 13 | ✅ 92% |
 | I/O | functions | 0 | 7 | ~8 | ✅ 88% |
 | Generators | generators | 0 | 25 | ~28 | ✅ 89% |
 | Build acceleration | CMake options | 0 | 5 | 5 | ✅ full |
 
 The original **Tensor / ndarray** row bundled `mtl/array` and `mtl/tensor` at ~15
-functions; they are split here, because one is bound and the other is untouched.
+functions; they are split here, because the two are different layers with different
+coverage. `mtl/tensor`'s 13 is an exact count of its namespace-scope functions rather than
+the audit's `~7` estimate, which is why that column moved.
 
 Notes on the rows that are easy to miscount:
 
@@ -455,7 +468,10 @@ Notes on the rows that are easy to miscount:
   `MTL5_WITH_ZLIB` was added afterwards for gzip Matrix Market input and is a sixth,
   outside the audited five.
 
-**Nothing is left.** Every module this audit inventoried is reachable from Python.
+**Nothing is left.** Every module this audit inventoried is reachable from Python. The one
+row short of 100% is `mtl/tensor` at 12 of 13, and the missing function is `bind`, which
+has no Python meaning — it attaches index names so that `contract` can find the repeated
+one at compile time, and the Python `contract` takes index strings directly.
 
 `mtl/tensor` was bound in #44. Its contraction was the one place where a compile-time
 interface could be reached anyway: `contract` takes index names as `char` template
