@@ -408,7 +408,7 @@ where that matters it is named in the notes. **Was** is the audit-time figure.
 | Sparse ordering / analysis | functions | 0 | 5 | ~9 | ⚠️ 56% |
 | Krylov solvers | solvers | 3 | 10 | 10 | ✅ full |
 | Preconditioners | preconditioners | 2 | 8 | 8 | ✅ full |
-| Smoothers / multigrid | functions | 0 | 0 | 12 | ❌ 0% |
+| Smoothers / multigrid | functions | 0 | 12 | 12 | ✅ full |
 | Views / expressions | class templates | 0 | 0 | ~8 | ❌ 0% |
 | `mtl/array` N-D layer | functions | 0 | 5 | ~8 | ✅ 63% |
 | `mtl/tensor` | functions | 0 | 0 | ~7 | ❌ 0% |
@@ -455,11 +455,17 @@ Notes on the rows that are easy to miscount:
   `MTL5_WITH_ZLIB` was added afterwards for gzip Matrix Market input and is a sixth,
   outside the audited five.
 
-**What is left, in priority order.** Smoothers and multigrid (0 of 12) are now the
-largest remaining numerical gap. Views and expressions are unbound, and `hermitian_view`
-is the one most obviously wanted since complex became supported throughout. `mtl/tensor`
-— index-notation tensor algebra, distinct from the NumPy-shaped `mtl/array` — is
-untouched.
+**What is left.** Two modules, neither of them numerical kernels. Views and expressions
+are unbound, and `hermitian_view` is the one most obviously wanted since complex became
+supported throughout. `mtl/tensor` — index-notation tensor algebra, distinct from the
+NumPy-shaped `mtl/array` — is untouched.
+
+Smoothers and multigrid were bound in #40, with two additions upstream does not have: a
+sparse `galerkin(R, A, P)`, because `R * A * P` through `operator*` returns a *dense*
+matrix and the coarse operator is exactly what must stay sparse; and `multigrid_1d`,
+which builds a consistent hierarchy rather than asking the caller to supply levels,
+restrictors, prolongators, a smoother factory and a coarse solver separately. Measured at
+~0.03 residual reduction per V-cycle on 1-D Poisson, holding as n grows.
 
 The cross-cutting item is done: §3.7's note called for refactoring the binding pattern to
 a solver/preconditioner dispatch *before* expanding from 3×2 to 10×8, and #38 did exactly
