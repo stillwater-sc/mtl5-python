@@ -215,6 +215,9 @@ inline AccKind parse_acc(const std::optional<std::string>& spec,
     throw std::invalid_argument("unknown accumulator '" + a + "'; " + kAccumulatorHelp);
 }
 
+// Registered by mtl5_krylov.cpp — Krylov solver / preconditioner dispatch.
+void register_krylov(nb::module_& m);
+
 // Registered by mtl5_ndarray.cpp — the N-D array layer (mtl/array).
 void register_ndarray_layer(nb::module_& m);
 
