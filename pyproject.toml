@@ -84,6 +84,13 @@ patch_types = ["feat", "fix", "perf", "refactor"]
 
 [tool.semantic_release.changelog]
 changelog_file = "CHANGELOG.md"
+# "update" inserts each generated release section at the <!-- version list -->
+# marker instead of regenerating the file. The default, "init", rewrites
+# CHANGELOG.md wholesale from commit history, which would discard the
+# hand-written Unreleased section -- and a list of commit subjects cannot say
+# why a binding refuses input it could have accepted.
+mode = "update"
+insertion_flag = "<!-- version list -->"
 
 [tool.semantic_release.publish]
 upload_to_pypi = false
