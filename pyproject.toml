@@ -79,16 +79,26 @@ branch = "main"
 # Override: treat feat as patch (not minor) since minor tracks MTL5 upstream.
 # Only an explicit "BREAKING CHANGE" footer triggers a minor bump here — but
 # in practice, minor/major bumps are manual to align with MTL5.
-minor_types = []
-patch_types = ["feat", "fix", "perf", "refactor"]
+#
+# These are minor_TAGS / patch_TAGS. The conventional parser's options are
+# named that way; it was configured as minor_types / patch_types, which the
+# parser does not read, so the override was silently ignored and the defaults
+# ('feat',) / ('fix', 'perf') applied -- the opposite of the intent above.
+# Verified against python-semantic-release 10.6.1: constructing the options
+# with the _types spellings leaves minor_tags at ('feat',).
+minor_tags = []
+patch_tags = ["feat", "fix", "perf", "refactor"]
 
 [tool.semantic_release.changelog]
 changelog_file = "CHANGELOG.md"
-# "update" inserts each generated release section at the <!-- version list -->
-# marker instead of regenerating the file. The default, "init", rewrites
-# CHANGELOG.md wholesale from commit history, which would discard the
-# hand-written Unreleased section -- and a list of commit subjects cannot say
-# why a binding refuses input it could have accepted.
+# "update" inserts each generated release section at the insertion flag rather
+# than regenerating the file, which is what keeps the hand-written Unreleased
+# section in CHANGELOG.md. It is already the default -- stated explicitly
+# because the file depends on it. (The alternative, "init", overwrites the
+# changelog wholesale.)
+#
+# insertion_flag is the setting that actually has to be here: its default is
+# empty, so the marker in CHANGELOG.md would not be found without it.
 mode = "update"
 insertion_flag = "<!-- version list -->"
 
