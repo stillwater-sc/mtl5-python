@@ -47,3 +47,58 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
+
+  # Publish every built wheel + the sdist to PyPI. Runs only for a real
+  # published Release, never for the workflow_dispatch build smoke-tests.
+  #
+  # Auth: Trusted Publishing (OIDC) — no secrets to store or rotate. This repo
+  # lives on github.com, so PyPI's OIDC trusts these runners directly. (The
+  # `git@github.sw:` origin is only an SSH-config alias whose HostName is
+  # github.com, selecting a specific key — NOT a GitHub Enterprise host.) A
+  # matching trusted publisher must be registered on PyPI
+  # (owner/repo/workflow=wheels.yml/environment=pypi). See docs/pypi-release.md.
+  publish-pypi:
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    environment: pypi  # optional manual-approval gate; configure in repo settings
+    permissions:
+      id-token: write  # mint the OIDC token PyPI verifies; no password needed
+    steps:
+      - name: Gather wheels and sdist into dist/
+        uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true  # flatten wheels-*/ and sdist/ into a single dir
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  # Dry-run lane: publish the same artifacts to TestPyPI. Runs ONLY on a manual
+  # workflow_dispatch, so a real Release never lands here and a dispatch never
+  # touches production PyPI. Uses the TestPyPI trusted publisher (registered
+  # with environment=pypi, same as production — the two are separate per-index
+  # registrations). skip-existing lets a re-run at an unchanged version succeed
+  # instead of 400-ing on a duplicate. See docs/pypi-release.md §4.
+  publish-testpypi:
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Gather wheels and sdist into dist/
+        uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
