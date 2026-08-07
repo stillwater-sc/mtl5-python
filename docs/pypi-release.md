@@ -17,18 +17,19 @@ wired up yet: the final upload to PyPI.
 | Piece | File | What it does today |
 |---|---|---|
 | Version policy | `pyproject.toml` `[tool.semantic_release]` | `mtl5` tracks MTL5's `major.minor`; semantic-release manages only the **patch** component from conventional commits. Minor/major bumps are manual. |
-| Tag + GitHub Release | `.github/workflows/release.yml` | On push to `main`, runs `semantic-release version`, commits the bump, pushes a `v{version}` tag, and creates a GitHub Release with generated notes. |
-| Wheel + sdist build | `.github/workflows/wheels.yml` | On **Release published**, `cibuildwheel` builds cp310/311/312 wheels for Linux/macOS/Windows (no musllinux) and an sdist. **Artifacts are uploaded to the workflow run only — not to PyPI.** |
+| Release + build + publish | `.github/workflows/wheels.yml` | **One workflow, three triggers.** `push: main` → `semantic-release` bumps/tags/creates the GitHub Release, then (if it released) builds wheels + sdist and publishes to PyPI. `release: published` → a human-cut release builds + publishes to PyPI. `workflow_dispatch` → dry-run to TestPyPI. |
 | CI gate | `.github/workflows/ci.yml` | Lint + build/test matrix + ecosystem + zlib lanes on every push/PR. |
 
-The two intentional stubs to be aware of:
-
-- `pyproject.toml` → `[tool.semantic_release.publish]` → `upload_to_pypi = false`
-- `release.yml` declares `permissions: id-token: write` with a `# trusted
-  publishing (future PyPI)` comment, but no publish job consumes it yet.
-
-**The only missing step is a job that takes the built distributions and
-uploads them to PyPI.** Everything else is a matter of one-time account setup.
+> **Why everything is in one workflow (not `release.yml` + a reusable `wheels.yml`).**
+> PyPI Trusted Publishing **does not support reusable workflows** — the OIDC
+> `workflow` claim becomes ambiguous and the upload is rejected
+> ([PyPI docs](https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github)).
+> And a GitHub Release created by CI's `GITHUB_TOKEN` does not trigger other
+> workflows (anti-recursion), so a separate publish workflow would never fire on
+> an automated release. Consolidating into `wheels.yml` keeps the OIDC claim on a
+> single **direct** workflow, so one trusted publisher covers every path with no
+> tokens. (`upload_to_pypi = false` stays in `pyproject.toml` — semantic-release
+> is not the publisher; the dedicated `publish-pypi` job is.)
 
 ---
 
@@ -69,18 +70,22 @@ Setup:
    - Repository: `mtl5-python`
    - Workflow filename: `wheels.yml`
    - Environment name: `pypi`
-2. **Add a *second* PyPI publisher for the automated path** — identical except
-   **Workflow filename: `release.yml`**. This is required because the OIDC
-   `workflow` claim is always the **entry** workflow: the manual `gh release
-   create` path enters through `wheels.yml`, but the automated `release.yml`
-   path calls `wheels.yml` as a reusable workflow, so its claim is `release.yml`.
-   Without this publisher the automated release's upload 403s. (TestPyPI needs
-   only the `wheels.yml` publisher, since dry-runs always run via
-   `workflow_dispatch` on `wheels.yml` directly.)
-3. Do the `wheels.yml` publisher on **TestPyPI** too, for the dry run (§4) —
-   trusted publishers are per-index, so register on each.
-4. No secret is stored. The publish jobs declare `permissions: id-token: write`
+2. Do the same `wheels.yml` publisher on **TestPyPI** too, for the dry run
+   (§4) — trusted publishers are per-index, so register on each.
+3. No secret is stored. The publish jobs declare `permissions: id-token: write`
    and authenticate via the minted OIDC token.
+
+**One publisher covers everything.** All publishing runs from `wheels.yml` — the
+automated (`push`), manual (`release`), and dry-run (`workflow_dispatch`) paths
+are all jobs in that one workflow, so the OIDC `workflow` claim is always
+`wheels.yml`. Do **not** add a `release.yml` publisher: there is no `release.yml`,
+and reusable-workflow claims are unsupported by PyPI anyway (see §1).
+
+> **Adding a publisher to an *existing* project** goes through the project's own
+> **Publishing** page (pypi.org → Your projects → `mtl5` → Manage → Publishing),
+> not the account-level **pending publisher** flow — pending publishers are only
+> for project names that do not exist yet, so PyPI rejects one for a name that is
+> already taken.
 
 > **First-publish chicken-and-egg:** a project-scoped trusted publisher can only
 > be added *after* the project exists. For the very first upload, use PyPI's
@@ -94,13 +99,20 @@ Setup:
 
 `.github/workflows/wheels.yml` contains the `publish-pypi` job below. It runs
 after the wheel/sdist jobs, gathers every artifact, and uploads via Trusted
-Publishing:
+Publishing. It fires on a human-cut Release **or** on a push where the `release`
+job cut one — but never on the `workflow_dispatch` dry-run (that goes to
+TestPyPI):
 
 ```yaml
   publish-pypi:
-    needs: [build-wheels, build-sdist]
+    needs: [release, build-wheels, build-sdist]
+    if: >-
+      !cancelled()
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
+      && (github.event_name == 'release'
+          || (github.event_name == 'push' && needs.release.outputs.released == 'true'))
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
     environment: pypi
     permissions:
       id-token: write          # mint the OIDC token PyPI verifies; no password
@@ -119,10 +131,10 @@ Notes:
   so PyPI's OIDC trusts these runners directly — no mirror or special routing.
 - `merge-multiple: true` collapses the `wheels-<os>` and `sdist` artifacts into
   a single `dist/` directory, which is what the publish action expects.
-- Gating on `github.event_name == 'release'` keeps the `workflow_dispatch`
-  path (used for build smoke-tests) from ever publishing.
+- The gate publishes on `release` (manual) and on `push` when a release was cut,
+  and excludes `workflow_dispatch` — so the dry-run only ever reaches TestPyPI.
 - No `password:` — auth is the OIDC token, enabled by `id-token: write` plus the
-  trusted publisher registered on PyPI (§2.2).
+  single `wheels.yml` trusted publisher on PyPI (§2.2).
 - Leaving `upload_to_pypi = false` in `pyproject.toml` is fine — semantic-release
   is not the publisher here; the dedicated job is. Do **not** also enable
   semantic-release publishing, or you will get double uploads.
@@ -226,22 +238,25 @@ Once §2 and §3 are done, every subsequent release is just:
 1. **Merge conventional commits to `main`.** A `feat:`/`fix:` (etc.) commit is
    what drives a patch bump. For a major/minor bump aligned with MTL5 upstream,
    land a commit that manually sets `[project].version` in `pyproject.toml`.
-2. **`release.yml` runs automatically** on the push to `main`, doing everything
+2. **`wheels.yml` runs automatically** on the push to `main`, doing everything
    in one workflow run:
-   - `semantic-release version` computes the bump, updates `pyproject.toml` and
-     the changelog, commits `chore(release): v{version}`, tags `v{version}`,
-     pushes, and creates the GitHub Release.
-   - Its `publish` job then **calls `wheels.yml` as a reusable workflow**
-     (`workflow_call`, `publish: pypi`, `ref: v{version}`): it builds wheels +
-     sdist for the new tag and uploads to PyPI via OIDC — in the **same run**.
-   - *(If no release-worthy commits are present, nothing happens — expected.)*
+   - The `release` job runs `semantic-release version` — computes the bump,
+     updates `pyproject.toml` and the changelog, commits `chore(release):
+     v{version}`, tags `v{version}`, pushes, and creates the GitHub Release. It
+     outputs whether it released and the new tag.
+   - If it released, the `build-wheels`/`build-sdist` jobs (checking out that
+     tag) and then `publish-pypi` run **in the same run**, uploading to PyPI via
+     OIDC (`workflow=wheels.yml`, the existing trusted publisher).
+   - *(If no release-worthy commits are present, the `release` job is a no-op and
+     the build/publish jobs are skipped — expected.)*
 
-   > **Why one run, not two.** A GitHub Release created by CI's `GITHUB_TOKEN`
-   > does **not** trigger other workflows (GitHub's anti-recursion rule), so the
-   > `release: published` trigger on `wheels.yml` never fires for an automated
-   > release. Building+publishing inline via `workflow_call` sidesteps that with
-   > no PAT/App token. The `release: published` trigger still serves the
-   > **manual** `gh release create` path (§6-manual / how 5.7.0–5.7.1 were cut).
+   > **Why one workflow, same run.** A GitHub Release created by CI's
+   > `GITHUB_TOKEN` does **not** trigger other workflows (anti-recursion), so a
+   > separate publish workflow would never fire on an automated release; and
+   > reusable workflows can't be used because PyPI Trusted Publishing doesn't
+   > support them (§1). Keeping build+publish as native jobs in `wheels.yml`
+   > sidesteps both — no PAT/App token. The `release: published` trigger still
+   > serves the **manual** `gh release create` path (how 5.7.0–5.7.2 were cut).
 3. **Verify** the release landed:
    ```bash
    pip index versions mtl5        # or visit https://pypi.org/project/mtl5/

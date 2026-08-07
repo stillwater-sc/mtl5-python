@@ -1,31 +1,105 @@
 name: Build wheels
 
-# Triggers:
-#   release: published    → a human-cut GitHub Release; publish to PyPI.
-#   workflow_dispatch     → manual dry-run; publish to TestPyPI (skip-existing).
-#   workflow_call         → invoked by release.yml in the same run as an
-#                           automated release; `publish` chooses the index and
-#                           `ref` selects the tag to build. This path exists
-#                           because a GITHUB_TOKEN-created release does NOT
-#                           trigger the `release` event above (anti-recursion),
-#                           so the automated pipeline builds+publishes inline.
+# One workflow, three triggers — all publishing happens HERE so the OIDC
+# `workflow` claim is always `wheels.yml` (a direct, non-reusable workflow),
+# which is what PyPI's Trusted Publishing supports and what the existing
+# trusted publisher (workflow=wheels.yml, environment=pypi) is registered for.
+#
+#   push: main         → automated release. The `release` job runs
+#                        semantic-release (bump/changelog/commit/tag/push/GitHub
+#                        Release); if it cut a release, the build + publish-pypi
+#                        jobs run in the SAME run. No cross-workflow trigger, no
+#                        token: a GITHUB_TOKEN-created release does not cascade,
+#                        so build+publish must live in this run.
+#   release: published → a human-cut GitHub Release (e.g. gh release create).
+#                        Skips semantic-release; builds + publishes to PyPI.
+#   workflow_dispatch  → manual dry-run; builds + publishes to TestPyPI.
+#
+# NOTE: reusable workflows are deliberately NOT used — PyPI Trusted Publishing
+# does not support them (the OIDC claim becomes ambiguous). See
+# https://docs.pypi.org/trusted-publishers/troubleshooting/#reusable-workflows-on-github
 on:
+  push:
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      publish:
-        description: "Publish target when called: none | testpypi | pypi"
-        type: string
-        default: "none"
-      ref:
-        description: "Git ref (tag or SHA) to build; defaults to the triggering ref"
-        type: string
-        default: ""
+
+# Serialize releases so two pushes cannot race semantic-release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # semantic-release pushes the release commit + tag
+  id-token: write  # OIDC for the publish jobs
 
 jobs:
+  # Automated versioning — push to main only. semantic-release analyzes
+  # conventional commits since the last tag and, if a release is warranted,
+  # bumps the version, updates the changelog, commits, tags, pushes, and creates
+  # the GitHub Release. Outputs whether it released and the new tag.
+  #
+  # Versioning policy: mtl5-python follows MTL5's major.minor; semantic-release
+  # manages only PATCH (feat/fix/perf/refactor → patch). Major/minor bumps are
+  # manual: edit pyproject.toml, commit, then semantic-release resumes.
+  release:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.psr.outputs.released }}
+      tag: ${{ steps.psr.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # full history for commit analysis
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install python-semantic-release
+        # Pinned to the v10 line the pyproject [tool.semantic_release] config was
+        # verified against; a major bump could change parser/changelog behavior.
+        run: pip install "python-semantic-release>=10,<11"
+
+      - name: Configure git identity for the release commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Release (bump, changelog, commit, tag, push, GitHub Release)
+        id: psr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # semantic-release commits, tags, pushes, and creates the GitHub
+          # Release itself (v10 default). It creates a tag iff it releases, so
+          # detect a release by tag-count growth. The GITHUB_TOKEN-created
+          # Release does not cascade — this run's own build/publish jobs handle
+          # the upload, so there is no double publish.
+          before=$(git tag | wc -l)
+          semantic-release version
+          after=$(git tag | wc -l)
+          if [ "$after" -gt "$before" ]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+            echo "Released $(git describe --tags --abbrev=0)"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "No conventional commits warranted a release."
+          fi
+
   build-wheels:
+    needs: [release]
+    # Build on a human release or a dispatch; on push, only when the release job
+    # actually cut a release. !cancelled() lets this run even though `release` is
+    # skipped for release/dispatch events.
+    if: >-
+      !cancelled()
+      && needs.release.result != 'failure'
+      && (github.event_name != 'push' || needs.release.outputs.released == 'true')
     strategy:
       matrix:
         os: [ubuntu-22.04, macos-14, windows-2022]
@@ -33,10 +107,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # When called by release.yml, build the tag semantic-release just
-          # created (which carries the bumped version) rather than the caller's
-          # pre-bump SHA. Empty for release/dispatch → checkout's default ref.
-          ref: ${{ inputs.ref || github.ref }}
+          # On push, build the tag semantic-release just created (bumped
+          # version). On release/dispatch the release job is skipped, so
+          # `tag` is empty and we fall back to the triggering ref.
+          ref: ${{ needs.release.outputs.tag || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -67,11 +141,16 @@ jobs:
           path: wheelhouse/*.whl
 
   build-sdist:
+    needs: [release]
+    if: >-
+      !cancelled()
+      && needs.release.result != 'failure'
+      && (github.event_name != 'push' || needs.release.outputs.released == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.release.outputs.tag || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -82,23 +161,19 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
-  # Publish every built wheel + the sdist to PyPI. Runs for a human-cut Release
-  # (`release` event) or when release.yml calls this workflow with publish=pypi.
-  #
-  # Auth: Trusted Publishing (OIDC) — no secrets to store or rotate. This repo
-  # lives on github.com, so PyPI's OIDC trusts these runners directly. (The
-  # `git@github.sw:` origin is only an SSH-config alias whose HostName is
-  # github.com, selecting a specific key — NOT a GitHub Enterprise host.)
-  #
-  # Two trusted publishers are needed on PyPI, because the OIDC `workflow` claim
-  # is the ENTRY workflow:
-  #   - workflow=wheels.yml   → the `release` (manual) path
-  #   - workflow=release.yml  → the workflow_call (automated) path
-  # both with environment=pypi. See docs/pypi-release.md.
+  # Publish to PyPI: on a human-cut Release, or on a push that cut a release.
+  # OIDC `workflow` claim is wheels.yml (direct) — no token, uses the existing
+  # trusted publisher (workflow=wheels.yml, environment=pypi). No skip-existing:
+  # a duplicate production version must fail loudly, never be silently skipped.
   publish-pypi:
-    needs: [build-wheels, build-sdist]
+    needs: [release, build-wheels, build-sdist]
+    if: >-
+      !cancelled()
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
+      && (github.event_name == 'release'
+          || (github.event_name == 'push' && needs.release.outputs.released == 'true'))
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || inputs.publish == 'pypi'
     environment: pypi  # optional manual-approval gate; configure in repo settings
     permissions:
       id-token: write  # mint the OIDC token PyPI verifies; no password needed
@@ -114,15 +189,17 @@ jobs:
         with:
           packages-dir: dist
 
-  # Dry-run lane: publish the same artifacts to TestPyPI. Runs on a manual
-  # workflow_dispatch, or when release.yml calls this workflow with
-  # publish=testpypi. Uses the TestPyPI trusted publisher (environment=pypi,
-  # its own per-index registration). skip-existing lets a re-run at an unchanged
-  # version succeed instead of 400-ing on a duplicate. See docs/pypi-release.md §4.
+  # Dry-run lane: publish to TestPyPI on a manual workflow_dispatch. Uses the
+  # TestPyPI trusted publisher (its own per-index registration). skip-existing
+  # lets a re-run at an unchanged version succeed instead of 400-ing.
   publish-testpypi:
     needs: [build-wheels, build-sdist]
+    if: >-
+      !cancelled()
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
+      && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || inputs.publish == 'testpypi'
     environment: pypi
     permissions:
       id-token: write
