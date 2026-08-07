@@ -7,10 +7,29 @@ Built with [nanobind](https://github.com/wjakob/nanobind) for minimal overhead a
 ## Install
 
 ```bash
+pip install mtl5
+```
+
+Prebuilt wheels are published for Linux, macOS, and Windows on CPython
+3.10–3.12, so no compiler is required. Optional ecosystem integrations are
+available as extras:
+
+```bash
+pip install "mtl5[scipy]"   # SciPy sparse interop
+pip install "mtl5[all]"     # scipy, torch, jax, pandas, scikit-learn
+```
+
+### From source
+
+Building the extension yourself — for contributing, or to enable a
+[build option](#build-options) — needs Python 3.10+ and a C++20 compiler
+(GCC 12+, Clang 15+, MSVC 2022):
+
+```bash
 pip install .
 ```
 
-Requires Python 3.10+ and a C++20 compiler (GCC 12+, Clang 15+, MSVC 2022).
+See [Development](#development) for an editable install.
 
 ## Quick start
 
