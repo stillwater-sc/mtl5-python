@@ -17,6 +17,31 @@ _Nothing yet._
 
 <!-- version list -->
 
+## v5.7.2 (2026-08-07)
+
+### Bug Fixes
+
+- **build**: Require typing_extensions for stub generation on Python <3.11
+  ([#56](https://github.com/stillwater-sc/mtl5-python/pull/56),
+  [`d6757ae`](https://github.com/stillwater-sc/mtl5-python/commit/d6757ae35f10622529f9780ef60f30494e925f60))
+
+- **import**: Actionable error when the compiled _core is stale
+  ([#54](https://github.com/stillwater-sc/mtl5-python/pull/54),
+  [`8ee0d61`](https://github.com/stillwater-sc/mtl5-python/commit/8ee0d61015cecce98568f752ee7a5e4302628658))
+
+### Continuous Integration
+
+- **release**: Make the automated release path actually publish
+  ([#53](https://github.com/stillwater-sc/mtl5-python/pull/53),
+  [`29762bd`](https://github.com/stillwater-sc/mtl5-python/commit/29762bd5232c9b26bb5a6c2d32105f5f2ec1d3d2))
+
+### Features
+
+- **build**: Generate and ship type stubs; make mtl5 a typed package
+  ([#55](https://github.com/stillwater-sc/mtl5-python/pull/55),
+  [`d56d0ad`](https://github.com/stillwater-sc/mtl5-python/commit/d56d0adebe0670a3711ed469949e0572b5839567))
+
+
 ## [5.7.1] - 2026-08-07
 
 ### Fixed
