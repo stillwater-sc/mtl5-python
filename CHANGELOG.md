@@ -13,9 +13,15 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
-Closes epic #21 — the binding gap against MTL5 v5.7.0. Every module the
-2026-08-01 gap analysis inventoried is now reachable from Python, taking the
-surface from roughly 14 numerical entry points to over 150.
+_Nothing yet._
+
+<!-- version list -->
+
+## [5.7.0] - 2026-08-07
+
+First release to PyPI. Closes epic #21 — the binding gap against MTL5 v5.7.0.
+Every module the 2026-08-01 gap analysis inventoried is now reachable from
+Python, taking the surface from roughly 14 numerical entry points to over 150.
 
 ### Added
 
@@ -102,4 +108,5 @@ Two operations differ from NumPy on purpose: `dot` on complex is Hermitian
 (`numpy.vdot`, not `numpy.dot` — `dot_real` is the latter), and `.T` does not
 conjugate, `.H` does.
 
-<!-- version list -->
+[Unreleased]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.0...HEAD
+[5.7.0]: https://github.com/stillwater-sc/mtl5-python/releases/tag/v5.7.0
