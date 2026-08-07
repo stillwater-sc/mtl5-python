@@ -69,10 +69,18 @@ Setup:
    - Repository: `mtl5-python`
    - Workflow filename: `wheels.yml`
    - Environment name: `pypi`
-2. Do the same on **TestPyPI** for the dry run (§4) — trusted publishers are
-   per-index, so register one on each.
-3. No secret is stored. The `publish-pypi` job declares `permissions:
-   id-token: write` and authenticates via the minted OIDC token.
+2. **Add a *second* PyPI publisher for the automated path** — identical except
+   **Workflow filename: `release.yml`**. This is required because the OIDC
+   `workflow` claim is always the **entry** workflow: the manual `gh release
+   create` path enters through `wheels.yml`, but the automated `release.yml`
+   path calls `wheels.yml` as a reusable workflow, so its claim is `release.yml`.
+   Without this publisher the automated release's upload 403s. (TestPyPI needs
+   only the `wheels.yml` publisher, since dry-runs always run via
+   `workflow_dispatch` on `wheels.yml` directly.)
+3. Do the `wheels.yml` publisher on **TestPyPI** too, for the dry run (§4) —
+   trusted publishers are per-index, so register on each.
+4. No secret is stored. The publish jobs declare `permissions: id-token: write`
+   and authenticate via the minted OIDC token.
 
 > **First-publish chicken-and-egg:** a project-scoped trusted publisher can only
 > be added *after* the project exists. For the very first upload, use PyPI's
@@ -218,17 +226,23 @@ Once §2 and §3 are done, every subsequent release is just:
 1. **Merge conventional commits to `main`.** A `feat:`/`fix:` (etc.) commit is
    what drives a patch bump. For a major/minor bump aligned with MTL5 upstream,
    land a commit that manually sets `[project].version` in `pyproject.toml`.
-2. **`release.yml` runs automatically** on the push to `main`:
-   - `semantic-release version` computes the bump, updates `pyproject.toml`,
-     and inserts the changelog section.
-   - A `chore(release): v{version}` commit is pushed with a `v{version}` tag.
-   - A GitHub Release is created with generated notes.
-   - *(If no release-worthy commits are present, nothing happens — this is
-     expected.)*
-3. **`wheels.yml` runs automatically** on **Release published**:
-   - Builds wheels + sdist across the matrix.
-   - The new `publish-pypi` job uploads them to PyPI.
-4. **Verify** the release landed:
+2. **`release.yml` runs automatically** on the push to `main`, doing everything
+   in one workflow run:
+   - `semantic-release version` computes the bump, updates `pyproject.toml` and
+     the changelog, commits `chore(release): v{version}`, tags `v{version}`,
+     pushes, and creates the GitHub Release.
+   - Its `publish` job then **calls `wheels.yml` as a reusable workflow**
+     (`workflow_call`, `publish: pypi`, `ref: v{version}`): it builds wheels +
+     sdist for the new tag and uploads to PyPI via OIDC — in the **same run**.
+   - *(If no release-worthy commits are present, nothing happens — expected.)*
+
+   > **Why one run, not two.** A GitHub Release created by CI's `GITHUB_TOKEN`
+   > does **not** trigger other workflows (GitHub's anti-recursion rule), so the
+   > `release: published` trigger on `wheels.yml` never fires for an automated
+   > release. Building+publishing inline via `workflow_call` sidesteps that with
+   > no PAT/App token. The `release: published` trigger still serves the
+   > **manual** `gh release create` path (§6-manual / how 5.7.0–5.7.1 were cut).
+3. **Verify** the release landed:
    ```bash
    pip index versions mtl5        # or visit https://pypi.org/project/mtl5/
    pip install mtl5==<version>

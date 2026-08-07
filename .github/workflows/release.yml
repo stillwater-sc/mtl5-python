@@ -1,32 +1,45 @@
 name: Release
 
-# Triggered on push to main after CI passes.
-# python-semantic-release analyzes conventional commits since the last tag,
-# determines if a version bump is needed, updates pyproject.toml, creates
-# a git tag, and publishes a GitHub Release.
+# On push to main, python-semantic-release analyzes conventional commits since
+# the last tag. If a release is warranted it bumps the version, updates the
+# changelog, commits, tags, pushes, and creates a GitHub Release — then the
+# publish job builds wheels + sdist for that tag and uploads to PyPI via Trusted
+# Publishing (OIDC), all in THIS run.
+#
+# Why build+publish inline (not via the wheels.yml `release` trigger): a
+# GitHub Release created with GITHUB_TOKEN does NOT trigger other workflows
+# (GitHub's anti-recursion rule), so relying on the `release` event would never
+# fire. Calling wheels.yml as a reusable workflow keeps it in the same run.
 #
 # Versioning policy:
-#   - mtl5-python follows MTL5's major.minor version (currently 5.2.x)
-#   - semantic-release only manages the PATCH component
-#   - feat: and fix: commits both trigger a patch bump
-#   - Major/minor bumps are manual to align with MTL5 upstream releases
+#   - mtl5-python follows MTL5's major.minor; semantic-release manages only the
+#     PATCH component. feat:/fix:/perf:/refactor: → patch bump.
+#   - Major/minor bumps are manual: edit pyproject.toml, commit, then
+#     semantic-release resumes patch management from there.
+#
+# PREREQUISITE: because the OIDC `workflow` claim on the reusable-workflow call
+# is THIS file, PyPI must have a trusted publisher registered for
+# workflow=release.yml (environment=pypi), alongside the wheels.yml publisher
+# that the manual `gh release create` path uses. See docs/pypi-release.md §2.2.
 
 on:
   push:
     branches: [main]
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 permissions:
-  contents: write  # push tags and create releases
-  id-token: write  # trusted publishing (future PyPI)
+  contents: write  # semantic-release pushes the release commit + tag
+  id-token: write  # OIDC for the publish job
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Only run if CI passed (release depends on the CI workflow)
-    concurrency:
-      group: release
-      cancel-in-progress: false
-
+    outputs:
+      released: ${{ steps.psr.outputs.released }}
+      tag: ${{ steps.psr.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -38,40 +51,48 @@ jobs:
           python-version: "3.12"
 
       - name: Install python-semantic-release
-        run: pip install python-semantic-release
+        # Pinned to the v10 line: the pyproject [tool.semantic_release] config
+        # was verified against 10.x, and a major bump could change parser or
+        # changelog behavior out from under it. Bump deliberately.
+        run: pip install "python-semantic-release>=10,<11"
 
-      - name: Run semantic-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: semantic-release version --no-push --no-vcs-release --skip-build
-
-      - name: Check if version was bumped
-        id: check
+      - name: Configure git identity for the release commit
         run: |
-          if git diff --name-only | grep -q pyproject.toml; then
-            echo "bumped=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "bumped=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commit, tag, and push
-        if: steps.check.outputs.bumped == 'true'
-        run: |
-          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore(release): v${VERSION}"
-          git tag "v${VERSION}"
-          git push origin main --tags
 
-      - name: Create GitHub Release
-        if: steps.check.outputs.bumped == 'true'
-        run: |
-          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          gh release create "v${VERSION}" \
-            --title "v${VERSION}" \
-            --generate-notes \
-            --latest
+      - name: Release (bump, changelog, commit, tag, push, GitHub Release)
+        id: psr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # semantic-release commits, tags, pushes, and creates the GitHub
+          # Release itself (v10 default). It creates a tag iff it decides to
+          # release, so detect a release by whether the tag count grew — this is
+          # robust regardless of whether any files changed.
+          before=$(git tag | wc -l)
+          semantic-release version
+          after=$(git tag | wc -l)
+          if [ "$after" -gt "$before" ]; then
+            tag=$(git describe --tags --abbrev=0)
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "Released $tag"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "No conventional commits warranted a release."
+          fi
+
+  # Same run — no cross-workflow trigger. Build wheels + sdist for the tag
+  # semantic-release just created and publish to PyPI via OIDC.
+  publish:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    permissions:
+      id-token: write  # forwarded to wheels.yml's publish-pypi (OIDC)
+      contents: read
+    uses: ./.github/workflows/wheels.yml
+    with:
+      publish: pypi
+      ref: ${{ needs.release.outputs.tag }}
+    secrets: inherit
