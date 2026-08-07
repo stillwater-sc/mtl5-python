@@ -137,8 +137,11 @@ publishes to TestPyPI via the trusted publisher registered in §2.2, and carries
 > publisher, which TestPyPI promoted to the real project on first publish. A
 > clean-venv install from TestPyPI then imported the compiled `_core`, reported
 > the expected `build_info()` (`native_fast_gemm`/`highway_simd` on), and passed
-> `norm`/`dot` smoke checks. The production PyPI path is identical apart from the
-> trigger (`release` vs `workflow_dispatch`) and target index.
+> `norm`/`dot` smoke checks. The production PyPI path differs in three ways:
+> trigger (`release` vs `workflow_dispatch`), target index, and duplicate
+> handling — `publish-testpypi` sets `skip-existing: true` so re-runs are no-ops,
+> whereas `publish-pypi` deliberately omits it, so a duplicate version fails
+> loudly rather than being silently skipped.
 
 1. Make sure `wheels.yml` is committed and pushed to `main` (a workflow must be
    on GitHub, and on the default branch, to be dispatchable).
