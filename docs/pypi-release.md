@@ -129,6 +129,20 @@ boring. This is a **standing, repeatable lane** — no temporary edits. The
 publishes to TestPyPI via the trusted publisher registered in §2.2, and carries
 `skip-existing: true` so re-runs at an unchanged version don't fail.
 
+> **✅ Validated 2026-08-07.** This lane has been exercised end-to-end. A
+> `workflow_dispatch` run of `wheels.yml` built the full matrix (cp310/311/312
+> × Linux `manylinux_2_28_x86_64` / macOS `arm64` / Windows `amd64`, 64-bit
+> only per §3), and `publish-testpypi` uploaded `mtl5 5.7.0` (9 wheels + sdist)
+> to <https://test.pypi.org/project/mtl5/> — keyless, via the pending trusted
+> publisher, which TestPyPI promoted to the real project on first publish. A
+> clean-venv install from TestPyPI then imported the compiled `_core`, reported
+> the expected `build_info()` (`native_fast_gemm`/`highway_simd` on), and passed
+> `norm`/`dot` smoke checks. The production PyPI path differs in three ways:
+> trigger (`release` vs `workflow_dispatch`), target index, and duplicate
+> handling — `publish-testpypi` sets `skip-existing: true` so re-runs are no-ops,
+> whereas `publish-pypi` deliberately omits it, so a duplicate version fails
+> loudly rather than being silently skipped.
+
 1. Make sure `wheels.yml` is committed and pushed to `main` (a workflow must be
    on GitHub, and on the default branch, to be dispatchable).
 2. Trigger the build+TestPyPI-publish run:
