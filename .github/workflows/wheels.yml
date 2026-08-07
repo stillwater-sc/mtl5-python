@@ -24,6 +24,14 @@ jobs:
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
+          # 64-bit only. cibuildwheel's default "auto" archs still include the
+          # 32-bit win32 target on Windows, and this C++20 / nanobind / Highway
+          # extension has no 32-bit toolchain or deps, so that target fails the
+          # build (observed: cp310-win32 exit code 1). auto64 selects just the
+          # native 64-bit arch per platform: AMD64 on Windows, x86_64 on Linux,
+          # arm64 on the macos-14/15 runners. (Linux i686 was already dropped
+          # from "auto" in cibuildwheel 3.0, so it is not a factor here.)
+          CIBW_ARCHS: "auto64"
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_SKIP: "*-musllinux*"
           CIBW_TEST_REQUIRES: pytest numpy scipy
