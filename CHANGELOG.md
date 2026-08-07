@@ -22,7 +22,8 @@ against, and semantic-release manages only the **patch** component.
   `workflow_dispatch` (TestPyPI dry-run). PyPI Trusted Publishing does not
   support reusable workflows, and a `GITHUB_TOKEN`-created release does not
   cascade to another workflow — so build+publish now run as native jobs
-  alongside semantic-release: keyless OIDC, one trusted publisher, and
+  alongside semantic-release: keyless OIDC, a single trusted-publisher
+  registration per index (no separate `release.yml` publisher needed), and
   least-privilege per-job permissions. No runtime or API change.
   ([#57](https://github.com/stillwater-sc/mtl5-python/pull/57))
 
