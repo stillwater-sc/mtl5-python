@@ -86,7 +86,7 @@ and reusable-workflow claims are unsupported by PyPI anyway (see §1).
 > not the account-level **pending publisher** flow — pending publishers are only
 > for project names that do not exist yet, so PyPI rejects one for a name that is
 > already taken.
-
+>
 > **First-publish chicken-and-egg:** a project-scoped trusted publisher can only
 > be added *after* the project exists. For the very first upload, use PyPI's
 > **pending publisher** flow (**Account → Publishing → Add a pending publisher**),

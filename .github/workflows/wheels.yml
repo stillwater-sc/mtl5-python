@@ -30,9 +30,11 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Least privilege at workflow scope: build jobs only read code. The `release`
+# job grants itself contents:write (to push the tag/commit), and the publish
+# jobs grant themselves id-token:write (OIDC) — see their per-job permissions.
 permissions:
-  contents: write  # semantic-release pushes the release commit + tag
-  id-token: write  # OIDC for the publish jobs
+  contents: read
 
 jobs:
   # Automated versioning — push to main only. semantic-release analyzes
@@ -46,6 +48,8 @@ jobs:
   release:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # push the release commit + tag, create the GitHub Release
     outputs:
       released: ${{ steps.psr.outputs.released }}
       tag: ${{ steps.psr.outputs.tag }}
@@ -111,6 +115,7 @@ jobs:
           # version). On release/dispatch the release job is skipped, so
           # `tag` is empty and we fall back to the triggering ref.
           ref: ${{ needs.release.outputs.tag || github.ref }}
+          persist-credentials: false  # build only reads; no token needed on disk
 
       - uses: actions/setup-python@v5
         with:
@@ -151,6 +156,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.release.outputs.tag || github.ref }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
