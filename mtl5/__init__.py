@@ -3,7 +3,16 @@
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
-import mtl5._core as _core
+try:
+    import mtl5._core as _core
+except ImportError as _exc:  # pragma: no cover - environment-dependent
+    raise ImportError(
+        f"mtl5: the compiled extension mtl5._core could not be imported ({_exc}). "
+        "If you launched Python from the repository root, the source 'mtl5/' "
+        "directory shadows the installed package but has no compiled extension — "
+        "run from another directory. Otherwise build/install it: 'pip install .' "
+        "(or 'pip install -e .' for a development checkout)."
+    ) from _exc
 
 # Single source of truth: pyproject.toml → installed package metadata.
 # The C++ module also reads this at build time via CMake.
@@ -16,6 +25,48 @@ except _PackageNotFoundError:
         from mtl5._core import __version__  # noqa: F811
     except ImportError:
         __version__ = "0.0.0-dev"
+
+# Guard against a compiled extension that is older than this Python layer — the
+# classic "updated the source, forgot to rebuild the C++ extension" with an
+# editable `pip install -e .`. The imports below pull submodules and symbols out
+# of _core (e.g. mtl5._core.tensor); when _core predates them the bare
+# ImportError ("cannot import name 'tensor' from 'mtl5._core'") is baffling.
+# Check the major always-compiled surfaces up front and, if any are missing,
+# fail with an actionable message. A version-string compare would NOT catch this
+# case: with an editable install the metadata and _core versions both stay at
+# the old build while only the source .py files advance. Extend the tuple when a
+# new top-level _core submodule is added.
+# (Assignments live inside the `if` so they don't count as module-level code
+# before the imports below — which would trip E402.)
+if not all(
+    hasattr(_core, _n)
+    for _n in ("tensor", "view", "mg", "mixed", "array", "backends", "build_info")
+):
+    _missing_core = [
+        _n
+        for _n in ("tensor", "view", "mg", "mixed", "array", "backends", "build_info")
+        if not hasattr(_core, _n)
+    ]
+    try:
+        _pkg = _pkg_version("mtl5")
+    except _PackageNotFoundError:
+        _pkg = "<no installed metadata>"
+    raise ImportError(
+        "mtl5: the compiled extension (mtl5._core) is out of sync with the "
+        "Python package — it is missing: " + ", ".join(_missing_core) + ".\n"
+        f"  Python package : {__file__}\n"
+        f"  compiled _core : {getattr(_core, '__file__', '<unknown>')}\n"
+        f"  versions       : package metadata {_pkg!r}, compiled _core "
+        f"{getattr(_core, '__version__', '<unknown>')!r}\n"
+        "This usually means the C++ extension was not rebuilt after the source "
+        "was updated (common with an editable 'pip install -e .').\n"
+        "Rebuild or reinstall:\n"
+        "  pip install -e . --force-reinstall     # rebuild an editable/dev install\n"
+        "  # or a clean wheel install:\n"
+        "  pip uninstall -y mtl5 && pip install mtl5\n"
+        "Also avoid launching Python from the repository root, where the source "
+        "'mtl5/' directory shadows the installed package."
+    )
 
 from mtl5 import tensor  # noqa: F401  -- submodule, imported for mtl5.tensor
 from mtl5._core import (

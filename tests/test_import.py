@@ -29,6 +29,44 @@ def test_version_sync():
     )
 
 
+def test_stale_core_guard_is_actionable():
+    """A compiled _core older than the Python layer must fail with a clear
+    rebuild message, not the cryptic 'cannot import name X from mtl5._core'.
+
+    Reproduces the editable-install hazard (updated the source, forgot to
+    rebuild the extension) in a subprocess: inject a fake mtl5._core that is
+    missing the newer `tensor` submodule, then import the source package.
+    """
+    import pathlib
+    import subprocess
+    import sys
+    import textwrap
+
+    repo = pathlib.Path(__file__).resolve().parents[1]
+    script = textwrap.dedent(f"""
+        import sys, types
+        core = types.ModuleType("mtl5._core")
+        for _n in ("view", "mg", "mixed", "array", "backends", "build_info"):
+            setattr(core, _n, object())          # everything EXCEPT `tensor`
+        core.__version__ = "0.0.0"
+        core.__file__ = "fake/_core.pyd"
+        sys.modules["mtl5._core"] = core
+        sys.path.insert(0, {str(repo)!r})        # load the source mtl5 package
+        try:
+            import mtl5
+        except ImportError as e:
+            msg = str(e)
+            assert "missing: tensor" in msg, msg
+            assert "pip install" in msg, msg     # points at the fix
+            print("GUARD_OK")
+        else:
+            raise SystemExit("stale-core guard did not fire")
+    """)
+    r = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert r.returncode == 0, f"stdout={r.stdout!r}\nstderr={r.stderr!r}"
+    assert "GUARD_OK" in r.stdout
+
+
 def test_public_api():
     for name in ["vector", "vector_copy", "matrix", "matrix_copy", "norm", "dot", "solve"]:
         assert hasattr(mtl5, name), f"mtl5.{name} not found"
