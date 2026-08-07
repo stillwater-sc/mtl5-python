@@ -1,9 +1,28 @@
 name: Build wheels
 
+# Triggers:
+#   release: published    → a human-cut GitHub Release; publish to PyPI.
+#   workflow_dispatch     → manual dry-run; publish to TestPyPI (skip-existing).
+#   workflow_call         → invoked by release.yml in the same run as an
+#                           automated release; `publish` chooses the index and
+#                           `ref` selects the tag to build. This path exists
+#                           because a GITHUB_TOKEN-created release does NOT
+#                           trigger the `release` event above (anti-recursion),
+#                           so the automated pipeline builds+publishes inline.
 on:
   release:
     types: [published]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      publish:
+        description: "Publish target when called: none | testpypi | pypi"
+        type: string
+        default: "none"
+      ref:
+        description: "Git ref (tag or SHA) to build; defaults to the triggering ref"
+        type: string
+        default: ""
 
 jobs:
   build-wheels:
@@ -13,6 +32,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # When called by release.yml, build the tag semantic-release just
+          # created (which carries the bumped version) rather than the caller's
+          # pre-bump SHA. Empty for release/dispatch → checkout's default ref.
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -46,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -56,19 +82,23 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
-  # Publish every built wheel + the sdist to PyPI. Runs only for a real
-  # published Release, never for the workflow_dispatch build smoke-tests.
+  # Publish every built wheel + the sdist to PyPI. Runs for a human-cut Release
+  # (`release` event) or when release.yml calls this workflow with publish=pypi.
   #
   # Auth: Trusted Publishing (OIDC) — no secrets to store or rotate. This repo
   # lives on github.com, so PyPI's OIDC trusts these runners directly. (The
   # `git@github.sw:` origin is only an SSH-config alias whose HostName is
-  # github.com, selecting a specific key — NOT a GitHub Enterprise host.) A
-  # matching trusted publisher must be registered on PyPI
-  # (owner/repo/workflow=wheels.yml/environment=pypi). See docs/pypi-release.md.
+  # github.com, selecting a specific key — NOT a GitHub Enterprise host.)
+  #
+  # Two trusted publishers are needed on PyPI, because the OIDC `workflow` claim
+  # is the ENTRY workflow:
+  #   - workflow=wheels.yml   → the `release` (manual) path
+  #   - workflow=release.yml  → the workflow_call (automated) path
+  # both with environment=pypi. See docs/pypi-release.md.
   publish-pypi:
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || inputs.publish == 'pypi'
     environment: pypi  # optional manual-approval gate; configure in repo settings
     permissions:
       id-token: write  # mint the OIDC token PyPI verifies; no password needed
@@ -84,16 +114,15 @@ jobs:
         with:
           packages-dir: dist
 
-  # Dry-run lane: publish the same artifacts to TestPyPI. Runs ONLY on a manual
-  # workflow_dispatch, so a real Release never lands here and a dispatch never
-  # touches production PyPI. Uses the TestPyPI trusted publisher (registered
-  # with environment=pypi, same as production — the two are separate per-index
-  # registrations). skip-existing lets a re-run at an unchanged version succeed
-  # instead of 400-ing on a duplicate. See docs/pypi-release.md §4.
+  # Dry-run lane: publish the same artifacts to TestPyPI. Runs on a manual
+  # workflow_dispatch, or when release.yml calls this workflow with
+  # publish=testpypi. Uses the TestPyPI trusted publisher (environment=pypi,
+  # its own per-index registration). skip-existing lets a re-run at an unchanged
+  # version succeed instead of 400-ing on a duplicate. See docs/pypi-release.md §4.
   publish-testpypi:
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || inputs.publish == 'testpypi'
     environment: pypi
     permissions:
       id-token: write
