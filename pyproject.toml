@@ -1,8 +1,17 @@
 [build-system]
-# numpy is a build requirement, not just a runtime one: nanobind_add_stub imports
-# the freshly built _core to generate type stubs, and its ndarray signatures are
-# annotated with numpy.typing.NDArray, which must resolve at stub-generation time.
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "numpy>=1.24"]
+# Extra build requirements exist for stub generation (nanobind_add_stub imports
+# the freshly built _core at build time):
+#   - numpy: the ndarray signatures are annotated with numpy.typing.NDArray,
+#     which must resolve when the stub is generated.
+#   - typing_extensions on Python < 3.11: nanobind's stubgen.py imports it there
+#     (src/stubgen.py) and nanobind does not declare it as a dependency, so we
+#     require it explicitly rather than relying on it arriving transitively.
+requires = [
+    "scikit-build-core>=0.10",
+    "nanobind>=2.0",
+    "numpy>=1.24",
+    "typing_extensions>=4.0; python_version < '3.11'",
+]
 build-backend = "scikit_build_core.build"
 
 [project]
