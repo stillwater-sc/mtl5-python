@@ -191,9 +191,18 @@ Before letting a release go out, confirm on `main`:
         `pyproject.toml` by hand first**, commit it, then let semantic-release
         resume patch management from there. See the policy comment in
         `pyproject.toml`.
-- [ ] `README.md` renders correctly as the PyPI long description (it is the
-      `readme`). Check for anything that breaks on PyPI's stricter renderer —
-      relative image links and internal-only URLs will not resolve.
+- [ ] `README.md` is correct **as the PyPI long description** (it is the
+      `readme`) — for a reader who found the package on PyPI, not a source
+      checkout. In particular:
+      - The Install section leads with `pip install mtl5` (installing the
+        published wheel), **not** `pip install .` (source-only — fails in an
+        arbitrary directory and misleads PyPI users). Source-build steps belong
+        under a clearly-labeled "From source" subsection.
+      - It **renders** on PyPI's stricter markup renderer — relative image links
+        and internal-only URLs will not resolve.
+      Note: PyPI does not let you edit a published version's description (it is
+      baked into the uploaded wheel/sdist metadata), so a README fix only reaches
+      the project page on the **next** release.
 - [ ] `LICENSE` (MIT) and `[project].license` agree. *(Note: `license` is
       currently `{text = "MIT"}`; modern setuptools/PyPI metadata prefers the
       SPDX form `license = "MIT"`. Harmless today, worth tidying.)*

@@ -17,6 +17,20 @@ _Nothing yet._
 
 <!-- version list -->
 
+## [5.7.1] - 2026-08-07
+
+### Fixed
+
+- **PyPI install instructions.** The README Install section — which is also the
+  package's PyPI long description (`readme = "README.md"`) — led with
+  `pip install .`, a source-only command that fails in an arbitrary directory
+  and misleads anyone installing the published package. It now leads with
+  `pip install mtl5`, notes that prebuilt wheels need no compiler, and moves the
+  from-source build under a labeled "From source" subsection. The correction
+  only reaches the PyPI project page with this release, since PyPI bakes the
+  description into each uploaded distribution and does not allow editing a
+  published version.
+
 ## [5.7.0] - 2026-08-07
 
 First release to PyPI. Closes epic #21 — the binding gap against MTL5 v5.7.0.
@@ -108,5 +122,6 @@ Two operations differ from NumPy on purpose: `dot` on complex is Hermitian
 (`numpy.vdot`, not `numpy.dot` — `dot_real` is the latter), and `.T` does not
 conjugate, `.H` does.
 
-[Unreleased]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.0...HEAD
+[Unreleased]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.1...HEAD
+[5.7.1]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.0...v5.7.1
 [5.7.0]: https://github.com/stillwater-sc/mtl5-python/releases/tag/v5.7.0
