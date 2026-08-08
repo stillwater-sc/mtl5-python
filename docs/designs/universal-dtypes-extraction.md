@@ -14,9 +14,12 @@ Registering them as first-class NumPy dtypes is a *number-representation*
 concern, and it depends on **Universal**, not on MTL5 (the linear-algebra
 library). Today that dependency is inverted:
 
-- `mtl5/pandas_ext.py` (the Phase 1 pandas `ExtensionDtype` for posit16) backs
-  its storage and arithmetic on `mtl5.DenseVector_posit16` — i.e. a dtype
-  reaching **up** into a matrix library to represent a scalar number system.
+- `mtl5/pandas_ext.py` (the Phase 1 pandas `ExtensionDtype` for posit16) stores
+  a `float64` NumPy array and quantizes values by round-tripping through
+  **temporary** `mtl5.vector_posit16` objects — i.e. a scalar number-system dtype
+  reaching **up** into a matrix library for its quantization. (It does not hold a
+  `DenseVector_posit16`; the point stands either way — the dependency runs the
+  wrong direction.)
 
 Three problems follow from housing dtypes in mtl5-python:
 
@@ -46,8 +49,12 @@ Create `universal_dtypes` as a standalone package and sister repo of Universal:
 - **Provides:** true NumPy custom dtypes for the Universal number systems,
   following the `ml_dtypes` C++ pattern (cast tables, ufunc loops, comparison,
   sort, formatting, pickling), plus an optional pandas adapter.
-- **Consumed by:** mtl5-python (for zero-copy interop and the linear-algebra
-  layer), and any other library or user wanting Universal dtypes in NumPy.
+- **Consumed by:** mtl5-python (for interop and the linear-algebra layer), and
+  any other library or user wanting Universal dtypes in NumPy. Interop is
+  *conversion* today — the MTL5 factories accept contiguous `float64` and copy
+  into native vectors. True **zero-copy** (a `universal_dtypes` array and an MTL5
+  container sharing one buffer) is a future goal that requires a defined memory
+  contract; see Open decisions.
 
 ## Naming
 
@@ -66,9 +73,9 @@ PyPI name is `ml-dtypes`. It also keeps install-name and import-name visually
 identical (`pip install universal_dtypes` → `import universal_dtypes`), avoiding
 the "install X, import Y" gotcha of the older scikit-learn/`sklearn` style.
 
-Both `universal-dtypes` and `universal_dtypes` are currently unclaimed on PyPI
-(both 404 as of this writing) — reserve the name early, since a distribution name
-is immutable once first published.
+Both `universal-dtypes` and `universal_dtypes` were unclaimed on PyPI (both
+returned 404 on 2026-08-08) — reserve the name early, since registry ownership
+can change and a distribution name is immutable once first published.
 
 *Naming note:* the earlier working title was `mp_dtypes` (mixed-precision
 dtypes), tied to the mpdsp product line. `universal_dtypes` was chosen instead
@@ -102,6 +109,16 @@ operation like "sum of posits" belongs.
 The clean phrasing: **`universal_dtypes` is the element type and its scalar/
 element-wise arithmetic; `mtl5` is what you do with arrays of them, including how
 you accumulate.**
+
+**Reductions cross this line and must be documented as deliberately different.**
+`np.sum(posit_array)` / `np.mean(...)` accumulate **naively in the element type**
+— each partial sum rounds to a posit — which is *not* the same value as `mtl5`'s
+**quire**-accumulated `dot`/`norm`/`sum` (exact until the final round). This is by
+design, not a bug: `universal_dtypes` gives ordinary NumPy semantics for the
+dtype, and the accuracy-preserving path is `mtl5` with `accumulator=`. The two
+answers will differ on ill-conditioned data, so both the package docs and the
+mtl5 docs should state the distinction explicitly and point users who need
+exactness at the `mtl5` accumulator API.
 
 ## Framework support
 
@@ -141,12 +158,24 @@ array to drop its MTL5 dependency.
 mtl5-python 5.7.x already exposes `mtl5.Posit16Dtype` / `mtl5.Posit16Array`
 (pandas). The transition:
 
-1. mtl5-python adds a dependency on `universal_dtypes`.
+1. mtl5-python adds a dependency on `universal_dtypes`. Because the pandas types
+   live in the **optional** `[pandas]` extra, mtl5-python must depend on
+   `universal-dtypes[pandas]` (not bare `universal-dtypes`) — otherwise the
+   re-exported `Posit16Dtype`/`Posit16Array` would be missing. (Equivalently,
+   gate the re-export on pandas being importable, matching how `mtl5.__init__`
+   already guards its pandas surface.)
 2. mtl5-python re-exports `Posit16Dtype`/`Posit16Array` (and future dtypes) from
    `universal_dtypes` for a deprecation window, so existing imports keep working.
-3. `mtl5/pandas_ext.py`'s independent implementation is removed once the
-   re-export is in place.
-4. The `mtl5.vector_posit16(...)` factories and the `mixed`/accumulator surface
+3. **Preserve behavior, not just import paths.** Re-exporting keeps
+   `mtl5.Posit16Dtype` importable, but the new implementation must match — or
+   deliberately, and in a documented breaking release, change — the observable
+   semantics of today's `Posit16Array`: scalar indexing returns a Python
+   `float`, `to_numpy()` yields `float64`, and assignment quantizes through
+   posit16. Pin these with tests carried over from the current pandas suite
+   before deleting `mtl5/pandas_ext.py`.
+4. `mtl5/pandas_ext.py`'s independent implementation is removed once the
+   re-export and the behavioral tests are in place.
+5. The `mtl5.vector_posit16(...)` factories and the `mixed`/accumulator surface
    stay in mtl5-python.
 
 This is a minor-version-worthy reorganization under the project's versioning
@@ -185,6 +214,11 @@ maintenance-heavy reality argues for waiting rather than building speculatively.
    proof of concept.
 3. **First family:** posit16 (per #14) — confirm it is also the format mpdsp
    needs first.
+4. **Zero-copy contract (deferred):** to move from conversion to true zero-copy
+   between a `universal_dtypes` array and an MTL5 container, define the shared
+   memory layout (element width/encoding), strides, buffer ownership and
+   lifetime, and mutability — and whether MTL5 factories gain a
+   borrow-a-buffer entry point. Until that exists, interop is a copy.
 
 ## Recommendation
 
