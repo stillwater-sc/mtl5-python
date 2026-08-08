@@ -184,13 +184,20 @@ publishes to TestPyPI via the trusted publisher registered in §2.2, and carries
 4. Install it into a clean environment on each target OS/Python and smoke-test:
    ```bash
    python -m venv /tmp/mtl5-test && source /tmp/mtl5-test/bin/activate
+   # Pin the EXACT version you dispatched. --extra-index-url also exposes
+   # production PyPI (needed for numpy et al.), so an *unpinned* `mtl5` would
+   # resolve to the highest version across BOTH indexes — i.e. production, not
+   # the artifact under test. Dry-run a dev version (see the note below) so only
+   # TestPyPI can satisfy the pin.
    pip install --index-url https://test.pypi.org/simple/ \
-               --extra-index-url https://pypi.org/simple/ mtl5
+               --extra-index-url https://pypi.org/simple/ "mtl5==5.8.0.dev1"
    python -c "import mtl5; print(mtl5.__version__); print(mtl5.build_info())"
    pytest --pyargs mtl5   # if tests are packaged; otherwise run the repo tests
    ```
-   The `--extra-index-url` is needed so `numpy` and friends resolve from real
-   PyPI while `mtl5` comes from TestPyPI.
+   The `--extra-index-url` lets `numpy` and friends resolve from real PyPI while
+   the pinned `mtl5` version — which exists only on TestPyPI — comes from
+   TestPyPI. Without the pin, pip picks the highest version across both indexes,
+   which is now production (5.7.2 > any TestPyPI dry-run at 5.7.x).
 
 > **Iterating on TestPyPI:** TestPyPI versions are immutable just like PyPI's.
 > `skip-existing: true` means a re-run at the *same* version is a no-op (the
