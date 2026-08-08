@@ -52,9 +52,12 @@ Create `universal_dtypes` as a standalone package and sister repo of Universal:
 - **Consumed by:** mtl5-python (for interop and the linear-algebra layer), and
   any other library or user wanting Universal dtypes in NumPy. Interop is
   *conversion* today — the MTL5 factories accept contiguous `float64` and copy
-  into native vectors. True **zero-copy** (a `universal_dtypes` array and an MTL5
-  container sharing one buffer) is a future goal that requires a defined memory
-  contract; see Open decisions.
+  into native vectors, so a `universal_dtypes` array is cast to `float64`
+  (1-D for `mtl5.vector`, 2-D for `mtl5.matrix`) before the copy; non-finite
+  inputs map to the element type's exceptional value (posits have a single NaR,
+  not separate ±inf/NaN). True **zero-copy** (a `universal_dtypes` array and an
+  MTL5 container sharing one buffer) is a future goal that requires a defined
+  memory contract; see Open decisions.
 
 ## Naming
 
@@ -112,13 +115,21 @@ you accumulate.**
 
 **Reductions cross this line and must be documented as deliberately different.**
 `np.sum(posit_array)` / `np.mean(...)` accumulate **naively in the element type**
-— each partial sum rounds to a posit — which is *not* the same value as `mtl5`'s
-**quire**-accumulated `dot`/`norm`/`sum` (exact until the final round). This is by
-design, not a bug: `universal_dtypes` gives ordinary NumPy semantics for the
-dtype, and the accuracy-preserving path is `mtl5` with `accumulator=`. The two
-answers will differ on ill-conditioned data, so both the package docs and the
-mtl5 docs should state the distinction explicitly and point users who need
-exactness at the `mtl5` accumulator API.
+— each partial sum rounds to a posit — which is *not* the same value as the
+**quire**-accumulated reductions in `mtl5` (exact until the final round). Note
+`mtl5` exposes the accumulator policy on `dot`, `norm`, `frobenius_norm`,
+`matvec` and `matmul` (via `mtl5.mixed`); there is **no** free `mtl5.sum`, so the
+accuracy-preserving analogue of `np.sum` is `mtl5.dot(x, ones)` /
+`mtl5.norm`-style calls with `accumulator=`. This split is by design:
+`universal_dtypes` gives ordinary NumPy semantics for the dtype, and exactness
+lives in `mtl5`. The two answers differ on ill-conditioned data, so both packages'
+docs should state it and point users needing exactness at the `mtl5` accumulator
+API.
+
+The precise `universal_dtypes` reduction contract — result dtype, whether
+`dtype=` overrides accumulation precision, empty-input behavior, and final-
+rounding rules — is **deliberately left to implementation** (see Open decisions);
+pinning it in this proposal would invent decisions no consumer has driven yet.
 
 ## Framework support
 
@@ -219,6 +230,10 @@ maintenance-heavy reality argues for waiting rather than building speculatively.
    memory layout (element width/encoding), strides, buffer ownership and
    lifetime, and mutability — and whether MTL5 factories gain a
    borrow-a-buffer entry point. Until that exists, interop is a copy.
+5. **Reduction/ufunc contract (deferred):** for the NumPy ufuncs and reductions,
+   settle the result dtype, whether `dtype=` overrides accumulation precision,
+   empty-input semantics, and where the final rounding falls. Decide at
+   implementation with the first consumer, not speculatively here.
 
 ## Recommendation
 
