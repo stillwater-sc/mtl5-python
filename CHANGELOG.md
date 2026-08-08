@@ -13,7 +13,19 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **Release pipeline consolidated into one workflow.** `release.yml` plus a
+  reusable `wheels.yml` were merged into a single `wheels.yml` with three
+  triggers: `push: main` (semantic-release cuts the version, then builds and
+  publishes in the same run), `release: published` (manual), and
+  `workflow_dispatch` (TestPyPI dry-run). PyPI Trusted Publishing does not
+  support reusable workflows, and a `GITHUB_TOKEN`-created release does not
+  cascade to another workflow — so build+publish now run as native jobs
+  alongside semantic-release: keyless OIDC, a single trusted-publisher
+  registration per index (no separate `release.yml` publisher needed), and
+  least-privilege per-job permissions. No runtime or API change.
+  ([#57](https://github.com/stillwater-sc/mtl5-python/pull/57))
 
 <!-- version list -->
 
