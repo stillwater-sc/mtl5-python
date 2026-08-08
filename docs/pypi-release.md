@@ -1,14 +1,14 @@
 # Releasing `mtl5` to PyPI
 
 A step-by-step, repeatable procedure for publishing the `mtl5` package to
-[PyPI](https://pypi.org/). This document reflects the release machinery that
-already lives in the repo and describes the one piece that is deliberately not
-wired up yet: the final upload to PyPI.
+[PyPI](https://pypi.org/). It reflects the consolidated release pipeline that is
+now live in the repo.
 
-> **Status:** As of this writing there is **no PyPI release** of `mtl5`. The
-> automation below already tags versions, generates GitHub Releases, and builds
-> multi-platform wheels — but the artifacts stop at GitHub. This document closes
-> that last gap.
+> **Status:** fully wired and in production. `mtl5` 5.7.0 → 5.7.1 → 5.7.2 are
+> published on [PyPI](https://pypi.org/project/mtl5/), cut through this exact
+> automation — one workflow (`wheels.yml`), keyless OIDC Trusted Publishing, no
+> tokens. §1 is the machinery, §6 is the day-to-day happy path, and the one-time
+> account/publisher setup (§2) is already done for `mtl5`.
 
 ---
 
@@ -34,6 +34,10 @@ wired up yet: the final upload to PyPI.
 ---
 
 ## 2. One-time setup (do this once, ever)
+
+> **Already complete for `mtl5`** — the name is claimed, the PyPI + TestPyPI
+> trusted publishers exist, and the `pypi` environment is configured. This
+> section is kept as the record and the template for a new sister package.
 
 ### 2.1 Reserve the project name
 
@@ -180,13 +184,20 @@ publishes to TestPyPI via the trusted publisher registered in §2.2, and carries
 4. Install it into a clean environment on each target OS/Python and smoke-test:
    ```bash
    python -m venv /tmp/mtl5-test && source /tmp/mtl5-test/bin/activate
+   # Pin the EXACT version you dispatched. --extra-index-url also exposes
+   # production PyPI (needed for numpy et al.), so an *unpinned* `mtl5` would
+   # resolve to the highest version across BOTH indexes — i.e. production, not
+   # the artifact under test. Dry-run a dev version (see the note below) so only
+   # TestPyPI can satisfy the pin.
    pip install --index-url https://test.pypi.org/simple/ \
-               --extra-index-url https://pypi.org/simple/ mtl5
+               --extra-index-url https://pypi.org/simple/ "mtl5==5.8.0.dev1"
    python -c "import mtl5; print(mtl5.__version__); print(mtl5.build_info())"
    pytest --pyargs mtl5   # if tests are packaged; otherwise run the repo tests
    ```
-   The `--extra-index-url` is needed so `numpy` and friends resolve from real
-   PyPI while `mtl5` comes from TestPyPI.
+   The `--extra-index-url` lets `numpy` and friends resolve from real PyPI while
+   the pinned `mtl5` version — which exists only on TestPyPI — comes from
+   TestPyPI. Without the pin, pip picks the highest version across both indexes,
+   which is now production (5.7.2 > any TestPyPI dry-run at 5.7.x).
 
 > **Iterating on TestPyPI:** TestPyPI versions are immutable just like PyPI's.
 > `skip-existing: true` means a re-run at the *same* version is a no-op (the
@@ -298,18 +309,22 @@ whereas `wheels.yml` ships the full matrix. Prefer re-running the workflow.
 | Long description rejected / renders wrong | `README.md` uses markup PyPI's renderer dislikes, or relative links | Run `twine check dist/*` locally; fix links to be absolute. |
 | No release cut after merging | No release-worthy conventional commits since the last tag | Expected; land a `feat:`/`fix:` commit, or bump the version manually. |
 | Double upload | Both semantic-release publishing and the `publish-pypi` job enabled | Keep `upload_to_pypi = false`; let only `wheels.yml` publish. |
+| Spurious `1.0.0` on a pre-1.0 / tagless repo | `semantic-release` with `allow_zero_version` unset force-escapes `0.x` to `1.0.0` on the first run — even for non-release commits — and can publish it | Set `allow_zero_version = true`; bootstrap the first release from an **annotated** baseline tag. `mtl5` (5.x, tagged) is not affected — this bit the `universal_dtypes` sister package and is why its `wheels.yml` also guards against a tagless auto-release. |
 
 ---
 
-## 9. Summary of first-time actions
+## 9. First-time setup — completed
 
-1. Reserve `mtl5` on PyPI + TestPyPI; enable 2FA; add a second owner. *(§2.1)*
-2. Register the GitHub **trusted publisher** (a *pending* publisher for the
-   first release) on both PyPI and TestPyPI: owner `stillwater-sc`, repo
-   `mtl5-python`, `workflow=wheels.yml`, `environment=pypi`. *(§2.2)*
-3. Confirm the `publish-pypi` job is present in `wheels.yml` — it already is. *(§3)*
-4. Create the `pypi` environment in the repo settings. *(§3)*
-5. Dry-run against TestPyPI and install-test on every target. *(§4)*
-6. Cut the first real release via the normal merge-to-`main` flow. *(§6)*
+All done for `mtl5`; kept as the record and the template for a new package:
 
-After that, releasing is: merge conventional commits → CI does the rest.
+- [x] `mtl5` reserved on PyPI + TestPyPI; 2FA on. *(§2.1)*
+- [x] GitHub **trusted publisher** on both PyPI and TestPyPI: owner
+      `stillwater-sc`, repo `mtl5-python`, `workflow=wheels.yml`,
+      `environment=pypi`. *(§2.2)*
+- [x] `publish-pypi` job present in `wheels.yml`. *(§3)*
+- [x] `pypi` environment configured in repo settings. *(§3)*
+- [x] TestPyPI dry-run + install-test validated. *(§4)*
+- [x] First real release cut — 5.7.0, then 5.7.1 and 5.7.2. *(§6)*
+
+Day-to-day, releasing is now just: **merge conventional commits → the pipeline
+does the rest** (§6). For a new sister package, walk §2 → §4 → §6 in order.
