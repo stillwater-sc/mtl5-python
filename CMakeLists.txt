@@ -85,7 +85,17 @@ endif()
 # and mtl5_complex.cpp needs the Hermitian factorizations cholesky_h_factor /
 # cholesky_h_solve / ldlt_h_factor / ldlt_h_solve and CHOLESKY_NOT_HERMITIAN.
 # Both landed after v5.8.0.
-find_package(MTL5 QUIET)
+#
+# The version argument to find_package is what applies that floor to the OTHER
+# build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
+# MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
+# installed would silently build against it and get ~140 template errors deep
+# inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
+# with COMPATIBILITY SameMajorVersion, under which 5.9.0 rejects an installed
+# 5.7.0 and accepts 5.9.0 or 5.10.0 -- exactly the floor we want. (It also
+# rejects a 6.x install, which is correct: an MTL5 major bump is the manual
+# intervention case in the version policy, not something to absorb silently.)
+find_package(MTL5 5.9.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -106,7 +116,8 @@ endif()
 # Provides cfloat<nbits,es>, posit<nbits,es>, and other custom number types.
 # Pinned for the same reason as MTL5 above: this is fetched at `pip install`
 # time, and the quire sizing it supplies backs the mixed-precision norms.
-find_package(universal QUIET)
+# Version-floored for the same reason too -- see the find_package note above.
+find_package(universal 4.7.9 QUIET)
 if(NOT universal_FOUND)
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)

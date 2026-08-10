@@ -264,11 +264,20 @@ Once §2 and §3 are done, every subsequent release is just:
    > `refactor:` commit makes the `release` job compute 5.7.2 → **5.7.3** from
    > the tag and rewrite your 5.9.0 back down. Land the bump under a type that
    > is *not* in `patch_tags` (`build:`, `chore:`, `docs:`, `ci:`) so the
-   > `release` job no-ops, then create the tag by hand:
+   > `release` job no-ops, then create the tag by hand — **pinned to the merge
+   > commit you verified**:
    >
    > ```bash
-   > gh release create v5.9.0 --title v5.9.0 --notes-file <notes>
+   > SHA=$(git rev-parse origin/main)   # the commit CI went green on
+   > gh release create v5.9.0 --target "$SHA" --title v5.9.0 --notes-file <notes>
    > ```
+   >
+   > `--target` is not optional here. When the tag does not already exist, `gh`
+   > creates it from the tip of the default branch *at that moment* — so an
+   > unrelated merge landing between your CI check and your `gh release create`
+   > would get tagged and published instead. (If you tagged and pushed by hand
+   > instead, use `--verify-tag` so a typo'd tag name fails rather than
+   > silently creating a new one.)
    >
    > That fires the `release: published` trigger, which builds at the tag and
    > publishes — the same path used for 5.7.0–5.7.2. Patch releases need none
