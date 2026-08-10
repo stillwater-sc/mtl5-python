@@ -59,7 +59,7 @@ jobs:
           fetch-depth: 0  # full history for commit analysis
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -117,7 +117,7 @@ jobs:
           ref: ${{ needs.release.outputs.tag || github.ref }}
           persist-credentials: false  # build only reads; no token needed on disk
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -140,7 +140,7 @@ jobs:
           CIBW_TEST_REQUIRES: pytest numpy scipy
           CIBW_TEST_COMMAND: pytest {project}/tests -v
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
@@ -157,12 +157,12 @@ jobs:
         with:
           ref: ${{ needs.release.outputs.tag || github.ref }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install build
       - run: python -m build --sdist
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -184,8 +184,13 @@ jobs:
     permissions:
       id-token: write  # mint the OIDC token PyPI verifies; no password needed
     steps:
+      # download-artifact v8 errors on a digest mismatch rather than warning
+      # (v7 and earlier only logged). That default is left alone deliberately:
+      # the next step uploads these exact files to PyPI, where a corrupted
+      # artifact is unfixable after the fact -- PyPI does not allow re-uploading
+      # a version. Failing here is the cheap outcome.
       - name: Gather wheels and sdist into dist/
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true  # flatten wheels-*/ and sdist/ into a single dir
@@ -211,7 +216,7 @@ jobs:
       id-token: write
     steps:
       - name: Gather wheels and sdist into dist/
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
