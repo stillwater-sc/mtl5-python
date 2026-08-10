@@ -6,10 +6,35 @@ accumulator measurably improves accuracy, and that the quire is exact.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
 import mtl5
+
+
+def exact_sum_of_squares(a) -> float:
+    """The correctly-rounded float64 value of ``sum(a[i]**2)``.
+
+    The obvious reference, ``np.dot(a, a)``, is *not* exact — it is itself a
+    sequential float64 accumulation carrying its own rounding error. That makes
+    it useless for ranking accumulators that are more accurate than float64:
+    the ``f64`` accumulator reproduces it bit for bit and scores a perfect 0,
+    while the exact quire differs from it and therefore scores *worse*. Tests
+    built on it rank accumulators by agreement with float64 rather than by
+    accuracy, and penalise the quire for being right.
+
+    ``math.fsum`` is correctly rounded regardless of summation order, so it is
+    the true value to within one rounding, and the quire reproduces it exactly.
+    ``np.longdouble`` is not a portable substitute: it is 80-bit only on x86
+    Linux, and plain float64 on Windows and macOS/arm64, where it would
+    silently reintroduce the same defect.
+
+    See https://github.com/stillwater-sc/mtl5-python/issues/62.
+    """
+    return math.fsum(float(x) * float(x) for x in a)
+
 
 QUIRE_DTYPES = [
     "fp8",
@@ -76,17 +101,21 @@ class TestAccumulatorPolicy:
             assert "quire" not in mtl5.mixed.accumulators(dt)
 
     def test_quire_is_exact_for_posit(self, data):
-        """The headline claim: an exact dot product, not merely a better one."""
+        """The headline claim: an exact dot product, not merely a better one.
+
+        Asserted as exact equality. A tolerance here would be the weaker claim,
+        and would hide the reference being only as good as float64.
+        """
         v = mtl5.convert(data, "posit16")
         rounded = v.to_numpy()  # the posit16 values, as float64
-        exact = float(np.dot(rounded, rounded))
+        exact = exact_sum_of_squares(rounded)
         got = mtl5.mixed.dot(v, v, accumulator="quire")
-        assert got == pytest.approx(exact, rel=1e-15, abs=0.0)
+        assert got == exact
 
     def test_wider_accumulator_is_monotonically_better(self, data):
         v = mtl5.convert(data, "posit16")
         rounded = v.to_numpy()
-        exact = float(np.dot(rounded, rounded))
+        exact = exact_sum_of_squares(rounded)
 
         def relerr(acc):
             return abs(mtl5.mixed.dot(v, v, accumulator=acc) - exact) / abs(exact)
@@ -101,7 +130,12 @@ class TestAccumulatorPolicy:
         assert in_precision > 1e-3, "expected in-precision accumulation to be poor"
         assert f32 < in_precision
         assert f64 < f32
+        # The quire is exact, so it does not merely tie float64 -- it hits the
+        # true value. Stated as == 0.0 rather than <= f64 because that is the
+        # actual property; <= f64 follows from it and would also be satisfied
+        # by a quire that was merely no worse.
         assert quire <= f64
+        assert quire == 0.0, f"the quire should be exact, got {quire}"
 
     def test_fma_accumulator_available(self, data):
         v = mtl5.convert(data, "posit16")
@@ -158,11 +192,17 @@ class TestAccumulatedNorms:
     def test_a_wider_accumulator_is_strictly_better(self):
         """posit16 elements, where the accumulator has room to matter. Measured
         against the exact norm of the same posit16 data, so the only error is
-        the accumulation."""
+        the accumulation.
+
+        The reference was ``np.longdouble``, which is 80-bit only on x86 Linux
+        and plain float64 on Windows and macOS/arm64 -- so on two of the three
+        CI platforms the ``err["quire"] == 0.0`` assertion below was being made
+        against a float64 reference and passing on luck. ``math.fsum`` is
+        correctly rounded everywhere.
+        """
         rng = np.random.default_rng(0)
         v = mtl5.convert(rng.standard_normal(4000), "posit16")
-        elements = np.array([float(v[i]) for i in range(len(v))], dtype=np.longdouble)
-        exact = float(np.sqrt((elements * elements).sum()))
+        exact = math.sqrt(exact_sum_of_squares(v.to_numpy()))
 
         err = {
             acc: abs(mtl5.mixed.norm(v, 2, accumulator=acc) - exact) / exact
