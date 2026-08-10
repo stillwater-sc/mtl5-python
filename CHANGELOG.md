@@ -18,8 +18,10 @@ against, and semantic-release manages only the **patch** component.
 - **The accumulator tests ranked accumulators against a float64 reference, so
   they penalised the quire for being exact.** Tests only — no shipped code
   changed, and the binding behaviour was always correct. The reference was
-  `np.dot`, which is itself a sequential float64 accumulation carrying its own
-  rounding error, so `test_wider_accumulator_is_monotonically_better` was
+  `np.dot`, which is itself a float64 accumulation carrying its own rounding
+  error — and whose summation order is not even fixed, since it dispatches to
+  whatever BLAS numpy was built against — so
+  `test_wider_accumulator_is_monotonically_better` was
   really measuring *agreement with float64*: the `f64` accumulator reproduced
   the reference bit for bit and scored a perfect `0.0`, while the exact quire
   differed from it by `1.14e-16` and therefore scored worse, failing the
@@ -28,9 +30,14 @@ against, and semantic-release manages only the **patch** component.
   stayed green only because FP contraction on those runners perturbed one of
   the two.
 
-  The reference is now `math.fsum`, which is correctly rounded regardless of
-  summation order and which the quire reproduces exactly (verified bit-for-bit
-  for both `dot` and `two_norm`). That let the tests assert the real property
+  The reference is now `math.fsum`, which tracks exact partial sums and is
+  therefore correctly rounded independently of summation order. (CPython
+  documents one residual caveat: on builds whose C library adds in extended
+  precision, an intermediate sum can double-round and leave the result off by
+  one ulp. Not observed on any platform in CI.) The quire reproduced it
+  bit-for-bit for both `dot` and `two_norm` on every lane — an observed result
+  across Linux, macOS/arm64 and Windows, not a guarantee derived from the
+  standard. That let the tests assert the real property
   instead of a tolerance: `test_quire_is_exact_for_posit` now asserts exact
   equality rather than `rel=1e-15` — the old tolerance was absorbing the same
   discrepancy, so the headline "the quire is exact" claim was never actually
