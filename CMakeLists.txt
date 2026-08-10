@@ -72,7 +72,30 @@ if(MTL5_NATIVE_FAST_GEMM AND NOT MTL5_WITH_HIGHWAY)
 endif()
 
 # --- MTL5 (header-only) ---
-find_package(MTL5 QUIET)
+#
+# Pinned to a release tag, not a branch. FetchContent runs at `pip install`
+# time, so a floating `main` would make every user's build -- and every wheel
+# CI ships -- a different library. The pin is what makes a released wheel
+# reproducible, and it is the thing to bump when tracking MTL5 upstream:
+# mtl5-python's minor version follows the MTL5 tag named here.
+#
+# v5.9.0 is a floor, not a preference. The bindings will NOT compile against
+# v5.8.0: mtl5_mixed_precision.cpp needs the two_norm<Accumulator, Result> /
+# frobenius_norm<Accumulator, Result> forms (v5.8.0 has no Result parameter),
+# and mtl5_complex.cpp needs the Hermitian factorizations cholesky_h_factor /
+# cholesky_h_solve / ldlt_h_factor / ldlt_h_solve and CHOLESKY_NOT_HERMITIAN.
+# Both landed after v5.8.0.
+#
+# The version argument to find_package is what applies that floor to the OTHER
+# build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
+# MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
+# installed would silently build against it and get ~140 template errors deep
+# inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
+# with COMPATIBILITY SameMajorVersion, under which 5.9.0 rejects an installed
+# 5.7.0 and accepts 5.9.0 or 5.10.0 -- exactly the floor we want. (It also
+# rejects a 6.x install, which is correct: an MTL5 major bump is the manual
+# intervention case in the version policy, not something to absorb silently.)
+find_package(MTL5 5.9.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -82,7 +105,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        main
+        GIT_TAG        v5.9.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
@@ -90,8 +113,11 @@ if(NOT MTL5_FOUND)
 endif()
 
 # --- Universal number library (header-only) ---
-# Provides cfloat<nbits,es>, posit<nbits,es>, and other custom number types
-find_package(universal QUIET)
+# Provides cfloat<nbits,es>, posit<nbits,es>, and other custom number types.
+# Pinned for the same reason as MTL5 above: this is fetched at `pip install`
+# time, and the quire sizing it supplies backs the mixed-precision norms.
+# Version-floored for the same reason too -- see the find_package note above.
+find_package(universal 4.7.9 QUIET)
 if(NOT universal_FOUND)
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
@@ -110,7 +136,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        main
+        GIT_TAG        v4.7.9
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )

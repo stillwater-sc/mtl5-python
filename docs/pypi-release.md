@@ -218,10 +218,17 @@ Before letting a release go out, confirm on `main`:
 - [ ] The version in `pyproject.toml` is correct for the intended bump:
       - A `feat:`/`fix:`/`perf:`/`refactor:` commit → semantic-release bumps the
         **patch** automatically.
-      - A new MTL5 `major.minor` (e.g. bumping to `5.8.0`) → **edit
-        `pyproject.toml` by hand first**, commit it, then let semantic-release
-        resume patch management from there. See the policy comment in
-        `pyproject.toml`.
+      - A new MTL5 `major.minor` (e.g. bumping to `5.9.0`) → **edit
+        `pyproject.toml` by hand first**, commit it under a non-releasing type,
+        tag by hand (see §6 step 1), then let semantic-release resume patch
+        management from there. See the policy comment in `pyproject.toml`.
+- [ ] The `GIT_TAG` for `mtl5` in `CMakeLists.txt` is the MTL5 release this
+      version claims to track, and it is a **tag, not a branch**. FetchContent
+      runs at `pip install` time, so a branch there means the published wheel
+      and any from-source install are built against a moving target. The
+      `universal` pin next to it is subject to the same rule. Verify the pinned
+      combination actually compiles before tagging — a pin that predates an API
+      the bindings call fails at build time, not at import.
 - [ ] `README.md` is correct **as the PyPI long description** (it is the
       `readme`) — for a reader who found the package on PyPI, not a source
       checkout. In particular:
@@ -249,6 +256,33 @@ Once §2 and §3 are done, every subsequent release is just:
 1. **Merge conventional commits to `main`.** A `feat:`/`fix:` (etc.) commit is
    what drives a patch bump. For a major/minor bump aligned with MTL5 upstream,
    land a commit that manually sets `[project].version` in `pyproject.toml`.
+
+   > **A minor/major bump must not ride a release-worthy commit.**
+   > semantic-release reads the *current* version from the last git tag, not
+   > from `pyproject.toml` — it only ever writes that file. So merging a
+   > hand-set `version = "5.9.0"` together with a `feat:`/`fix:`/`perf:`/
+   > `refactor:` commit makes the `release` job compute 5.7.2 → **5.7.3** from
+   > the tag and rewrite your 5.9.0 back down. Land the bump under a type that
+   > is *not* in `patch_tags` (`build:`, `chore:`, `docs:`, `ci:`) so the
+   > `release` job no-ops, then create the tag by hand — **pinned to the merge
+   > commit you verified**:
+   >
+   > ```bash
+   > SHA=$(git rev-parse origin/main)   # the commit CI went green on
+   > gh release create v5.9.0 --target "$SHA" --title v5.9.0 --notes-file <notes>
+   > ```
+   >
+   > `--target` is not optional here. When the tag does not already exist, `gh`
+   > creates it from the tip of the default branch *at that moment* — so an
+   > unrelated merge landing between your CI check and your `gh release create`
+   > would get tagged and published instead. (If you tagged and pushed by hand
+   > instead, use `--verify-tag` so a typo'd tag name fails rather than
+   > silently creating a new one.)
+   >
+   > That fires the `release: published` trigger, which builds at the tag and
+   > publishes — the same path used for 5.7.0–5.7.2. Patch releases need none
+   > of this; step 2 handles them.
+
 2. **`wheels.yml` runs automatically** on the push to `main`, doing everything
    in one workflow run:
    - The `release` job runs `semantic-release version` — computes the bump,
