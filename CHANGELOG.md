@@ -13,7 +13,29 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+## [5.9.0] - 2026-08-10
+
+Tracks MTL5 **v5.9.0**. No Python API change — the minor bump is the version
+policy (minor follows the MTL5 release built against), not new surface.
+
 ### Changed
+
+- **MTL5 and Universal are pinned to release tags, not `main`.** Both were
+  fetched from `main`, and FetchContent runs at `pip install` time — so every
+  wheel CI shipped, and every from-source install, was built against whatever
+  those branches happened to be at that moment. 5.7.0 through 5.7.2 are not
+  reproducible for that reason. They are now `mtl5 v5.9.0` and
+  `universal v4.7.9`, and bumping the MTL5 pin is what a minor release of this
+  package now means.
+
+  v5.9.0 is a floor rather than a preference: the bindings do not compile
+  against MTL5 v5.8.0. `mtl5_mixed_precision.cpp` calls the
+  `two_norm<Accumulator, Result>` / `frobenius_norm<Accumulator, Result>`
+  forms, and v5.8.0's signature is `template <typename Accumulator = void,
+  Vector V>` with no `Result` parameter; `mtl5_complex.cpp` calls the Hermitian
+  factorizations `cholesky_h_factor` / `cholesky_h_solve` / `ldlt_h_factor` /
+  `ldlt_h_solve` and `CHOLESKY_NOT_HERMITIAN`. Both arrived after v5.8.0, so
+  there is no v5.8.0-backed release of this binding surface.
 
 - **Release pipeline consolidated into one workflow.** `release.yml` plus a
   reusable `wheels.yml` were merged into a single `wheels.yml` with three
@@ -159,6 +181,7 @@ Two operations differ from NumPy on purpose: `dot` on complex is Hermitian
 (`numpy.vdot`, not `numpy.dot` — `dot_real` is the latter), and `.T` does not
 conjugate, `.H` does.
 
-[Unreleased]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.1...HEAD
+[Unreleased]: https://github.com/stillwater-sc/mtl5-python/compare/v5.9.0...HEAD
+[5.9.0]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.2...v5.9.0
 [5.7.1]: https://github.com/stillwater-sc/mtl5-python/compare/v5.7.0...v5.7.1
 [5.7.0]: https://github.com/stillwater-sc/mtl5-python/releases/tag/v5.7.0

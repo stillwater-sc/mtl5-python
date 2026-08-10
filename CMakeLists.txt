@@ -72,6 +72,19 @@ if(MTL5_NATIVE_FAST_GEMM AND NOT MTL5_WITH_HIGHWAY)
 endif()
 
 # --- MTL5 (header-only) ---
+#
+# Pinned to a release tag, not a branch. FetchContent runs at `pip install`
+# time, so a floating `main` would make every user's build -- and every wheel
+# CI ships -- a different library. The pin is what makes a released wheel
+# reproducible, and it is the thing to bump when tracking MTL5 upstream:
+# mtl5-python's minor version follows the MTL5 tag named here.
+#
+# v5.9.0 is a floor, not a preference. The bindings will NOT compile against
+# v5.8.0: mtl5_mixed_precision.cpp needs the two_norm<Accumulator, Result> /
+# frobenius_norm<Accumulator, Result> forms (v5.8.0 has no Result parameter),
+# and mtl5_complex.cpp needs the Hermitian factorizations cholesky_h_factor /
+# cholesky_h_solve / ldlt_h_factor / ldlt_h_solve and CHOLESKY_NOT_HERMITIAN.
+# Both landed after v5.8.0.
 find_package(MTL5 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
@@ -82,7 +95,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        main
+        GIT_TAG        v5.9.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
@@ -90,7 +103,9 @@ if(NOT MTL5_FOUND)
 endif()
 
 # --- Universal number library (header-only) ---
-# Provides cfloat<nbits,es>, posit<nbits,es>, and other custom number types
+# Provides cfloat<nbits,es>, posit<nbits,es>, and other custom number types.
+# Pinned for the same reason as MTL5 above: this is fetched at `pip install`
+# time, and the quire sizing it supplies backs the mixed-precision norms.
 find_package(universal QUIET)
 if(NOT universal_FOUND)
     include(FetchContent)
@@ -110,7 +125,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        main
+        GIT_TAG        v4.7.9
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
