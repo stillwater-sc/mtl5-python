@@ -13,6 +13,38 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The accumulator tests ranked accumulators against a float64 reference, so
+  they penalised the quire for being exact.** Tests only — no shipped code
+  changed, and the binding behaviour was always correct. The reference was
+  `np.dot`, which is itself a sequential float64 accumulation carrying its own
+  rounding error, so `test_wider_accumulator_is_monotonically_better` was
+  really measuring *agreement with float64*: the `f64` accumulator reproduced
+  the reference bit for bit and scored a perfect `0.0`, while the exact quire
+  differed from it by `1.14e-16` and therefore scored worse, failing the
+  `quire <= f64` assertion. Not a flake — it fails whenever the `f64`
+  accumulator matches numpy's summation order, which is the ordinary case; CI
+  stayed green only because FP contraction on those runners perturbed one of
+  the two.
+
+  The reference is now `math.fsum`, which is correctly rounded regardless of
+  summation order and which the quire reproduces exactly (verified bit-for-bit
+  for both `dot` and `two_norm`). That let the tests assert the real property
+  instead of a tolerance: `test_quire_is_exact_for_posit` now asserts exact
+  equality rather than `rel=1e-15` — the old tolerance was absorbing the same
+  discrepancy, so the headline "the quire is exact" claim was never actually
+  being tested — and the ordering test asserts `quire == 0.0`, which `quire <=
+  f64` follows from and which is not satisfied by a quire that merely ties.
+
+  The same defect in `test_a_wider_accumulator_is_strictly_better` is fixed
+  too. It referenced `np.longdouble`, which is 80-bit only on x86 Linux and
+  plain float64 on Windows and macOS/arm64 — so on two of the three CI
+  platforms its `err["quire"] == 0.0` assertion was already being made against
+  a float64 reference and passing on luck.
+  ([#62](https://github.com/stillwater-sc/mtl5-python/issues/62),
+  [#63](https://github.com/stillwater-sc/mtl5-python/pull/63))
+
 ## [5.9.0] - 2026-08-10
 
 Tracks MTL5 **v5.9.0**. No Python API change — the minor bump is the version
@@ -36,6 +68,19 @@ policy (minor follows the MTL5 release built against), not new surface.
   factorizations `cholesky_h_factor` / `cholesky_h_solve` / `ldlt_h_factor` /
   `ldlt_h_solve` and `CHOLESKY_NOT_HERMITIAN`. Both arrived after v5.8.0, so
   there is no v5.8.0-backed release of this binding surface.
+
+  The floor is enforced on **both** build paths. A bare `find_package(MTL5
+  QUIET)` accepts any system-installed MTL5 and skips the pinned fetch
+  entirely, so the pin governed only one of the two ways this package gets
+  built; a developer with 5.7.x installed would have built against it silently
+  and hit ~140 template errors inside `norms.hpp` rather than a version
+  message. Both lookups are now version-floored
+  (`find_package(MTL5 5.9.0 QUIET)`, `find_package(universal 4.7.9 QUIET)`).
+  Under `COMPATIBILITY SameMajorVersion` — which both projects generate — that
+  rejects an installed 5.7.0, accepts 5.9.0 and 5.10.0, and rejects 6.x, the
+  last being correct in its own right: an MTL5 major bump is the
+  manual-intervention case in the version policy, not something to absorb
+  silently. ([#61](https://github.com/stillwater-sc/mtl5-python/pull/61))
 
 - **Release pipeline consolidated into one workflow.** `release.yml` plus a
   reusable `wheels.yml` were merged into a single `wheels.yml` with three
