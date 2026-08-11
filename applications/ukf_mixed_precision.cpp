@@ -88,6 +88,7 @@
 #include <limits>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -375,6 +376,35 @@ double significand_bits_at_one() {
     }
 }
 
+/// Smallest and largest positive representable values.
+///
+/// Universal exposes these uniformly across its number systems through the
+/// shared SpecificValue encoding (number/shared/specific_value_encoding.hpp), so
+/// T(SpecificValue::minpos) and T(SpecificValue::maxpos) are the portable way to
+/// ask any of them for their dynamic range. That is what this uses.
+///
+/// Deliberately NOT numeric_limits<T>::min(): that is the smallest *normal*
+/// value, whereas minpos is the smallest positive *representable* one,
+/// subnormals included. For the cfloats the two differ by decades --
+/// cfloat<32,8> is 1.18e-38 normal against 1.40e-45 minpos, cfloat<16,5> is
+/// 6.10e-05 against 5.96e-08. The purpose of this column is to explain where a
+/// format runs out of room, so the smallest representable value is the honest
+/// one. Posits have no subnormals, so for them the two coincide -- which is why
+/// substituting numeric_limits here looks harmless until you reach a cfloat.
+///
+/// Native float and double have no SpecificValue constructor; denorm_min() is
+/// the same quantity for them.
+template <typename S>
+std::pair<double, double> dynamic_range() {
+    if constexpr (std::is_floating_point_v<S>) {
+        return {double(std::numeric_limits<S>::denorm_min()),
+                double(std::numeric_limits<S>::max())};
+    } else {
+        return {double(S(sw::universal::SpecificValue::minpos)),
+                double(S(sw::universal::SpecificValue::maxpos))};
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Driver.
 // ---------------------------------------------------------------------------
@@ -432,11 +462,10 @@ template <typename S>
 void run(const char* label, const std::vector<Row>& traj,
          const std::vector<std::vector<double>>& ref) {
     std::cout << "\n--- " << label << " ---\n";
+    const auto [lo, hi] = dynamic_range<S>();
     std::cout << "    significand at 1.0: " << std::fixed << std::setprecision(1)
-              << significand_bits_at_one<S>() << " bits    range ["
-              << std::scientific << std::setprecision(1)
-              << double(std::numeric_limits<S>::min()) << ", "
-              << double(std::numeric_limits<S>::max()) << "]\n";
+              << significand_bits_at_one<S>() << " bits    [minpos, maxpos] = ["
+              << std::scientific << std::setprecision(2) << lo << ", " << hi << "]\n";
 
     std::cout << "    step      cond(P) |";
     for (Method m : ALL_METHODS)
