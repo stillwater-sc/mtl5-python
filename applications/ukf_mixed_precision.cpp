@@ -38,16 +38,24 @@
 // dangerous case because nothing reports it.
 //
 // Note what does NOT work as a diagnostic: sigma points are placed as x +/-
-// gamma*S(:,c), so in exact arithmetic their weighted mean is x for ANY square
-// root S, correct or not. Comparing that mean against x measures the rounding of
-// the +/- additions and is blind to the quality of S. The asymmetry the issue
-// describes only becomes visible after the points pass through a nonlinearity.
+// gamma*S(:,c), so the weighted mean telescopes to (w0 + 2n*wi)*x = x for ANY
+// square root S, correct or not -- an algebraic identity, not a rounding
+// accident. Comparing that mean against x is therefore blind to the quality of
+// S. Measured directly: against a deliberately 10%-corrupted S, the raw mean
+// moves by exactly 0.000e+00. The asymmetry only becomes observable after the
+// points pass through a nonlinearity.
 //
 // So this propagates the sigma points through the actual bearing measurement
 // h(chi) = atan2(chi_y, chi_x) and takes the weighted mean of the transformed
-// points -- the unscented transform proper. A degraded S moves the points, the
-// nonlinearity turns that into a shifted mean, and the shift is the bias the
-// filter would silently accumulate.
+// points -- the unscented transform proper, which IS square-root dependent: the
+// same 10% corruption moves it by 6.7e-08 rad in exact arithmetic.
+//
+// What the bias column then reports is |z_mean in this format - z_mean of the
+// same method in float64|, so it is the precision-induced divergence of the
+// whole pipeline -- factorization, sigma-point placement and transform
+// together. It is not a measure of "distance from a correct square root"; that
+// is what the resid column is for. The two answer different questions and both
+// are printed.
 //
 // Each method is compared against ITSELF run in float64, not against a single
 // shared reference. LL^T and LDL^T produce genuinely different square roots even
@@ -126,9 +134,15 @@ constexpr double RANGE_GROWTH = 10.0;
 // alpha = 1 (so lambda = 0, w0 = 0, wi = 1/2n, gamma = sqrt(n)) rather than the
 // common alpha = 1e-3. With alpha = 1e-3 and n = 2, w0 is about -1e6 and wi
 // about 2.5e5, so the weighted mean is a cancellation of 1e6-sized terms down to
-// order 1. In float32 that cancellation alone produces a ~1e-2 bias no matter
-// which square root was used -- it swamps the signal this experiment exists to
-// measure. Benign weights leave the square root as the only variable.
+// order 1, and that cancellation amplifies every rounding error along with it.
+//
+// Measured, on one P with a square root corrupted by 10%: the signal to be
+// resolved -- how much the transform moves when the square root changes -- is
+// 6.7e-08 rad. The float32 noise floor is 3.1e-11 at alpha = 1 but 7.1e-08 at
+// alpha = 1e-3. So the conventional alpha puts the noise floor *at* the signal
+// (SNR ~ 0.9) while alpha = 1 leaves about three orders of headroom (SNR ~
+// 2000). The tuning parameter would otherwise decide the result of the
+// experiment, which is not a property you want in an instrument.
 constexpr double ALPHA  = 1.0;
 constexpr double KAPPA  = 0.0;
 constexpr double LAMBDA = ALPHA * ALPHA * (double(N) + KAPPA) - double(N);
