@@ -198,11 +198,24 @@ void propagate_and_update(double P[N][N]) {
 /// t/2 +/- sqrt((t/2)^2 - det), which is exact enough here and keeps the
 /// diagnostic free of any iterative-solver behaviour at the extreme conditioning
 /// this experiment deliberately produces.
+/// Written to survive its own subject matter. The obvious form,
+/// l2 = t/2 - sqrt((t/2)^2 - det), subtracts two nearly equal quantities exactly
+/// when the eigenvalues are far apart -- which is the entire regime this
+/// experiment operates in -- and rounds l2 to zero while P is still comfortably
+/// SPD. The sweep would then truncate on a cancellation artifact rather than on
+/// the reference actually degrading. So: scale out the magnitude, take the large
+/// eigenvalue through hypot (no cancellation, since both terms are added), and
+/// recover the small one as det/l1 rather than by subtraction.
 double cond2x2(const double P[N][N]) {
-    const double t    = P[0][0] + P[1][1];
-    const double det  = P[0][0] * P[1][1] - P[0][1] * P[1][0];
-    const double disc = std::sqrt(std::max(0.0, (t * 0.5) * (t * 0.5) - det));
-    const double l1 = t * 0.5 + disc, l2 = t * 0.5 - disc;
+    const double scale = std::fmax(std::abs(P[0][0]),
+                                   std::fmax(std::abs(P[0][1]), std::abs(P[1][1])));
+    if (scale == 0.0) return std::numeric_limits<double>::infinity();
+
+    const double a = P[0][0] / scale, b = P[0][1] / scale, d = P[1][1] / scale;
+    const double l1  = 0.5 * (a + d + std::hypot(a - d, 2.0 * b));
+    const double det = a * d - b * b;
+    if (l1 <= 0.0) return std::numeric_limits<double>::infinity();
+    const double l2 = det / l1;
     if (l2 <= 0.0) return std::numeric_limits<double>::infinity();
     return l1 / l2;
 }
@@ -312,9 +325,31 @@ Outcome evaluate(const double Pd[N][N], Method method) {
             out.status = "bk@" + std::to_string(rc - 1);
             return out;
         }
+        // The pivots are not decoration -- they change what the stored factor
+        // MEANS, and ignoring them is a silent-wrong-answer bug.
+        //
+        // assemble_sqrt_from_ldlt reads A as a plain L*diag(D) in the original
+        // row order. Bunch-Kaufman only leaves it in that form when every pivot
+        // is 1x1 and no interchange happened. In LAPACK's ipiv convention (which
+        // MTL5 follows): ipiv[k] > 0 is a 1x1 pivot that swapped row k with
+        // ipiv[k]-1, so ipiv[k] == k+1 means "no swap"; a negative pair marks a
+        // 2x2 block, whose off-diagonal D cannot be written as L*sqrt(D) at all.
+        //
+        // Anything else and the assembled S is a square root of a permuted or
+        // block-diagonal matrix, not of P -- and it would have been reported as
+        // "ok" with a plausible-looking residual and bias. Refuse instead.
+        bool plain = true;
+        for (std::size_t k = 0; k < piv.ipiv.size(); ++k) {
+            if (piv.ipiv[k] != static_cast<int>(k) + 1) {
+                plain = false;
+                break;
+            }
+        }
+        if (!plain) {
+            out.status = "pivoted";
+            return out;
+        }
         std::string why;
-        // A 2x2 pivot block puts an off-diagonal term in D, which L*sqrt(D)
-        // cannot express. Report that rather than emit a wrong square root.
         if (!assemble_sqrt_from_ldlt(A, why)) {
             out.status = why;
             return out;
@@ -463,18 +498,35 @@ std::vector<Row> reference_trajectory(int& stopped_at) {
     return rows;
 }
 
+/// A float64 reference mean, or the fact that there isn't one.
+///
+/// The `ok` flag is the point. Storing a bare double would mean a float64 method
+/// that failed silently contributes its default 0.0, and every format's bias at
+/// that step would then be measured against a fabricated reference -- producing
+/// a confident-looking ~0.46 rad that means nothing. The trajectory truncation
+/// only guarantees float64 *Cholesky* succeeds, so LDL^T or BK failing here is
+/// not hypothetical enough to leave unguarded.
+struct Reference {
+    bool   ok    = false;
+    double zmean = 0.0;
+};
+
 /// float64 reference means, one per (step, method), for the bias comparison.
-std::vector<std::vector<double>> reference_means(const std::vector<Row>& traj) {
-    std::vector<std::vector<double>> ref(traj.size(), std::vector<double>(3, 0.0));
-    for (std::size_t s = 0; s < traj.size(); ++s)
-        for (int m = 0; m < 3; ++m)
-            ref[s][m] = evaluate<double>(traj[s].Pd, ALL_METHODS[m]).zmean;
+std::vector<std::vector<Reference>> reference_means(const std::vector<Row>& traj) {
+    std::vector<std::vector<Reference>> ref(traj.size(), std::vector<Reference>(3));
+    for (std::size_t s = 0; s < traj.size(); ++s) {
+        for (int m = 0; m < 3; ++m) {
+            const Outcome o = evaluate<double>(traj[s].Pd, ALL_METHODS[m]);
+            ref[s][m].ok    = o.ok;
+            ref[s][m].zmean = o.zmean;
+        }
+    }
     return ref;
 }
 
 template <typename S>
 void run(const char* label, const std::vector<Row>& traj,
-         const std::vector<std::vector<double>>& ref) {
+         const std::vector<std::vector<Reference>>& ref) {
     std::cout << "\n--- " << label << " ---\n";
     const auto [lo, hi] = dynamic_range<S>();
     std::cout << "    significand at 1.0: " << std::fixed << std::setprecision(1)
@@ -498,9 +550,14 @@ void run(const char* label, const std::vector<Row>& traj,
             const Outcome o = evaluate<S>(r.Pd, ALL_METHODS[m]);
             if (o.ok) {
                 std::cout << std::setw(9) << "ok" << std::setw(10)
-                          << std::setprecision(2) << std::scientific
-                          << std::abs(o.zmean - ref[s][m]) << std::setw(10)
-                          << o.residual << " |";
+                          << std::setprecision(2) << std::scientific;
+                // No float64 reference for this (step, method) means there is no
+                // bias to report. Printing a number here would be inventing one.
+                if (ref[s][m].ok)
+                    std::cout << std::abs(o.zmean - ref[s][m].zmean);
+                else
+                    std::cout << "noref";
+                std::cout << std::setw(10) << o.residual << " |";
             } else {
                 if (o.status == "range") {
                     if (first_range == 0) first_range = r.step;

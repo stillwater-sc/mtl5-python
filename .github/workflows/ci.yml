@@ -155,6 +155,9 @@ jobs:
         run: cmake --build build_apps --target ukf_mixed_precision -j4
       - name: Run it, and fail on nan
         run: |
+          # pipefail, or the pipeline reports tee's status and a crash or a
+          # nonzero exit that happens not to print "nan" passes the lane.
+          set -o pipefail
           ./build_apps/applications/ukf_mixed_precision | tee ukf.out
           if grep -qi "nan" ukf.out; then
             echo "::error::ukf_mixed_precision produced nan"

@@ -15,11 +15,10 @@
 function(mtl5_add_application name)
     add_executable(${name} ${name}.cpp)
     target_link_libraries(${name} PRIVATE MTL5::mtl5 universal)
-    # Not part of `all`: MTL5_BUILD_APPLICATIONS=ON should make these buildable,
-    # and CI builds them explicitly by target, but a developer who flips the
-    # option on while iterating on the bindings should not pay for them on every
-    # incremental build.
-    set_target_properties(${name} PROPERTIES EXCLUDE_FROM_ALL FALSE)
+    # Part of `all`, which is the default for add_executable and is what we
+    # want: MTL5_BUILD_APPLICATIONS is itself the opt-in, so a developer who
+    # turned it ON should get these from a plain `cmake --build`. Requiring both
+    # the option AND an explicit --target would be a redundant second opt-in.
 endfunction()
 
 # Mixed-precision UKF stability comparison: Cholesky vs LDL^T vs Bunch-Kaufman
