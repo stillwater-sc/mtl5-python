@@ -103,6 +103,41 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.1 (2026-08-11)
+
+### Continuous Integration
+
+- Move actions off the deprecated Node 20 runtime
+  ([#65](https://github.com/stillwater-sc/mtl5-python/pull/65),
+  [`bf8d198`](https://github.com/stillwater-sc/mtl5-python/commit/bf8d198658f6b28c90e0e0efd188e5125c7b10a7))
+
+### Documentation
+
+- Qualify the FP and reproducibility claims in the release records
+  ([#64](https://github.com/stillwater-sc/mtl5-python/pull/64),
+  [`27161c2`](https://github.com/stillwater-sc/mtl5-python/commit/27161c2dd26d16ddebc2f3e3cd81c2aade0fb686))
+
+- Scope the reproducibility claim to the fetched path
+  ([#64](https://github.com/stillwater-sc/mtl5-python/pull/64),
+  [`27161c2`](https://github.com/stillwater-sc/mtl5-python/commit/27161c2dd26d16ddebc2f3e3cd81c2aade0fb686))
+
+- Session log for the v5.9.0 release arc + changelog entries
+  ([#64](https://github.com/stillwater-sc/mtl5-python/pull/64),
+  [`27161c2`](https://github.com/stillwater-sc/mtl5-python/commit/27161c2dd26d16ddebc2f3e3cd81c2aade0fb686))
+
+### Features
+
+- **applications**: Mixed-precision UKF stability comparison across number systems
+  ([#66](https://github.com/stillwater-sc/mtl5-python/pull/66),
+  [`de52854`](https://github.com/stillwater-sc/mtl5-python/commit/de52854a2ea3b872bdb493dfc4828308a8530d14))
+
+### Testing
+
+- **mixed-precision**: Rank accumulators against an exact reference, not float64
+  ([#63](https://github.com/stillwater-sc/mtl5-python/pull/63),
+  [`77b5e1a`](https://github.com/stillwater-sc/mtl5-python/commit/77b5e1a267d72f798d3780a06ea0092e5e5f97c0))
+
+
 ## v5.7.2 (2026-08-07)
 
 ### Bug Fixes
