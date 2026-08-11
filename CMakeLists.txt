@@ -12,6 +12,12 @@ endif()
 
 option(MTL5_ENABLE_PYTHON "Build Python bindings" ON)
 
+# C++ numerical experiments under applications/. Deliberately OFF by default:
+# scikit-build-core drives this file on every `pip install`, so an ON default
+# would compile a demo binary into every user's install for no benefit to them.
+# Turn it on explicitly:  cmake -DMTL5_BUILD_APPLICATIONS=ON
+option(MTL5_BUILD_APPLICATIONS "Build the C++ applications under applications/" OFF)
+
 # ---------------------------------------------------------------------------
 # MTL5 acceleration options
 #
@@ -145,4 +151,8 @@ endif()
 
 if(MTL5_ENABLE_PYTHON)
     add_subdirectory(python)
+endif()
+
+if(MTL5_BUILD_APPLICATIONS)
+    add_subdirectory(applications)
 endif()
