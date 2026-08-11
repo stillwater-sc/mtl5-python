@@ -118,3 +118,45 @@ jobs:
           python -c "import mtl5, sys; ok = mtl5.build_info()['zlib']; print('zlib:', ok); sys.exit(0 if ok else 1)"
       - name: Run the I/O tests
         run: pytest tests/test_io.py -v
+
+  # The C++ applications under applications/ are gated behind
+  # MTL5_BUILD_APPLICATIONS (OFF by default, so `pip install` never pays for
+  # them). Without this lane they would have no coverage at all and would rot
+  # silently the next time the MTL5 or Universal pin moves — they are compiled
+  # against those headers directly, not through the Python extension.
+  #
+  # Both compilers, because that is what issue #18 asks for and because clang
+  # and gcc disagree about things this code depends on (clang does not zero
+  # stack, so an uninitialized blockbinary temporary shows up there first).
+  # Built and *run*: a numerical experiment that compiles but produces nan is
+  # not passing.
+  applications:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: g++
+            name: gcc
+          - compiler: clang++
+            name: clang
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Configure (${{ matrix.name }})
+        run: >
+          cmake -S . -B build_apps
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DMTL5_ENABLE_PYTHON=OFF
+          -DMTL5_BUILD_APPLICATIONS=ON
+      - name: Build ukf_mixed_precision (${{ matrix.name }})
+        run: cmake --build build_apps --target ukf_mixed_precision -j4
+      - name: Run it, and fail on nan
+        run: |
+          ./build_apps/applications/ukf_mixed_precision | tee ukf.out
+          if grep -qi "nan" ukf.out; then
+            echo "::error::ukf_mixed_precision produced nan"
+            exit 1
+          fi
