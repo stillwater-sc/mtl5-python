@@ -496,10 +496,10 @@ double significand_bits_at_one() {
 template <typename S>
 struct Pivots {
     bool   in_range = true;  // false once P no longer fits the format
-    double exact;            // computed in float64
-    double cholesky;         // as the LL^T recurrence forms it, in S
-    double ldlt;             // as the LDL^T recurrence forms it, in S
-    double bk;               // as the Bunch-Kaufman 1x1 path forms it, in S
+    double exact    = 0.0;   // computed in float64
+    double cholesky = 0.0;   // as the LL^T recurrence forms it, in S
+    double ldlt     = 0.0;   // as the LDL^T recurrence forms it, in S
+    double bk       = 0.0;   // as the Bunch-Kaufman 1x1 path forms it, in S
 };
 
 template <typename S>
@@ -516,7 +516,16 @@ Pivots<S> trailing_pivots(const double Pd[N][N]) {
     }
 
     const S a(ad), b(bd), c(cd);
-    const S l_chol = b / S(std::sqrt(double(a)));
+
+    // ADL, not std::sqrt(double(a)). cholesky.hpp pulls `using std::sqrt` into
+    // scope and calls sqrt(diag) on the element type, so taking the root in
+    // double and rounding afterwards is a different computation -- and not
+    // always an equivalent one. On this matrix posit<16,1>'s own sqrt returns
+    // 1144 where sqrt-in-double-then-convert returns 1136. Since the whole point
+    // of this table is to replicate what each recurrence actually does, it has
+    // to take the root the same way MTL5 does.
+    using std::sqrt;
+    const S l_chol = b / sqrt(a);
     p.cholesky = double(S(c - l_chol * l_chol));
     const S l_ldlt = b / a;
     p.ldlt = double(S(c - l_ldlt * l_ldlt * a));
@@ -709,6 +718,8 @@ void run(const char* label, const std::vector<Row>& traj,
         if (p.exact != 0.0)
             std::cout << std::setw(9) << std::setprecision(1)
                       << (worst / std::abs(p.exact)) << "x off";
+        else
+            std::cout << std::setw(9) << "n/a";  // no ratio against a zero exact pivot
         std::cout << "\n";
     }
 }
