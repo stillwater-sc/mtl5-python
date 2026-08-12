@@ -6,10 +6,21 @@
 #   - typing_extensions on Python < 3.11: nanobind's stubgen.py imports it there
 #     (src/stubgen.py) and nanobind does not declare it as a dependency, so we
 #     require it explicitly rather than relying on it arriving transitively.
+#   - packaging: scikit-build-core's vendored pyproject_metadata calls
+#     canonicalize_name(..., validate=True) and catches packaging.utils.
+#     InvalidName, both of which landed in packaging 22.0. Debian/Ubuntu's
+#     patched site.py keeps /usr/lib/python3/dist-packages on sys.path INSIDE
+#     pip's isolated build env, so a system python3-packaging (21.3 on Ubuntu
+#     22.04) shadows whatever the overlay resolved and metadata generation dies
+#     with "canonicalize_name() got an unexpected keyword argument 'validate'"
+#     before CMake ever runs. Naming it here forces a modern packaging into the
+#     overlay, which precedes dist-packages on sys.path and wins. Observed on a
+#     Jetson (Ubuntu 22.04, system pip 22.0.2) installing the sdist.
 requires = [
     "scikit-build-core>=0.10",
     "nanobind>=2.0",
     "numpy>=1.24",
+    "packaging>=22",
     "typing_extensions>=4.0; python_version < '3.11'",
 ]
 build-backend = "scikit_build_core.build"
