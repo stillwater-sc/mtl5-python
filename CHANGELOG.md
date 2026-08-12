@@ -103,6 +103,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.2 (2026-08-12)
+
+### Bug Fixes
+
+- **build**: Unblock source installs on Debian/Ubuntu and ship aarch64 wheels
+  ([#68](https://github.com/stillwater-sc/mtl5-python/pull/68),
+  [`38de3ac`](https://github.com/stillwater-sc/mtl5-python/commit/38de3accfa40716fd243aa1504fa5f902a0660dc))
+
+### Chores
+
+- **applications**: Print the trailing pivot and stop implying the failure step ranks the methods
+  ([#67](https://github.com/stillwater-sc/mtl5-python/pull/67),
+  [`6374c43`](https://github.com/stillwater-sc/mtl5-python/commit/6374c4357e168493558921a08f1a18816afae371))
+
+
 ## v5.9.1 (2026-08-11)
 
 ### Continuous Integration
