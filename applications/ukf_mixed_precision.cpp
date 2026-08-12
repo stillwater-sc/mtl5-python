@@ -32,6 +32,40 @@
 // separate geometrically -- exactly the regime where the choice of square root
 // stops being cosmetic.
 //
+// WHAT THE FAILURE STEP DOES *NOT* TELL YOU
+//
+// Read the trailing-pivot table before drawing any conclusion from which method
+// failed first. All three compute the same Schur complement c - b^2/a, differing
+// only in how they associate it, and past the first few steps that quantity
+// falls below the working format's ability to represent it at all. At step 4 in
+// float32 the true value is 0.0283 while one ulp of the operands is 0.0156 --
+// the answer is under two ulps, so whether a method reports success is decided
+// by which side of zero its rounding lands on, not by any stability property:
+//
+//     step   exact      LL^T        LDL^T       LDL^T-BK
+//        4   2.83e-02   3.13e-02    0.00e+00    1.56e-02     <- "LDL^T fails first"
+//        5   2.27e-02   1.25e-01    2.50e-01    1.25e-01
+//        7   1.62e-02   3.20e+01    3.20e+01    1.60e+01
+//       12   1.56e-02   4.19e+06    0.00e+00    0.00e+00
+//
+// By step 5 every method is wrong by one to eight orders of magnitude with an
+// essentially arbitrary sign. So the "first precision failure" line below is
+// informative only for the first few steps; past that it reports a coin toss and
+// must not be read as ranking the methods against each other.
+//
+// Step 4 is the exception, and it is not luck: LDL^T reaching exactly 0 there
+// while BK reaches 0.015625 is a reproducible consequence of the two routines
+// associating the same update differently -- see the trailing_pivots comment.
+// That one row is the only place in this table where the difference between
+// methods is a property of the arithmetic rather than of where the noise fell.
+//
+// The signal that survives is the bias column, and the table above is also the
+// sharpest statement of it: at step 12 Cholesky computes 4.19e+06 for a true
+// pivot of 0.0156 -- wrong by a factor of 2.7e8 -- and reports "ok", because
+// garbage that happens to be positive passes a positivity test. That is the
+// silent success this experiment exists to expose, visible here at the level of
+// the arithmetic rather than inferred from downstream error.
+//
 // THE PRIMARY DIAGNOSTIC: UNSCENTED-TRANSFORM MEAN BIAS
 //
 // A factorization that *returns success* can still be broken, and that is the
@@ -224,6 +258,30 @@ double cond2x2(const double P[N][N]) {
 // Factorization paths.
 // ---------------------------------------------------------------------------
 
+/// Is P representable in S at all?
+///
+/// A genuinely different failure from running out of precision, and it has to be
+/// checked before any arithmetic: cfloat<16,5> tops out at 1.3e5 and
+/// posit<16,1> at 2.7e8, while this trajectory drives covariance entries to
+/// 1e16. For the small formats the matrix stops being representable long before
+/// a factorization could lose definiteness -- and an unrepresentable entry
+/// becomes inf, after which c - b*b/a is inf - inf = nan. Reporting that as
+/// "not SPD" would blame the algorithm for the format's range; printing the nan
+/// would be worse still.
+template <typename S>
+bool representable(const double Pd[N][N]) {
+    for (std::size_t i = 0; i < N; ++i) {
+        for (std::size_t j = 0; j < N; ++j) {
+            const double back = double(S(Pd[i][j]));
+            if (!std::isfinite(back)) return false;
+            if (Pd[i][j] != 0.0
+                && std::abs(back - Pd[i][j]) / std::abs(Pd[i][j]) > 0.5)
+                return false;
+        }
+    }
+    return true;
+}
+
 enum class Method { Cholesky, LDLT, BunchKaufman };
 constexpr Method ALL_METHODS[] = {Method::Cholesky, Method::LDLT, Method::BunchKaufman};
 
@@ -276,24 +334,9 @@ template <typename S>
 Outcome evaluate(const double Pd[N][N], Method method) {
     Outcome out;
 
-    // Dynamic range comes first, and it is a genuinely different failure from
-    // running out of precision. cfloat<16,5> tops out at 1.3e5 and posit<16,1>
-    // at 2.7e8, while this trajectory drives covariance entries to 1e15 -- so
-    // for the small formats the matrix stops being *representable* long before
-    // any factorization gets a chance to lose positive-definiteness. Reporting
-    // that as "not SPD" would blame the algorithm for the format's range, so it
-    // is detected here and labelled separately.
-    for (std::size_t i = 0; i < N; ++i) {
-        for (std::size_t j = 0; j < N; ++j) {
-            const double back = double(S(Pd[i][j]));
-            const bool   lost = !std::isfinite(back)
-                             || (Pd[i][j] != 0.0
-                                 && std::abs(back - Pd[i][j]) / std::abs(Pd[i][j]) > 0.5);
-            if (lost) {
-                out.status = "range";
-                return out;
-            }
-        }
+    if (!representable<S>(Pd)) {
+        out.status = "range";
+        return out;
     }
 
     mtl::mat::dense2D<S> A(N, N);
@@ -423,6 +466,71 @@ double significand_bits_at_one() {
         const double u = double(sw::universal::ulp(one));
         return (u > 0.0) ? -std::log2(u) : 0.0;
     }
+}
+
+/// The trailing pivot -- the Schur complement c - b^2/a -- as each method's
+/// recurrence actually computes it, in the working precision.
+///
+/// This replicates the recurrences rather than reading the value back out of
+/// MTL5, because the library reports only a status when a factorization fails,
+/// and the failing values are exactly the ones worth seeing. For the 2x2 system
+/// this experiment uses, the reproduction is exact:
+///
+///   Cholesky   L(0,0) = sqrt(a), L(1,0) = b/L(0,0), pivot = c - L(1,0)^2
+///              forms b^2/a as (b/sqrt(a))^2                  [cholesky.hpp]
+///   LDL^T      D(0) = a, L(1,0) = b/a, pivot = c - L(1,0)^2 * D(0)
+///              forms b^2/a as (b/a)^2 * a                    [ldlt.hpp]
+///   BK         pivot = c - b * (b/a), using the ORIGINAL off-diagonal, which
+///              it updates before overwriting column k        [ldlt_bk.hpp]
+///
+/// All three are the same quantity and they are listed separately because they
+/// do NOT agree. In particular Bunch-Kaufman does not share plain LDL^T's form
+/// even when it takes a 1x1 pivot with no interchange: ldlt_bk.hpp computes
+/// `A(i,j) -= A(i,k) * (A(j,k)/dkk)` off the original entries, where ldlt.hpp
+/// reconstructs the same product from the already-divided multiplier as
+/// `ljk * ljk * D(k)`. The extra rounding on that path is visible in the table:
+/// on the step-4 float32 matrix BK yields 0.015625 and proceeds while plain
+/// LDL^T yields exactly 0 and reports a zero pivot -- same library, same input,
+/// no pivoting involved. (An earlier revision of this comment asserted they
+/// shared a form. They do not; the numbers below are what caught it.)
+template <typename S>
+struct Pivots {
+    bool   in_range = true;  // false once P no longer fits the format
+    double exact    = 0.0;   // computed in float64
+    double cholesky = 0.0;   // as the LL^T recurrence forms it, in S
+    double ldlt     = 0.0;   // as the LDL^T recurrence forms it, in S
+    double bk       = 0.0;   // as the Bunch-Kaufman 1x1 path forms it, in S
+};
+
+template <typename S>
+Pivots<S> trailing_pivots(const double Pd[N][N]) {
+    const double ad = Pd[0][0], bd = Pd[0][1], cd = Pd[1][1];
+    Pivots<S> p;
+    p.exact = cd - bd * bd / ad;
+
+    // Same gate the main table uses. Without it an out-of-range entry becomes
+    // inf and every column below prints inf - inf = nan.
+    if (!representable<S>(Pd)) {
+        p.in_range = false;
+        return p;
+    }
+
+    const S a(ad), b(bd), c(cd);
+
+    // ADL, not std::sqrt(double(a)). cholesky.hpp pulls `using std::sqrt` into
+    // scope and calls sqrt(diag) on the element type, so taking the root in
+    // double and rounding afterwards is a different computation -- and not
+    // always an equivalent one. On this matrix posit<16,1>'s own sqrt returns
+    // 1144 where sqrt-in-double-then-convert returns 1136. Since the whole point
+    // of this table is to replicate what each recurrence actually does, it has
+    // to take the root the same way MTL5 does.
+    using std::sqrt;
+    const S l_chol = b / sqrt(a);
+    p.cholesky = double(S(c - l_chol * l_chol));
+    const S l_ldlt = b / a;
+    p.ldlt = double(S(c - l_ldlt * l_ldlt * a));
+    p.bk = double(S(c - b * (b / a)));
+    return p;
 }
 
 /// Smallest and largest positive representable values.
@@ -584,6 +692,36 @@ void run(const char* label, const std::vector<Row>& traj,
         std::cout << "   [P exceeds the format's range from step " << first_range
                   << " on -- a range limit, not a precision one]";
     std::cout << "\n";
+
+    // The quantity whose sign decided every status above. Printed so a reader
+    // can see *why* a success is meaningless rather than having to reconstruct
+    // the recurrence to find out -- and so the "first failure" line above is not
+    // mistaken for a ranking once these values go to noise.
+    std::cout << "    trailing pivot (c - b^2/a; its SIGN is what each status"
+                 " above turned on):\n";
+    std::cout << "    step        exact |         LL^T |        LDL^T |"
+                 "     LDL^T-BK | worst\n";
+    for (const Row& r : traj) {
+        const Pivots<S> p = trailing_pivots<S>(r.Pd);
+        std::cout << "  " << std::setw(6) << r.step << " " << std::setw(12)
+                  << std::scientific << std::setprecision(2) << p.exact << " |";
+        if (!p.in_range) {
+            std::cout << std::setw(13) << "range" << " |" << std::setw(13) << "range"
+                      << " |" << std::setw(13) << "range" << " |\n";
+            continue;
+        }
+        std::cout << std::setw(13) << p.cholesky << " |" << std::setw(13) << p.ldlt
+                  << " |" << std::setw(13) << p.bk << " |";
+        const double worst = std::max(std::abs(p.bk - p.exact),
+                                      std::max(std::abs(p.cholesky - p.exact),
+                                               std::abs(p.ldlt - p.exact)));
+        if (p.exact != 0.0)
+            std::cout << std::setw(9) << std::setprecision(1)
+                      << (worst / std::abs(p.exact)) << "x off";
+        else
+            std::cout << std::setw(9) << "n/a";  // no ratio against a zero exact pivot
+        std::cout << "\n";
+    }
 }
 
 }  // namespace
