@@ -15,6 +15,40 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **`lu()` and `qr()` for every Universal number system.** Both were
+  float32/float64 only, which was the last prerequisite in
+  [#69](https://github.com/stillwater-sc/mtl5-python/issues/69) — the
+  number-system benchmark could report `dot`/`gemv`/`gemm` for the emulated
+  formats but had a hole where the two factorizations should be. Householder QR
+  and partial-pivoting LU need only `sqrt` and the arithmetic operators, so all
+  fifteen bound types compile; no upstream change was needed.
+
+  LU is exposed as a reusable factorization object, not just through the
+  existing `solve()`, which threw the factorization away on every call. Factor
+  once at O(n³), solve many right-hand sides at O(n²) — and it is what the
+  benchmark can now time without conflating the factorization with the
+  triangular solves.
+
+  Unlike `gemv`/`gemm`, these two run the **same** kernel for native and
+  emulated types, so their ratios are a like-for-like comparison rather than one
+  that partly measures the vectoriser. On one recorded run (x86_64, single
+  thread), QR at n=64 cost `takum32` ~169x double, `cfloat32` ~272x,
+  `dd_cascade` ~348x, `lns32` ~930x and `posit32` ~1905x.
+
+  **Two formats fail silently and that is worth knowing before trusting a
+  number.** For `fp8` and `fixpnt8`, every Householder reflector rounds to zero
+  (measured: `sum|tau| == 0` exactly), so `.Q` is returned as the exact identity
+  and `.R` as the upper triangle of A. The factorization then scores a perfect
+  `||QᵀQ − I|| == 0` while reconstructing A to only ~14%. It looks flawless and
+  is meaningless. It does not raise, because a genuinely upper-triangular input
+  has zero reflectors too and that case is correct. `posit8` is unusable by a
+  different route — its reflectors do not vanish, it is simply inaccurate
+  (residual 0.47, orthogonality 1.3). All three are registered anyway: comparing
+  number systems is the point, and a format failing is a result.
+  `tests/test_universal_factorizations.py` pins where each tier stops.
+
+  `lq` remains float32/float64 only and is unchanged.
+
 - **Five number types — `cfloat32`, `takum32`, `dd_cascade`, `td_cascade`,
   `qd_cascade` — across `convert()`, the containers, and the mixed-precision
   `dot`/`gemv`/`gemm`.** All five already existed in Universal v4.7.9, the

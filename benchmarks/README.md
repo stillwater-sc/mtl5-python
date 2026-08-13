@@ -30,9 +30,18 @@ every emulated-type gap is the vectoriser rather than the number system. Use
 emulation layer, so `posit32 / cfloat32` isolates format-specific cost from
 generic emulation cost.
 
-**`lu` and `qr` are float32/float64 only.** Every emulated type reports
-`not instantiated`. That is a binding gap (see issue #69), not a slow result —
-do not read it as "too slow to measure".
+**`lu` and `qr` now cover every swept type.** They were float32/float64 only
+until #69; a `not instantiated` row would mean a genuine binding gap rather
+than a slow result, but none of the nine formats has one today. Unlike
+gemv/gemm, these two run the same kernel for native and emulated types, so
+their ratios are a like-for-like comparison.
+
+**A timing from a narrow format is not automatically a result.** `fp8` and
+`fixpnt8` QR degenerate — every Householder reflector rounds to zero, so Q is
+returned as the exact identity and the factorization is meaningless while
+timing perfectly normally. The harness measures throughput and cannot see this.
+`tests/test_universal_factorizations.py` records where each format stops being
+usable.
 
 **Slow cases are skipped, not silently truncated.** A case whose single call
 exceeds `--max-op-seconds` (default 2s) is reported as `too slow` and the sweep
