@@ -384,10 +384,12 @@ def qr(A):
     Above 16 bits the Universal types factorize usefully. Below that, read the
     result before trusting it: for `fp8` and `fixpnt8` every Householder
     reflector rounds to zero, so `.Q` comes back as the exact identity and `.R`
-    as the upper triangle of A — a factorization that scores a perfect
-    orthogonality check while reconstructing A to only ~16%. It does not raise,
-    because a genuinely upper-triangular input has zero reflectors too and that
-    case is correct.
+    as the upper triangle of A. Such a factorization scores a perfect
+    orthogonality check while reconstructing nothing but `triu(A)` — its error
+    is exactly the weight of A's discarded subdiagonal, so how bad it looks
+    depends on the input rather than on the format. It does not raise, because
+    a genuinely upper-triangular input has zero reflectors too and that case is
+    correct.
     """
     return _factor("qr", "QRFactor", A)
 

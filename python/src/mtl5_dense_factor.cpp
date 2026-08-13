@@ -467,9 +467,11 @@ void register_dense_factorizations(nb::module_& m) {
     // fixpnt8 every Householder reflector rounds to zero (measured: sum|tau|
     // == 0 exactly), so qr_extract_Q returns the exact identity and R is just
     // the upper triangle of A. The factorization then reports a perfect
-    // ||Q^T Q - I|| == 0 while ||QR-A||/||A|| is ~0.16. It looks flawless and
+    // ||Q^T Q - I|| == 0 while its product is only triu(A) — the residual is
+    // therefore the weight of the discarded subdiagonal, a property of the
+    // input rather than a fixed figure for the format. It looks flawless and
     // is meaningless. posit8 does not degenerate but is not usable either
-    // (residual 1.2, orthogonality 3.7). Covered in
+    // (on the 8x8 fixture: residual 0.47, orthogonality 1.3). Covered in
     // tests/test_universal_factorizations.py so the behaviour is pinned rather
     // than rediscovered.
     for_each_universal<QRRegistrar>(m);

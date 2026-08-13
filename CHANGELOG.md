@@ -39,8 +39,10 @@ against, and semantic-release manages only the **patch** component.
   number.** For `fp8` and `fixpnt8`, every Householder reflector rounds to zero
   (measured: `sum|tau| == 0` exactly), so `.Q` is returned as the exact identity
   and `.R` as the upper triangle of A. The factorization then scores a perfect
-  `||QᵀQ − I|| == 0` while reconstructing A to only ~14%. It looks flawless and
-  is meaningless. It does not raise, because a genuinely upper-triangular input
+  `||QᵀQ − I|| == 0` while its product reconstructs only `triu(A)` — the
+  residual is exactly the weight of the discarded subdiagonal, so it is a
+  property of the input, not a fixed figure for the format (9% to 45% across
+  the matrices tried). It looks flawless and is meaningless. It does not raise, because a genuinely upper-triangular input
   has zero reflectors too and that case is correct. `posit8` is unusable by a
   different route — its reflectors do not vanish, it is simply inaccurate
   (residual 0.47, orthogonality 1.3). All three are registered anyway: comparing

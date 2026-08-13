@@ -16,8 +16,11 @@ Three tiers, measured on an 8x8 in-range matrix (see TIERS below):
 The silent failure is the reason this file exists. For fp8 and fixpnt8 every
 Householder reflector rounds to zero, so Q is returned as the exact identity
 and R as the upper triangle of A. The orthogonality check then reads a perfect
-0.0 while the factorization reconstructs A to only ~14%. Anyone benchmarking
-number systems will meet this, and it looks like a pass.
+0.0 while the product reconstructs only triu(A) — an error equal to the weight
+of the discarded subdiagonal, which is a property of the input rather than a
+fixed figure for the format (9% to 45% across the matrices tried, and the
+tests below assert only that it is large). Anyone benchmarking number systems
+will meet this, and it looks like a pass.
 """
 
 import numpy as np
