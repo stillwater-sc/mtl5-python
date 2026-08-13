@@ -149,6 +149,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.3 (2026-08-13)
+
+### Features
+
+- **types**: Bind cfloat32/takum32/dd,td,qd_cascade and add a BLAS benchmark harness
+  ([#70](https://github.com/stillwater-sc/mtl5-python/pull/70),
+  [`b2df7d4`](https://github.com/stillwater-sc/mtl5-python/commit/b2df7d409914d877dac957a8d9ef5fef66907d98))
+
+
 ## v5.9.2 (2026-08-12)
 
 ### Bug Fixes
