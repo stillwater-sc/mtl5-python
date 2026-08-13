@@ -16,17 +16,25 @@ Usage
 
 Reading the results
 -------------------
-Two asymmetries are structural, not measurement noise, and both are reported
-rather than hidden:
+One asymmetry is structural, not measurement noise, and is reported rather
+than hidden: `f32`/`f64` gemv/gemm go through MTL5's blocked,
+Highway-vectorised kernels, while the emulated types go through the generic
+ones. The ratio therefore measures what a researcher actually pays, which is
+the right question — but it is not a like-for-like kernel comparison, and a
+chunk of the gap is the vectoriser, not the number system. `lu` and `qr` have
+no such split: every type runs the same kernel.
 
-1. `f32`/`f64` gemv/gemm go through MTL5's blocked, Highway-vectorised kernels;
-   the emulated types go through the generic ones. The ratio therefore measures
-   what a researcher actually pays, which is the right question — but it is not
-   a like-for-like kernel comparison, and a chunk of the gap is the vectoriser,
-   not the number system.
+An `unavailable` row means the kernel is not instantiated for that dtype. Since
+#69 that no longer happens for any of the nine swept formats, but the status is
+kept because it is the honest way to report a gap, and it is what keeps a sweep
+from aborting on the first one.
 
-2. `lu` and `qr` are instantiated for float32/float64 only. Every emulated type
-   reports `unavailable` for them. That is a binding gap, not a slow result.
+A NUMBER FROM A NARROW FORMAT IS NOT AUTOMATICALLY A RESULT. `fp8` and
+`fixpnt8` QR degenerate: every Householder reflector rounds to zero, so Q comes
+back as the exact identity and the factorization is meaningless while timing
+perfectly normally. This harness measures throughput and cannot see that. See
+tests/test_universal_factorizations.py for where each format stops being
+usable.
 
 Build flags dominate the numbers, so every run records `mtl5.build_info()`,
 thread count and host architecture in its output. A figure quoted without that

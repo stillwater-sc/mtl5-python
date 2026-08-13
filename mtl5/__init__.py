@@ -332,8 +332,10 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
         suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
         if suffix is None:
             # Only suggest convert() for the factorizations that actually have
-            # Universal instantiations — qr/lq are float32/float64 only, so
-            # sending a user there would just earn them a second TypeError.
+            # Universal instantiations — lq is float32/float64 only, so sending
+            # a user there would just earn them a second TypeError. (qr and lu
+            # gained Universal instantiations in #69; this probe reads that off
+            # _core rather than a hardcoded list, so it followed along.)
             hint = (
                 " For another number system, convert first: mtl5.convert(a, 'posit32')."
                 if _has_universal_support(prefix)
@@ -375,8 +377,19 @@ def _factor(name: str, prefix: str, A):
 def qr(A):
     """Householder QR of a tall-or-square matrix (num_rows >= num_cols).
 
-    float32 and float64 only. Returns a factorization exposing `.solve(b)`
-    (least squares), `.Q` and `.R`.
+    Accepts float32/float64 (and complex), plus every Universal dtype via
+    `mtl5.convert()`. Returns a factorization exposing `.solve(b)` (least
+    squares), `.Q` and `.R`.
+
+    Above 16 bits the Universal types factorize usefully. Below that, read the
+    result before trusting it: for `fp8` and `fixpnt8` every Householder
+    reflector rounds to zero, so `.Q` comes back as the exact identity and `.R`
+    as the upper triangle of A. Such a factorization scores a perfect
+    orthogonality check while reconstructing nothing but `triu(A)` — its error
+    is exactly the weight of A's discarded subdiagonal, so how bad it looks
+    depends on the input rather than on the format. It does not raise, because
+    a genuinely upper-triangular input has zero reflectors too and that case is
+    correct.
     """
     return _factor("qr", "QRFactor", A)
 

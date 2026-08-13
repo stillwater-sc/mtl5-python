@@ -227,21 +227,32 @@ class TestAcrossNumberSystems:
             assert "factor" not in msg.lower().replace("factorization", "")
 
     def test_convert_hint_only_where_convert_would_help(self):
-        """qr/lq are float-only, so pointing at convert() would just earn a
-        second TypeError."""
-        with pytest.raises(TypeError, match="convert"):
-            mtl5.ldlt(np.eye(3, dtype=np.int64))
-        for fn in (mtl5.qr, mtl5.lq):
-            with pytest.raises(TypeError) as exc:
+        """lq is float-only, so pointing at convert() would just earn a second
+        TypeError. qr and ldlt have Universal instantiations, so for them the
+        hint is the useful answer.
+
+        The hint is chosen by probing _core, not from a hardcoded list, which is
+        why it followed qr gaining Universal instantiations in #69 without an
+        edit. This asserts the two branches stay distinguishable.
+        """
+        for fn in (mtl5.ldlt, mtl5.qr):
+            with pytest.raises(TypeError, match="convert"):
                 fn(np.eye(3, dtype=np.int64))
-            assert "convert" not in str(exc.value)
-            assert "float32 and float64 only" in str(exc.value)
+
+        with pytest.raises(TypeError) as exc:
+            mtl5.lq(np.eye(3, dtype=np.int64))
+        assert "convert" not in str(exc.value)
+        assert "float32 and float64 only" in str(exc.value)
 
     def test_universal_dtype_rejected_by_float_only_factorizations(self):
+        """lq is the only one left that refuses a Universal dtype."""
         M = mtl5.convert(np.eye(4), "posit32")
-        for fn, name in ((mtl5.qr, "qr"), (mtl5.lq, "lq")):
-            with pytest.raises(TypeError, match=f"{name} is not available for dtype"):
-                fn(M)
+        with pytest.raises(TypeError, match="lq is not available for dtype"):
+            mtl5.lq(M)
+
+    def test_qr_now_accepts_a_universal_dtype(self):
+        M = mtl5.convert(np.eye(4), "posit32")
+        assert mtl5.qr(M).dtype == "posit32"
 
     def test_rejects_a_non_matrix(self):
         with pytest.raises(TypeError, match="expected an MTL5 matrix"):

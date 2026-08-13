@@ -912,6 +912,48 @@ void register_universal_matmul(nb::module_& m) {
        "Matrix-matrix multiplication: C = A @ B");
 }
 
+// LU as a reusable factorization object for the Universal types (#69).
+//
+// solve() below already factors internally, but it throws the factorization
+// away on every call. The object form is what makes a mixed-precision sweep
+// affordable — factor once at O(n^3), then solve many right-hand sides at
+// O(n^2) — and it is what the number-system benchmark times, since timing
+// solve() would measure the factorization and the triangular solves together.
+template <typename T>
+void register_universal_lu(nb::module_& m) {
+    using Mat = mtl::mat::dense2D<T>;
+    using Vec = mtl::vec::dense_vector<T>;
+    using LUF = LUFactor<T>;
+
+    const std::string name = std::string("LUFactor_") + type_suffix<T>();
+    nb::class_<LUF>(m, name.c_str())
+        .def("solve", [](const LUF& self, const Vec& b_in) {
+            if (b_in.size() != self.n)
+                throw std::invalid_argument("LU.solve: dimension mismatch");
+            Vec x(self.n);
+            {
+                nogil guard;
+                Vec b(self.n);
+                for (std::size_t i = 0; i < self.n; ++i) b[i] = b_in[i];
+                mtl::lu_solve(self.LU, self.pivot, x, b);
+            }
+            return x;
+        }, "b"_a, "Solve LUx = b for the previously factored A")
+        .def_prop_ro("shape", [](const LUF& s) {
+            return std::pair<std::size_t, std::size_t>(s.n, s.n);
+        })
+        .def_prop_ro("dtype", [](const LUF&) { return type_suffix<T>(); })
+        .def("__repr__", [name](const LUF& s) {
+            return "mtl5." + name + "(n=" + std::to_string(s.n) + ")";
+        });
+
+    m.def("lu", [](const Mat& A) {
+        if (A.num_rows() != A.num_cols())
+            throw std::invalid_argument("lu: matrix must be square");
+        return LUF(A);
+    }, "A"_a, "LU factorization with partial pivoting");
+}
+
 template <typename T>
 void register_universal_solve(nb::module_& m) {
     using Mat = mtl::mat::dense2D<T>;
@@ -979,6 +1021,7 @@ void register_universal(nb::module_& m, const char* vec_factory, const char* mat
     register_universal_matvec<T>(m);
     register_universal_matmul<T>(m);
     register_universal_solve<T>(m);
+    register_universal_lu<T>(m);
 }
 
 // ===========================================================================

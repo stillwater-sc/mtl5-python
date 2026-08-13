@@ -417,6 +417,25 @@ void register_float_only(nb::module_& m) {
     register_bunch_kaufman<T>(m);
 }
 
+// The Universal element types, in one place. LU (in mtl5_module.cpp, where
+// LUFactor lives) and QR both instantiate over exactly this set, and keeping
+// one list is what stops them drifting apart the way ldlt's and cholesky's
+// hand-copied lists could.
+template <template <typename> class Reg>
+void for_each_universal(nb::module_& m) {
+    (Reg<fp8>{}(m), Reg<fp16>{}(m),
+     Reg<posit8>{}(m), Reg<posit16>{}(m), Reg<posit32>{}(m), Reg<posit64>{}(m),
+     Reg<fixpnt8>{}(m), Reg<fixpnt16>{}(m),
+     Reg<lns16>{}(m), Reg<lns32>{}(m),
+     Reg<cfloat32>{}(m), Reg<takum32>{}(m),
+     Reg<dd_cascade>{}(m), Reg<td_cascade>{}(m), Reg<qd_cascade>{}(m));
+}
+
+template <typename T>
+struct QRRegistrar {
+    void operator()(nb::module_& m) const { register_qr<T>(m); }
+};
+
 }  // namespace
 
 // ===========================================================================
@@ -435,6 +454,27 @@ void register_dense_factorizations(nb::module_& m) {
     register_qr<c128>(m);
     register_lq<c64>(m);
     register_lq<c128>(m);
+
+    // QR over the Universal types (#69). Householder needs only sqrt and the
+    // arithmetic operators, so every bound type compiles and, above 16 bits,
+    // factorizes usefully: on an 8x8 in-range matrix, ||QR-A||/||A|| is 5.8e-8
+    // for posit32, 3.1e-8 for takum32, 2.3e-5 for lns32 and 1.1e-16 for the
+    // cascades, against 3.3e-16 for double.
+    //
+    // The narrow types are registered too — comparing number systems is the
+    // point of #69, and a format failing is a result — but two of them fail
+    // SILENTLY and that is worth knowing before trusting a number. For fp8 and
+    // fixpnt8 every Householder reflector rounds to zero (measured: sum|tau|
+    // == 0 exactly), so qr_extract_Q returns the exact identity and R is just
+    // the upper triangle of A. The factorization then reports a perfect
+    // ||Q^T Q - I|| == 0 while its product is only triu(A) — the residual is
+    // therefore the weight of the discarded subdiagonal, a property of the
+    // input rather than a fixed figure for the format. It looks flawless and
+    // is meaningless. posit8 does not degenerate but is not usable either
+    // (on the 8x8 fixture: residual 0.47, orthogonality 1.3). Covered in
+    // tests/test_universal_factorizations.py so the behaviour is pinned rather
+    // than rediscovered.
+    for_each_universal<QRRegistrar>(m);
 
     // LDL^T everywhere — the point of #18 is comparing number systems.
     register_ldlt<float>(m);

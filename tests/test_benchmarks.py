@@ -63,15 +63,9 @@ def test_operands_and_call_resolve_for_every_kernel_and_dtype(bench):
         for dtype in bench.DEFAULT_DTYPES:
             operands = bench._make_operands(kernel, dtype, 4)
             fn = bench._make_call(kernel, dtype, operands)
-            native = dtype in bench.NATIVE_DTYPES
-            if kernel in ("lu", "qr") and not native:
-                # Documented gap, not a failure — assert it is still a *clean*
-                # TypeError so the harness keeps classifying it as
-                # "unavailable" rather than crashing the sweep.
-                with pytest.raises(TypeError):
-                    fn()
-            else:
-                assert fn() is not None
+            # Every kernel now resolves for every swept dtype: lu and qr gained
+            # Universal instantiations in #69, so the sweep has no holes left.
+            assert fn() is not None, f"{kernel}/{dtype} produced nothing"
 
 
 def test_end_to_end_quick_run(bench, tmp_path):
@@ -121,16 +115,27 @@ def test_end_to_end_quick_run(bench, tmp_path):
             assert r["seconds_per_op"] > 0.0
 
 
-def test_unavailable_is_reported_not_raised(bench):
-    """lu/qr on an emulated type must land as a row, not an exception — a sweep
-    that aborts on the first gap is useless for exactly the types we care
-    about."""
+def test_unavailable_is_reported_not_raised(bench, monkeypatch):
+    """A kernel a dtype lacks must land as a row, not an exception — a sweep
+    that aborts on the first gap is useless for exactly the types we care about.
+
+    Driven through an injected TypeError rather than a real gap: since #69 gave
+    lu and qr their Universal instantiations, no swept combination is
+    unavailable any more. The guarantee still has to hold for the next dtype
+    added ahead of its kernels, so it is tested at the mechanism rather than
+    deleted along with the gap that used to demonstrate it.
+    """
 
     class Args:
         seed = 0
         min_time = 0.001
         repeat = 1
         max_op_seconds = 2.0
+
+    def _raise(*_a, **_k):
+        raise TypeError("qr is not available for dtype 'posit32' — it supports ...")
+
+    monkeypatch.setattr(bench, "_make_call", _raise)
 
     r = bench._measure("qr", "posit32", 8, Args())
     assert r.status == "unavailable"
