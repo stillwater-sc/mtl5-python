@@ -16,6 +16,10 @@
 #include <universal/number/posit/posit.hpp>
 #include <universal/number/fixpnt/fixpnt.hpp>
 #include <universal/number/lns/lns.hpp>
+#include <universal/number/takum/takum.hpp>
+#include <universal/number/dd_cascade/dd_cascade.hpp>
+#include <universal/number/td_cascade/td_cascade.hpp>
+#include <universal/number/qd_cascade/qd_cascade.hpp>
 
 #include <complex>
 #include <cstddef>
@@ -69,6 +73,27 @@ using fixpnt16 = sw::universal::fixpnt<16, 8, sw::universal::Saturate>;
 using lns16 = sw::universal::lns<16, 8>;
 using lns32 = sw::universal::lns<32, 16>;
 
+// IEEE-754 binary32 through the cfloat emulation layer. Universal calls this
+// `single`/`fp32`; it is spelled cfloat32 on the Python side to say plainly
+// that it is the EMULATED single, not the hardware `float`. That pairing is
+// the point: cfloat32-vs-float isolates the cost of emulation itself from the
+// cost of any particular format, which is what makes it the control in the
+// number-system benchmarks (#69).
+using cfloat32 = sw::universal::fp32;
+
+// Takum — a tapered logarithmic format. rbits=3 is the value the takum
+// reference uses, and uint32_t as the block type keeps a 32-bit value in a
+// single limb instead of the 4 the uint8_t default would take.
+using takum32 = sw::universal::takum<32, 3, uint32_t>;
+
+// Floating-point cascades: an unevaluated sum of 2/3/4 doubles, carrying
+// roughly 32/48/64 decimal digits. Unlike every other type here these are
+// plain classes, not template instantiations -- the width is fixed by how many
+// doubles are in the cascade -- so they are aliased only for naming symmetry.
+using dd_cascade = sw::universal::dd_cascade;
+using td_cascade = sw::universal::td_cascade;
+using qd_cascade = sw::universal::qd_cascade;
+
 // Complex, named for NumPy's convention: the digits are the TOTAL width, so
 // c64 is a pair of float32 and c128 a pair of float64.
 using c64  = std::complex<float>;
@@ -104,6 +129,11 @@ template <> constexpr const char* type_suffix<fixpnt8>() { return "fixpnt8"; }
 template <> constexpr const char* type_suffix<fixpnt16>(){ return "fixpnt16"; }
 template <> constexpr const char* type_suffix<lns16>()   { return "lns16"; }
 template <> constexpr const char* type_suffix<lns32>()   { return "lns32"; }
+template <> constexpr const char* type_suffix<cfloat32>(){ return "cfloat32"; }
+template <> constexpr const char* type_suffix<takum32>() { return "takum32"; }
+template <> constexpr const char* type_suffix<dd_cascade>() { return "dd_cascade"; }
+template <> constexpr const char* type_suffix<td_cascade>() { return "td_cascade"; }
+template <> constexpr const char* type_suffix<qd_cascade>() { return "qd_cascade"; }
 template <> constexpr const char* type_suffix<c64>()     { return "c64"; }
 template <> constexpr const char* type_suffix<c128>()    { return "c128"; }
 

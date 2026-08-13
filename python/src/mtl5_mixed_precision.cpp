@@ -40,6 +40,7 @@
 #include <mtl/math/quire_accumulator.hpp>
 
 #include <cmath>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -86,6 +87,20 @@ struct quire_for<sw::universal::fixpnt<nbits, rbits, arithmetic, bt>> {
     static constexpr bool ok = true;
     using type = sw::universal::quire<sw::universal::fixpnt<nbits, rbits, arithmetic, bt>>;
 };
+
+// Which bound dtypes accept accumulator='quire', keyed by the Python-facing
+// dtype string. Filled by the registration templates below from
+// quire_for<T>::ok so that accumulators() and dispatch_acc() answer from one
+// fact rather than two hand-maintained lists that can disagree.
+inline std::map<std::string, bool>& quire_support_registry() {
+    static std::map<std::string, bool> registry;
+    return registry;
+}
+
+template <typename T>
+void record_quire_support() {
+    quire_support_registry()[type_suffix<T>()] = quire_for<T>::ok;
+}
 
 bool parse_result_is_element(const std::optional<std::string>& spec) {
     if (!spec || *spec == "f64" || *spec == "float64") return false;
@@ -208,6 +223,7 @@ void register_mixed_universal(nb::module_& mx) {
     using Vec = mtl::vec::dense_vector<T>;
     using Mat = mtl::mat::dense2D<T>;
     constexpr bool quire_ok = quire_for<T>::ok;
+    record_quire_support<T>();
 
     mx.def("dot", [](const Vec& a, const Vec& b,
                      std::optional<std::string> accumulator,
@@ -259,6 +275,7 @@ template <typename T>
 void register_mixed_native(nb::module_& mx) {
     using VV = VectorView<T>;
     using MV = MatrixView<T>;
+    record_quire_support<T>();
 
     mx.def("dot", [](const VV& a, const VV& b,
                      std::optional<std::string> accumulator,
@@ -359,7 +376,8 @@ using mat_ctor = nb::object (*)(const double*, std::size_t, std::size_t);
 
 const char* const kDtypeHelp =
     "valid dtypes: f32, f64, fp8, fp16, posit8, posit16, posit32, posit64, "
-    "fixpnt8, fixpnt16, lns16, lns32";
+    "fixpnt8, fixpnt16, lns16, lns32, cfloat32, takum32, dd_cascade, "
+    "td_cascade, qd_cascade";
 
 vec_ctor vec_ctor_for(const std::string& dtype) {
     if (dtype == "f32")      return &native_vec_from_f64<float>;
@@ -374,6 +392,11 @@ vec_ctor vec_ctor_for(const std::string& dtype) {
     if (dtype == "fixpnt16") return &vec_from_f64<fixpnt16>;
     if (dtype == "lns16")    return &vec_from_f64<lns16>;
     if (dtype == "lns32")    return &vec_from_f64<lns32>;
+    if (dtype == "cfloat32")   return &vec_from_f64<cfloat32>;
+    if (dtype == "takum32")    return &vec_from_f64<takum32>;
+    if (dtype == "dd_cascade") return &vec_from_f64<dd_cascade>;
+    if (dtype == "td_cascade") return &vec_from_f64<td_cascade>;
+    if (dtype == "qd_cascade") return &vec_from_f64<qd_cascade>;
     throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
 }
 
@@ -390,6 +413,11 @@ mat_ctor mat_ctor_for(const std::string& dtype) {
     if (dtype == "fixpnt16") return &mat_from_f64<fixpnt16>;
     if (dtype == "lns16")    return &mat_from_f64<lns16>;
     if (dtype == "lns32")    return &mat_from_f64<lns32>;
+    if (dtype == "cfloat32")   return &mat_from_f64<cfloat32>;
+    if (dtype == "takum32")    return &mat_from_f64<takum32>;
+    if (dtype == "dd_cascade") return &mat_from_f64<dd_cascade>;
+    if (dtype == "td_cascade") return &mat_from_f64<td_cascade>;
+    if (dtype == "qd_cascade") return &mat_from_f64<qd_cascade>;
     throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
 }
 
@@ -473,11 +501,34 @@ void register_mixed_precision(nb::module_& m) {
     register_mixed_universal<lns16>(mx);
     register_mixed_universal<lns32>(mx);
 
+    // Emulated IEEE binary32, takum, and the float cascades (#69). Only
+    // cfloat32 gets a quire: quire_for<> specializes on the four families
+    // Universal ships an fdp.hpp for, so accumulator='quire' on takum32 or a
+    // cascade is rejected at runtime with the same message native float gets,
+    // rather than failing to compile.
+    register_mixed_universal<cfloat32>(mx);
+    register_mixed_universal<takum32>(mx);
+    register_mixed_universal<dd_cascade>(mx);
+    register_mixed_universal<td_cascade>(mx);
+    register_mixed_universal<qd_cascade>(mx);
+
     mx.def("accumulators", [](const std::string& dtype) {
         std::vector<std::string> v{"f32", "f64", "fma32", "fma64"};
-        // Quire availability follows Universal's fdp.hpp coverage.
-        if (dtype != "f32" && dtype != "f64" && dtype != "i32" && dtype != "i64")
-            v.push_back("quire");
+        // Answered from the registry the registration templates fill with
+        // quire_for<T>::ok -- the SAME trait dispatch_acc() consults -- so what
+        // is advertised cannot drift from what the operations accept.
+        //
+        // This used to be a denylist of the native dtypes, which failed open:
+        // every dtype not named in it was advertised as having a quire. That
+        // was right only by accident, because until takum32 and the cascades
+        // arrived every non-native bound type happened to have one. Adding
+        // them made accumulators() promise a quire that dot() rejects, and an
+        // unknown dtype string was advertised a quire too.
+        const auto& reg = quire_support_registry();
+        auto it = reg.find(dtype);
+        if (it == reg.end())
+            throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
+        if (it->second) v.push_back("quire");
         return v;
     }, "dtype"_a,
        "Accumulators available for an element dtype (None is always valid and "
@@ -500,7 +551,9 @@ void register_mixed_precision(nb::module_& m) {
         return std::vector<std::string>{
             "f32", "f64", "fp8", "fp16",
             "posit8", "posit16", "posit32", "posit64",
-            "fixpnt8", "fixpnt16", "lns16", "lns32"};
+            "fixpnt8", "fixpnt16", "lns16", "lns32",
+            "cfloat32", "takum32",
+            "dd_cascade", "td_cascade", "qd_cascade"};
     }, "Element dtypes accepted by convert() and the mixed-precision operations");
 
     // ----- Dense mixed-precision iterative refinement -------------------------
