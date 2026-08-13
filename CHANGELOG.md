@@ -84,11 +84,17 @@ against, and semantic-release manages only the **patch** component.
   type, reporting slowdown against float64 rather than raw GFLOP/s, because
   experiment planning is built out of "posit32 GEMM costs 4000x double".
 
-  It reports two structural asymmetries instead of hiding them. The native
-  baselines run MTL5's blocked Highway-vectorised kernels while the emulated
-  types run the generic ones, so part of every gap is the vectoriser. And
-  `lu`/`qr` are instantiated for float32/float64 only, so emulated types come
-  back `not instantiated` — a binding gap, not a slow result.
+  It reports a structural asymmetry instead of hiding it: the native baselines
+  run MTL5's blocked Highway-vectorised kernels while the emulated types run
+  the generic ones, so part of every `gemv`/`gemm` gap is the vectoriser rather
+  than the number system. `lu` and `qr` have no such split — both sides run the
+  same kernel — so those ratios are like-for-like.
+
+  (As first written, the harness also reported `lu`/`qr` as `not instantiated`
+  for every emulated type, which was true when it was added and stopped being
+  true later in the same release cycle. The `unavailable` status remains, since
+  it is the honest way to report a gap and is what keeps a sweep from aborting
+  on the first one.)
 
   It also measures each kernel's own call floor and flags baselines that sit
   within 20x of it. Small-`n` rows are otherwise quietly misleading: an f64 dot
