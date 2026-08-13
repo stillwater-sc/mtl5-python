@@ -17,6 +17,8 @@ round-tripped qd_cascade is exactly as accurate as a round-tripped float64;
 what it buys is that the dot product in between did not lose anything.
 """
 
+from fractions import Fraction
+
 import numpy as np
 import numpy.testing as npt
 import pytest
@@ -149,6 +151,35 @@ class TestExtendedTypeQuire:
         with pytest.raises(ValueError, match="quire"):
             mtl5.mixed.dot(mtl5.convert(a, name), mtl5.convert(b, name), accumulator="quire")
 
+    @pytest.mark.parametrize("name", mtl5.dtypes())
+    def test_advertised_accumulators_are_exactly_the_accepted_ones(self, name):
+        """accumulators() must agree with what dot() actually takes, for EVERY
+        bound dtype.
+
+        Asserted by executing each advertised accumulator rather than comparing
+        against a second hardcoded list, which would just be the same mistake
+        written twice. accumulators() previously answered from a denylist of
+        the native dtypes and so failed open — it advertised a quire for every
+        other dtype, which was right only until takum32 and the cascades
+        arrived without one.
+        """
+        rng = np.random.default_rng(5)
+        a, b = rng.standard_normal(8), rng.standard_normal(8)
+        va, vb = mtl5.convert(a, name), mtl5.convert(b, name)
+
+        for acc in mtl5.mixed.accumulators(name):
+            mtl5.mixed.dot(va, vb, accumulator=acc)  # must not raise
+
+        if "quire" not in mtl5.mixed.accumulators(name):
+            with pytest.raises(ValueError, match="quire"):
+                mtl5.mixed.dot(va, vb, accumulator="quire")
+
+    def test_accumulators_rejects_an_unknown_dtype(self):
+        # The denylist form returned a quire-bearing list for any string at
+        # all, including typos.
+        with pytest.raises(ValueError):
+            mtl5.mixed.accumulators("not_a_dtype")
+
 
 class TestCfloat32IsEmulatedBinary32:
     """cfloat32 must round exactly like hardware binary32 — that equivalence is
@@ -181,10 +212,17 @@ class TestCascadesExceedFloat64Internally:
         rng = np.random.default_rng(4)
         a = rng.standard_normal(n) * 1e8
         b = np.ones(n)
-        # Exact reference via Python's fsum (correctly rounded).
-        import math
 
-        exact = math.fsum(float(ai) * float(bi) for ai, bi in zip(a, b))
+        # The reference is summed as exact rationals, then rounded once. This
+        # assertion is an EQUALITY, so it cannot rest on math.fsum: CPython
+        # documents that on builds whose C library adds in extended precision,
+        # an intermediate sum can double-round and leave fsum off by one ulp.
+        # That caveat is tolerable when the claim is "within a tolerance" (it
+        # is how the accumulator tests state theirs) and not tolerable here.
+        # Fraction has no such caveat — the sum is exact by construction and
+        # float() rounds it correctly exactly once.
+        exact_rational = sum(Fraction(float(ai)) * Fraction(float(bi)) for ai, bi in zip(a, b))
+        exact = float(exact_rational)
 
         naive = float(np.dot(a, b))
         cascade = mtl5.mixed.dot(mtl5.convert(a, "qd_cascade"), mtl5.convert(b, "qd_cascade"))
@@ -195,6 +233,9 @@ class TestCascadesExceedFloat64Internally:
         # representable, so it should be exact.
         assert err_cascade <= err_naive
         assert err_cascade == 0.0
+        # Guard the premise: if float64 also happened to be exact here, the
+        # test would pass while demonstrating nothing about the cascade.
+        assert err_naive > 0.0
 
     @pytest.mark.parametrize("name", ["dd_cascade", "td_cascade", "qd_cascade"])
     def test_cascade_roundtrip_is_float64_exact(self, name):

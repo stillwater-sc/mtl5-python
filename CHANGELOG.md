@@ -25,9 +25,13 @@ against, and semantic-release manages only the **patch** component.
   semantics through the same emulation layer everything else uses, so pairing
   it against hardware `float` separates *emulation overhead* from *format
   cost* — without it, a posit32-vs-double ratio conflates the two and cannot
-  say which one to attack. Measured, that distinction is the whole story: at
-  GEMM n=64, `cfloat32` costs ~780x double while `posit32` costs ~6300x, so
-  most of posit32's cost is posit-specific rather than the price of emulation.
+  say which one to attack. Measured, that distinction is the whole story: on
+  one recorded run (x86_64, single thread, `native_fast_gemm` + `highway_simd`,
+  no `-march=native`), GEMM at n=64 cost `cfloat32` ~570x double and `posit32`
+  ~4000x, so most of posit32's cost is posit-specific rather than the price of
+  emulation. Those figures are an example from one host, not a portable
+  constant — the ratios move with build flags, ISA dispatch, thread count and
+  architecture, which is why the harness records all four alongside them.
 
   `accumulator='quire'` works for `cfloat32` and is *rejected* for `takum32`
   and the cascades. Quire availability follows Universal's `fdp.hpp`, not our

@@ -109,10 +109,16 @@ def test_end_to_end_quick_run(bench, tmp_path):
     for r in baseline_rows:
         assert r["slowdown_vs_baseline"] == pytest.approx(1.0)
 
-    # The whole point of the harness: emulated types must come out slower.
+    # Structure only, deliberately: that the ratio was computed and attached at
+    # all is what can break (a missed baseline key leaves it None). Asserting
+    # posit32 > 1.0 would be true by a factor of ~10^3 and so not flaky in
+    # practice, but it would make a correctness test depend on host
+    # performance, and this file promises not to do that.
     for r in rows:
-        if r["dtype"] == "posit32" and r["status"] == "ok":
-            assert r["slowdown_vs_baseline"] > 1.0
+        if r["status"] == "ok":
+            assert r["slowdown_vs_baseline"] is not None
+            assert r["slowdown_vs_baseline"] > 0.0
+            assert r["seconds_per_op"] > 0.0
 
 
 def test_unavailable_is_reported_not_raised(bench):

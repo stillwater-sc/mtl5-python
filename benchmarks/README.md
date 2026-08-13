@@ -41,12 +41,22 @@ would wedge the run for minutes.
 
 ### Build flags dominate
 
-Every report embeds `mtl5.build_info()`, and a number quoted without it is not
-reproducible. The blocked GEMM path is roughly **3.4x slower** than the generic
-one when Highway is not there to vectorise it, and released wheels use static
-dispatch at the baseline ISA unless built with `MTL5_NATIVE_ARCH=ON`. Wheels for
-x86_64 and aarch64 therefore have different vectorisation baselines (SSE-era vs
-NEON), so ratios do not necessarily transfer between them.
+Every report embeds `mtl5.build_info()`, the thread count and the host
+architecture, and a number quoted without them is not reproducible.
+
+For scale, from the measurements recorded in the top-level `CMakeLists.txt`
+(double-precision matmul, GCC -O3, single thread, no `-march=native`, n=200 to
+1000): the blocked GEMM alone runs at 0.79 GF/s against 2.15–3.51 GF/s with both
+flags off — roughly **3.4x slower** without Highway to vectorise the
+micro-kernel — while the pair together reach 12.6–14.7 GF/s. Released wheels use
+static dispatch at the baseline ISA unless built with `MTL5_NATIVE_ARCH=ON`, so
+they sit below that last figure. Wheels for x86_64 and aarch64 have different
+vectorisation baselines (SSE-era vs NEON), so ratios do not necessarily transfer
+between them.
+
+**Every ratio quoted in this README is an example from one recorded run on one
+machine, not a portable constant.** Re-run the harness on the host you plan to
+compute on.
 
 For a like-for-like comparison against a tuned BLAS, build with
 `-C cmake.define.MTL5_WITH_BLAS=ON`.

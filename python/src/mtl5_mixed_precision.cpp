@@ -40,6 +40,7 @@
 #include <mtl/math/quire_accumulator.hpp>
 
 #include <cmath>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -86,6 +87,20 @@ struct quire_for<sw::universal::fixpnt<nbits, rbits, arithmetic, bt>> {
     static constexpr bool ok = true;
     using type = sw::universal::quire<sw::universal::fixpnt<nbits, rbits, arithmetic, bt>>;
 };
+
+// Which bound dtypes accept accumulator='quire', keyed by the Python-facing
+// dtype string. Filled by the registration templates below from
+// quire_for<T>::ok so that accumulators() and dispatch_acc() answer from one
+// fact rather than two hand-maintained lists that can disagree.
+inline std::map<std::string, bool>& quire_support_registry() {
+    static std::map<std::string, bool> registry;
+    return registry;
+}
+
+template <typename T>
+void record_quire_support() {
+    quire_support_registry()[type_suffix<T>()] = quire_for<T>::ok;
+}
 
 bool parse_result_is_element(const std::optional<std::string>& spec) {
     if (!spec || *spec == "f64" || *spec == "float64") return false;
@@ -208,6 +223,7 @@ void register_mixed_universal(nb::module_& mx) {
     using Vec = mtl::vec::dense_vector<T>;
     using Mat = mtl::mat::dense2D<T>;
     constexpr bool quire_ok = quire_for<T>::ok;
+    record_quire_support<T>();
 
     mx.def("dot", [](const Vec& a, const Vec& b,
                      std::optional<std::string> accumulator,
@@ -259,6 +275,7 @@ template <typename T>
 void register_mixed_native(nb::module_& mx) {
     using VV = VectorView<T>;
     using MV = MatrixView<T>;
+    record_quire_support<T>();
 
     mx.def("dot", [](const VV& a, const VV& b,
                      std::optional<std::string> accumulator,
@@ -497,9 +514,21 @@ void register_mixed_precision(nb::module_& m) {
 
     mx.def("accumulators", [](const std::string& dtype) {
         std::vector<std::string> v{"f32", "f64", "fma32", "fma64"};
-        // Quire availability follows Universal's fdp.hpp coverage.
-        if (dtype != "f32" && dtype != "f64" && dtype != "i32" && dtype != "i64")
-            v.push_back("quire");
+        // Answered from the registry the registration templates fill with
+        // quire_for<T>::ok -- the SAME trait dispatch_acc() consults -- so what
+        // is advertised cannot drift from what the operations accept.
+        //
+        // This used to be a denylist of the native dtypes, which failed open:
+        // every dtype not named in it was advertised as having a quire. That
+        // was right only by accident, because until takum32 and the cascades
+        // arrived every non-native bound type happened to have one. Adding
+        // them made accumulators() promise a quire that dot() rejects, and an
+        // unknown dtype string was advertised a quire too.
+        const auto& reg = quire_support_registry();
+        auto it = reg.find(dtype);
+        if (it == reg.end())
+            throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
+        if (it->second) v.push_back("quire");
         return v;
     }, "dtype"_a,
        "Accumulators available for an element dtype (None is always valid and "

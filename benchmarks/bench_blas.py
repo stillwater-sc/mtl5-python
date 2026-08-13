@@ -28,17 +28,25 @@ rather than hidden:
 2. `lu` and `qr` are instantiated for float32/float64 only. Every emulated type
    reports `unavailable` for them. That is a binding gap, not a slow result.
 
-Build flags dominate the numbers, so every run records `mtl5.build_info()` in
-its output. A figure quoted without that context is not reproducible: the
-blocked GEMM path is roughly 3.4x SLOWER than the generic one without Highway
-to vectorise it, and released wheels use static dispatch at the baseline ISA
-unless built with MTL5_NATIVE_ARCH=ON.
+Build flags dominate the numbers, so every run records `mtl5.build_info()`,
+thread count and host architecture in its output. A figure quoted without that
+context is not reproducible. For scale: the top-level CMakeLists records
+double-precision matmul at 0.79 GF/s with the blocked GEMM alone against
+2.15-3.51 GF/s with both flags off (GCC -O3, single thread, no -march=native,
+n=200..1000) — roughly 3.4x slower without Highway to vectorise the
+micro-kernel. Released wheels use static dispatch at the baseline ISA unless
+built with MTL5_NATIVE_ARCH=ON, so they are not at the top of that range.
+
+Every ratio this file or its README quotes is an example from one recorded run
+on one machine, not a portable constant. Re-run it on the host you plan to
+compute on.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import platform
 import sys
 import time
@@ -412,6 +420,31 @@ def print_table(report: Report) -> None:
             )
 
 
+def _positive_int(value: str) -> int:
+    """argparse type for counts that must be >= 1.
+
+    n=0 would divide by zero in the FLOP rate, and --repeat 0 silently degrades
+    to one batch rather than the documented count.
+    """
+    result = int(value)
+    if result <= 0:
+        raise argparse.ArgumentTypeError(f"must be greater than zero, got {result}")
+    return result
+
+
+def _positive_seconds(value: str) -> float:
+    """argparse type for durations.
+
+    The finiteness check is not decorative: a NaN --min-time makes every
+    `elapsed >= min_time` comparison false, so calibration runs to
+    `int(nan)` and dies with an unhelpful ValueError deep in the timing loop.
+    """
+    result = float(value)
+    if not math.isfinite(result) or result <= 0:
+        raise argparse.ArgumentTypeError(f"must be finite and greater than zero, got {value!r}")
+    return result
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description="BLAS kernel throughput as a function of number type",
@@ -419,13 +452,15 @@ def main(argv=None) -> int:
     )
     p.add_argument("--kernels", nargs="+", default=KERNELS, choices=KERNELS)
     p.add_argument("--dtypes", nargs="+", default=DEFAULT_DTYPES)
-    p.add_argument("--sizes", nargs="+", type=int, help="override sizes for every kernel")
+    p.add_argument("--sizes", nargs="+", type=_positive_int, help="override sizes for every kernel")
     p.add_argument("--quick", action="store_true", help="smallest sizes only")
-    p.add_argument("--min-time", type=float, default=0.05, help="seconds per timed batch")
-    p.add_argument("--repeat", type=int, default=3, help="timed batches; best is kept")
+    p.add_argument(
+        "--min-time", type=_positive_seconds, default=0.05, help="seconds per timed batch"
+    )
+    p.add_argument("--repeat", type=_positive_int, default=3, help="timed batches; best is kept")
     p.add_argument(
         "--max-op-seconds",
-        type=float,
+        type=_positive_seconds,
         default=2.0,
         help="skip a case whose single call exceeds this (keeps emulated sweeps finite)",
     )
