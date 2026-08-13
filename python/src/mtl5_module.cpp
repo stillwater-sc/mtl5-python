@@ -1584,4 +1584,15 @@ NB_MODULE(_core, m) {
     // Logarithmic number system
     register_universal<lns16>(m, "vector_lns16", "matrix_lns16");
     register_universal<lns32>(m, "vector_lns32", "matrix_lns32");
+
+    // Emulated IEEE binary32 — the control for emulation-overhead measurements
+    register_universal<cfloat32>(m, "vector_cfloat32", "matrix_cfloat32");
+
+    // Takum — tapered logarithmic
+    register_universal<takum32>(m, "vector_takum32", "matrix_takum32");
+
+    // Floating-point cascades — extended precision above float64
+    register_universal<dd_cascade>(m, "vector_dd_cascade", "matrix_dd_cascade");
+    register_universal<td_cascade>(m, "vector_td_cascade", "matrix_td_cascade");
+    register_universal<qd_cascade>(m, "vector_qd_cascade", "matrix_qd_cascade");
 }

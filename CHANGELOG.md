@@ -13,6 +13,48 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Added
+
+- **Five number types — `cfloat32`, `takum32`, `dd_cascade`, `td_cascade`,
+  `qd_cascade` — across `convert()`, the containers, and the mixed-precision
+  `dot`/`gemv`/`gemm`.** All five already existed in Universal v4.7.9, the
+  version already pinned, so this is binding work only: aliases, `type_suffix`,
+  and the instantiation lists.
+
+  `cfloat32` earns its place by being redundant on paper. It is IEEE binary32
+  semantics through the same emulation layer everything else uses, so pairing
+  it against hardware `float` separates *emulation overhead* from *format
+  cost* — without it, a posit32-vs-double ratio conflates the two and cannot
+  say which one to attack. Measured, that distinction is the whole story: at
+  GEMM n=64, `cfloat32` costs ~780x double while `posit32` costs ~6300x, so
+  most of posit32's cost is posit-specific rather than the price of emulation.
+
+  `accumulator='quire'` works for `cfloat32` and is *rejected* for `takum32`
+  and the cascades. Quire availability follows Universal's `fdp.hpp`, not our
+  type list, and a silent fallback to a lesser accumulator would quietly
+  invalidate an exactness claim — so it raises, as it already does for native
+  `float`.
+
+  The cascades' extra precision is invisible at the Python boundary by
+  construction: `convert()` takes float64 in and `to_numpy()` hands float64
+  back. What they buy is intermediate accumulation, which is why their test
+  asserts on a catastrophically cancelling sum rather than on a round trip.
+
+- **`benchmarks/bench_blas.py`** — BLAS throughput as a function of number
+  type, reporting slowdown against float64 rather than raw GFLOP/s, because
+  experiment planning is built out of "posit32 GEMM costs 4000x double".
+
+  It reports two structural asymmetries instead of hiding them. The native
+  baselines run MTL5's blocked Highway-vectorised kernels while the emulated
+  types run the generic ones, so part of every gap is the vectoriser. And
+  `lu`/`qr` are instantiated for float32/float64 only, so emulated types come
+  back `not instantiated` — a binding gap, not a slow result.
+
+  It also measures each kernel's own call floor and flags baselines that sit
+  within 20x of it. Small-`n` rows are otherwise quietly misleading: an f64 dot
+  at n=64 is mostly binding overhead, which inflates the baseline and
+  *understates* every ratio computed against it.
+
 ### Fixed
 
 - **The accumulator tests ranked accumulators against a float64 reference, so

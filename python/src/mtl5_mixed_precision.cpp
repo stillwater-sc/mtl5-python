@@ -359,7 +359,8 @@ using mat_ctor = nb::object (*)(const double*, std::size_t, std::size_t);
 
 const char* const kDtypeHelp =
     "valid dtypes: f32, f64, fp8, fp16, posit8, posit16, posit32, posit64, "
-    "fixpnt8, fixpnt16, lns16, lns32";
+    "fixpnt8, fixpnt16, lns16, lns32, cfloat32, takum32, dd_cascade, "
+    "td_cascade, qd_cascade";
 
 vec_ctor vec_ctor_for(const std::string& dtype) {
     if (dtype == "f32")      return &native_vec_from_f64<float>;
@@ -374,6 +375,11 @@ vec_ctor vec_ctor_for(const std::string& dtype) {
     if (dtype == "fixpnt16") return &vec_from_f64<fixpnt16>;
     if (dtype == "lns16")    return &vec_from_f64<lns16>;
     if (dtype == "lns32")    return &vec_from_f64<lns32>;
+    if (dtype == "cfloat32")   return &vec_from_f64<cfloat32>;
+    if (dtype == "takum32")    return &vec_from_f64<takum32>;
+    if (dtype == "dd_cascade") return &vec_from_f64<dd_cascade>;
+    if (dtype == "td_cascade") return &vec_from_f64<td_cascade>;
+    if (dtype == "qd_cascade") return &vec_from_f64<qd_cascade>;
     throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
 }
 
@@ -390,6 +396,11 @@ mat_ctor mat_ctor_for(const std::string& dtype) {
     if (dtype == "fixpnt16") return &mat_from_f64<fixpnt16>;
     if (dtype == "lns16")    return &mat_from_f64<lns16>;
     if (dtype == "lns32")    return &mat_from_f64<lns32>;
+    if (dtype == "cfloat32")   return &mat_from_f64<cfloat32>;
+    if (dtype == "takum32")    return &mat_from_f64<takum32>;
+    if (dtype == "dd_cascade") return &mat_from_f64<dd_cascade>;
+    if (dtype == "td_cascade") return &mat_from_f64<td_cascade>;
+    if (dtype == "qd_cascade") return &mat_from_f64<qd_cascade>;
     throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
 }
 
@@ -473,6 +484,17 @@ void register_mixed_precision(nb::module_& m) {
     register_mixed_universal<lns16>(mx);
     register_mixed_universal<lns32>(mx);
 
+    // Emulated IEEE binary32, takum, and the float cascades (#69). Only
+    // cfloat32 gets a quire: quire_for<> specializes on the four families
+    // Universal ships an fdp.hpp for, so accumulator='quire' on takum32 or a
+    // cascade is rejected at runtime with the same message native float gets,
+    // rather than failing to compile.
+    register_mixed_universal<cfloat32>(mx);
+    register_mixed_universal<takum32>(mx);
+    register_mixed_universal<dd_cascade>(mx);
+    register_mixed_universal<td_cascade>(mx);
+    register_mixed_universal<qd_cascade>(mx);
+
     mx.def("accumulators", [](const std::string& dtype) {
         std::vector<std::string> v{"f32", "f64", "fma32", "fma64"};
         // Quire availability follows Universal's fdp.hpp coverage.
@@ -500,7 +522,9 @@ void register_mixed_precision(nb::module_& m) {
         return std::vector<std::string>{
             "f32", "f64", "fp8", "fp16",
             "posit8", "posit16", "posit32", "posit64",
-            "fixpnt8", "fixpnt16", "lns16", "lns32"};
+            "fixpnt8", "fixpnt16", "lns16", "lns32",
+            "cfloat32", "takum32",
+            "dd_cascade", "td_cascade", "qd_cascade"};
     }, "Element dtypes accepted by convert() and the mixed-precision operations");
 
     // ----- Dense mixed-precision iterative refinement -------------------------

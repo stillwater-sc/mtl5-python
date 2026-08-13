@@ -78,6 +78,12 @@ from mtl5._core import (
     # Complex types (zero-copy views over complex64/complex128)
     DenseMatrix_c64,
     DenseMatrix_c128,
+    # Extended number types (#69) — emulated binary32, takum, and the float
+    # cascades. isort keeps this block alphabetical, so these land split across
+    # the family comments rather than together; the comment above each name is
+    # the one that applies to it.
+    DenseMatrix_cfloat32,
+    DenseMatrix_dd_cascade,
     # Native IEEE types (zero-copy views)
     DenseMatrix_f32,
     DenseMatrix_f64,
@@ -97,8 +103,14 @@ from mtl5._core import (
     DenseMatrix_posit16,
     DenseMatrix_posit32,
     DenseMatrix_posit64,
+    # Extended number types, continued
+    DenseMatrix_qd_cascade,
+    DenseMatrix_takum32,
+    DenseMatrix_td_cascade,
     DenseVector_c64,
     DenseVector_c128,
+    DenseVector_cfloat32,
+    DenseVector_dd_cascade,
     DenseVector_f32,
     DenseVector_f64,
     DenseVector_fixpnt8,
@@ -113,6 +125,9 @@ from mtl5._core import (
     DenseVector_posit16,
     DenseVector_posit32,
     DenseVector_posit64,
+    DenseVector_qd_cascade,
+    DenseVector_takum32,
+    DenseVector_td_cascade,
     # QR / LQ factorization objects — complex only; the real ones are reached
     # through mtl5.qr()/mtl5.lq(), which dispatch on dtype.
     LQFactor_c64,
@@ -184,7 +199,9 @@ from mtl5._core import (
     lu,
     matmul,
     matrix,
+    matrix_cfloat32,
     matrix_copy,
+    matrix_dd_cascade,
     matrix_fixpnt8,
     matrix_fixpnt16,
     matrix_fp8,
@@ -195,6 +212,9 @@ from mtl5._core import (
     matrix_posit16,
     matrix_posit32,
     matrix_posit64,
+    matrix_qd_cascade,
+    matrix_takum32,
+    matrix_td_cascade,
     matvec,
     # Smoothers, grid transfer and multigrid
     mg,
@@ -220,7 +240,9 @@ from mtl5._core import (
     trsm,
     trsv,
     vector,
+    vector_cfloat32,
     vector_copy,
+    vector_dd_cascade,
     vector_fixpnt8,
     vector_fixpnt16,
     vector_fp8,
@@ -231,6 +253,9 @@ from mtl5._core import (
     vector_posit16,
     vector_posit32,
     vector_posit64,
+    vector_qd_cascade,
+    vector_takum32,
+    vector_td_cascade,
     # Matrix views
     view,
 )
@@ -252,6 +277,11 @@ _UNIVERSAL_DTYPES = (
     "fixpnt16",
     "lns16",
     "lns32",
+    "cfloat32",
+    "takum32",
+    "dd_cascade",
+    "td_cascade",
+    "qd_cascade",
 )
 
 
@@ -542,6 +572,11 @@ __all__ = [
     # Typed vector classes — Universal lns
     "DenseVector_lns16",
     "DenseVector_lns32",
+    "DenseVector_cfloat32",
+    "DenseVector_takum32",
+    "DenseVector_dd_cascade",
+    "DenseVector_td_cascade",
+    "DenseVector_qd_cascade",
     # Typed matrix classes — IEEE
     "DenseMatrix",
     "DenseMatrix_c64",
@@ -564,6 +599,11 @@ __all__ = [
     # Typed matrix classes — Universal lns
     "DenseMatrix_lns16",
     "DenseMatrix_lns32",
+    "DenseMatrix_cfloat32",
+    "DenseMatrix_takum32",
+    "DenseMatrix_dd_cascade",
+    "DenseMatrix_td_cascade",
+    "DenseMatrix_qd_cascade",
     # Factorization classes
     "LQFactor_c64",
     "LQFactor_c128",
@@ -698,8 +738,18 @@ __all__ = [
     # Universal type factories — lns
     "matrix_lns16",
     "matrix_lns32",
+    "matrix_cfloat32",
+    "matrix_takum32",
+    "matrix_dd_cascade",
+    "matrix_td_cascade",
+    "matrix_qd_cascade",
     "vector_lns16",
     "vector_lns32",
+    "vector_cfloat32",
+    "vector_takum32",
+    "vector_dd_cascade",
+    "vector_td_cascade",
+    "vector_qd_cascade",
 ]
 
 
