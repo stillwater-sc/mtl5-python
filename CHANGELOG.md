@@ -185,6 +185,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.4 (2026-08-13)
+
+### Features
+
+- **factor**: Instantiate LU and QR for the Universal number systems
+  ([#71](https://github.com/stillwater-sc/mtl5-python/pull/71),
+  [`21927bc`](https://github.com/stillwater-sc/mtl5-python/commit/21927bcbe13f0f520d4c3622464230179602cc3c))
+
+
 ## v5.9.3 (2026-08-13)
 
 ### Features
