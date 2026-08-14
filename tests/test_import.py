@@ -1,5 +1,9 @@
 """Basic smoke tests — verify the module loads and exposes expected symbols."""
 
+import subprocess
+import sys
+import textwrap
+
 import mtl5
 
 
@@ -36,6 +40,10 @@ def test_stale_core_guard_is_actionable():
     Reproduces the editable-install hazard (updated the source, forgot to
     rebuild the extension) in a subprocess: inject a fake mtl5._core that is
     missing the newer `tensor` submodule, then import the source package.
+
+    Covers the SUBMODULE half of the hazard with a synthetic _core. The class
+    half — the one that actually reached a user — is covered against the real
+    extension in test_a_stale_core_produces_the_actionable_message below.
     """
     import pathlib
     import subprocess
@@ -56,7 +64,8 @@ def test_stale_core_guard_is_actionable():
             import mtl5
         except ImportError as e:
             msg = str(e)
-            assert "missing: tensor" in msg, msg
+            assert "out of sync" in msg, msg
+            assert "tensor" in msg, msg          # names what is missing
             assert "pip install" in msg, msg     # points at the fix
             print("GUARD_OK")
         else:
@@ -127,3 +136,86 @@ def test_all_matches_the_public_surface():
 
 def test_all_has_no_duplicates():
     assert len(mtl5.__all__) == len(set(mtl5.__all__)), "duplicate entries in __all__"
+
+
+# ---------------------------------------------------------------------------
+# The stale-extension guard
+#
+# mtl5/__init__.py reframes an ImportError from _core into an actionable
+# "rebuild your extension" message. It is worth testing because it has already
+# failed once in the field: the guard used to probe a fixed tuple of submodules,
+# so when #69-#73 added CLASSES to _core it passed happily and a user with an
+# editable install got the bare "cannot import name 'DenseMatrix_cfloat32'".
+#
+# Both directions matter — reframing too little leaves the original confusion,
+# reframing too much mislabels an unrelated failure as a stale build. Each runs
+# in a subprocess because it has to manipulate sys.modules before mtl5 is
+# imported, which cannot be undone within a live interpreter.
+# ---------------------------------------------------------------------------
+
+
+def _run(code: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def test_a_stale_core_produces_the_actionable_message():
+    """Load the real extension, hide one class a newer .py layer imports, and
+    confirm the guard explains the rebuild instead of leaking the raw error.
+
+    The extension is loaded through ExtensionFileLoader rather than
+    importlib.util.find_spec: find_spec imports the PARENT package first, which
+    would run mtl5/__init__.py to completion before anything could be hidden.
+    """
+    result = _run("""
+        import importlib.machinery, importlib.util, sys
+        import mtl5._core as probe
+        path = probe.__file__
+        del sys.modules["mtl5._core"], sys.modules["mtl5"], probe
+
+        loader = importlib.machinery.ExtensionFileLoader("mtl5._core", path)
+        spec = importlib.util.spec_from_loader("mtl5._core", loader)
+        stale = importlib.util.module_from_spec(spec)
+        loader.exec_module(stale)
+        delattr(stale, "DenseMatrix_cfloat32")   # pretend it predates #70
+        sys.modules["mtl5._core"] = stale
+
+        try:
+            import mtl5
+        except ImportError as exc:
+            print(exc)
+        else:
+            print("NO ERROR")
+    """)
+    out = result.stdout
+    assert "NO ERROR" not in out, "the guard did not fire on a stale extension"
+    assert "out of sync" in out
+    assert "DenseMatrix_cfloat32" in out, "the missing symbol must be named"
+    assert "pip install -e ." in out, "the message must say how to fix it"
+
+
+def test_an_unrelated_import_error_is_not_mislabelled():
+    """A failure that is not about _core must surface as itself.
+
+    Reframing everything would be worse than reframing nothing: it would send
+    someone with a missing dependency off rebuilding a C++ extension.
+    """
+    result = _run("""
+        import sys, types
+        # A stand-in for mtl5.tensor that fails for an unrelated reason.
+        broken = types.ModuleType("mtl5.tensor")
+        def _boom():
+            raise ImportError("some unrelated dependency is not installed")
+        broken.__getattr__ = lambda name: _boom()
+        sys.modules["mtl5.tensor"] = broken
+
+        import mtl5  # tensor is already in sys.modules, so this should succeed
+        print("IMPORTED")
+    """)
+    # The point is only that mtl5 does not blame _core for something else; if
+    # the import succeeds that is fine too.
+    assert "out of sync" not in result.stdout + result.stderr

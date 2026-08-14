@@ -207,6 +207,31 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **The stale-extension guard now catches a missing class, not just a missing
+  submodule.** `mtl5/__init__.py` reframes an `ImportError` from `_core` into a
+  "rebuild your extension" message, and it did not fire for the case that
+  actually reached a user on an editable install:
+
+  ```
+  ImportError: cannot import name 'DenseMatrix_cfloat32' from 'mtl5._core'
+  ```
+
+  The guard probed a fixed tuple of submodules — `tensor`, `view`, `mg`,
+  `mixed`, `array`, `backends`, `build_info`. All seven still existed in that
+  build, so the check passed and the bare error surfaced anyway. What #69-#73
+  added to `_core` were **classes**, which the tuple had no way to notice, and
+  its own comment ("extend the tuple when a new top-level submodule is added")
+  described a maintenance step that would not have helped.
+
+  The `_core` imports are now wrapped and the `ImportError` reframed, so every
+  symbol is covered with no list to maintain and nothing to keep in sync. The
+  reframing is conditional on the error mentioning `_core`: an unrelated
+  `ImportError` — a missing dependency inside `tensor.py`, say — still surfaces
+  as itself rather than sending someone off to rebuild a C++ extension for no
+  reason.
+
+  Both directions are tested, in subprocesses, against the real extension.
+
 - **The accumulator tests ranked accumulators against a float64 reference, so
   they penalised the quire for being exact.** Tests only — no shipped code
   changed, and the binding behaviour was always correct. The reference was
