@@ -262,6 +262,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.6 (2026-08-14)
+
+### Features
+
+- **bench**: Add an --accumulators axis to measure what exactness costs
+  ([#76](https://github.com/stillwater-sc/mtl5-python/pull/76),
+  [`6911eeb`](https://github.com/stillwater-sc/mtl5-python/commit/6911eeb7057be31e8c0ac1b2478aaf23b3d2b333))
+
+
 ## v5.9.5 (2026-08-14)
 
 ### Documentation
