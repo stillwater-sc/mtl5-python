@@ -37,15 +37,85 @@ permissions:
   contents: read
 
 jobs:
+  # Build and TEST a repaired wheel on every platform BEFORE the version is cut
+  # (#81). Nothing here is published or uploaded; the wheels are thrown away.
+  # The only product is a pass/fail that `release` depends on.
+  #
+  # Why this exists: the tag, the release commit and the GitHub Release used to
+  # be created before anything was built, so any wheel failure left a tagged,
+  # released version with nothing on PyPI — recoverable only by deleting the tag
+  # and Release and reverting the release commit. That is not hypothetical; it
+  # happened on v5.9.8 (#80).
+  #
+  # And it is precisely the failure this job can catch, because CIBW_TEST_COMMAND
+  # below is the ONLY place a REPAIRED wheel is exercised anywhere in CI.
+  # delvewheel (Windows), delocate (macOS) and auditwheel (Linux) each rewrite
+  # the wheel and how it resolves its libraries, so a repaired wheel can fail
+  # where the in-tree build every PR lane tests succeeds. v5.9.8 died on exactly
+  # that: "DLL load failed while importing _core" from a test that loaded the
+  # .pyd by path, bypassing the package __init__ where a repaired wheel sets up
+  # the DLL search path.
+  #
+  # Push only. On a human-cut release or a manual dispatch the tag already
+  # exists or nothing is being tagged, so there is no window to protect and no
+  # reason to pay for the build.
+  #
+  # Cost is contained by building ONE Python per platform rather than three: the
+  # risk being guarded is platform packaging and library repair, which does not
+  # vary by interpreter version. That keeps this at 4 builds against the release
+  # path's 12.
+  #
+  # Known limitation: these wheels carry the PRE-bump version, since the bump
+  # happens in `release` below. The artifact tested is therefore not
+  # byte-identical to the one published — same sources and same repair, one
+  # version string apart. Closing that gap needs the version computed before the
+  # build (option 2 in #81), which is a larger change.
+  validate-wheels:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel
+        run: pip install cibuildwheel
+
+      - name: Build and test a repaired wheel (discarded)
+        # Relative path, matching build-wheels below: an absolute /tmp is not a
+        # path on the Windows runner. Nothing uploads this directory, so the
+        # wheels go nowhere.
+        run: cibuildwheel --output-dir validate-wheelhouse
+        env:
+          CIBW_ARCHS: "auto64"
+          CIBW_BUILD: "cp312-*"
+          CIBW_SKIP: "*-musllinux*"
+          CIBW_TEST_REQUIRES: pytest numpy scipy
+          CIBW_TEST_COMMAND: pytest {project}/tests -v
+
   # Automated versioning — push to main only. semantic-release analyzes
   # conventional commits since the last tag and, if a release is warranted,
   # bumps the version, updates the changelog, commits, tags, pushes, and creates
   # the GitHub Release. Outputs whether it released and the new tag.
   #
+  # Gated on validate-wheels so the tag is never created ahead of a wheel that
+  # cannot be built or cannot pass its own tests (#81). If validation fails,
+  # this is skipped, `released` is never set, and the build/publish jobs below
+  # short-circuit on that — nothing is tagged and nothing is published.
+  #
   # Versioning policy: mtl5-python follows MTL5's major.minor; semantic-release
   # manages only PATCH (feat/fix/perf/refactor → patch). Major/minor bumps are
   # manual: edit pyproject.toml, commit, then semantic-release resumes.
   release:
+    needs: [validate-wheels]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
