@@ -48,6 +48,69 @@ exceeds `--max-op-seconds` (default 2s) is reported as `too slow` and the sweep
 stops climbing sizes for that pair. Without it, a `qd_cascade` GEMM at n=128
 would wedge the run for minutes.
 
+### The accumulator axis
+
+`dot`, `gemv` and `gemm` take an `accumulator=` argument — the precision the
+sum is carried in, independent of the element type. `--accumulators` sweeps it:
+
+```bash
+python benchmarks/bench_blas.py --kernels dot --accumulators quire f64
+```
+
+Results are reported as **cost against the same dtype's default accumulator**
+(its own element precision), in a `vs default` column. That is deliberately not
+the `vs f64` ratio: the question here is "what does exactness cost me for this
+format", and measuring it against float64 would bury the answer under the
+format's own slowness.
+
+Which accumulators exist is read off the extension via
+`mtl5.mixed.accumulators()`, never hardcoded — a quire exists only for the four
+families Universal ships an `fdp.hpp` for (posit, cfloat, lns, fixpnt), so
+`takum32` and the cascades are skipped rather than filled with rejection rows.
+`lu` and `qr` take no accumulator and are not swept. Native `f32`/`f64`
+`gemv`/`gemm` report `not instantiated` for a non-default accumulator, because
+the top-level `mtl5.matvec`/`matmul` have no such parameter — only the
+`mixed.*` entry points do.
+
+**There is no single answer to "what does the quire cost" — it spans a factor
+of 40 across formats.** One recorded run (x86_64, single thread, `dot`,
+n=100000 except `fixpnt16`/`lns32` at n=10000), against each dtype's own
+default accumulator:
+
+| dtype | quire | `f64` accumulator |
+|---|---:|---:|
+| `posit32` | **0.86x** | 0.35x |
+| `fixpnt16` | 1.66x | — |
+| `cfloat32` | 3.02x | 0.50x |
+| `lns32` | **36.7x** | 0.93x |
+
+For the posit family exactness is free — slightly *cheaper* than element-type
+accumulation, because posit addition is expensive to emulate while a quire
+accumulate is fixed-point. For `lns32` it is prohibitive: logarithmic
+multiplication is cheap, but every term must leave the log domain to reach a
+fixed-point accumulator. Budgeting on "the quire costs about X" would be wrong
+for three of these four formats.
+
+A second result falls out of the same sweep: accumulating in `f64` is
+consistently *cheaper* than accumulating in the emulated element type, because
+a native double add costs almost nothing next to an emulated one. If you do not
+need exactness, `accumulator="f64"` is usually both faster and more accurate
+than the default.
+
+The quire is genuinely exact, which is worth confirming before trusting a
+speed result — 4000 `posit32` terms against an exact rational reference over
+the rounded operands:
+
+| accumulator | relative error |
+|---|---|
+| default (element) | 9.2e-07 |
+| **quire** | **1.3e-16** — correctly rounded |
+| `f64` | 7.6e-14 |
+| `f32` | 1.6e-05 |
+
+Re-run the sweep on your own host: these ratios move with build flags and
+architecture like every other number here.
+
 ### Build flags dominate
 
 Every report embeds `mtl5.build_info()`, the thread count and the host

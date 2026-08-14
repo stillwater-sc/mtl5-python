@@ -141,3 +141,118 @@ def test_unavailable_is_reported_not_raised(bench, monkeypatch):
     assert r.status == "unavailable"
     assert r.seconds_per_op is None
     assert r.detail
+
+
+# ---------------------------------------------------------------------------
+# The accumulator axis (#73 item 2)
+# ---------------------------------------------------------------------------
+
+
+def test_accumulator_defaults_to_the_element_precision_only(bench):
+    """Without --accumulators the sweep must be exactly what it always was, so
+    the axis cannot silently multiply everyone's run time."""
+    assert bench.DEFAULT_ACC == "default"
+
+    class Args:
+        accumulators = [bench.DEFAULT_ACC]
+
+    for kernel in bench.KERNELS:
+        assert bench._accumulators_for(kernel, "posit32", Args()) == [bench.DEFAULT_ACC]
+
+
+def test_accumulators_are_read_off_the_extension_not_hardcoded(bench):
+    """A quire exists only for the families Universal ships an fdp.hpp for.
+
+    The harness must ask mtl5.mixed.accumulators() rather than carry its own
+    list, or it drifts the moment a type is added — which is exactly how
+    accumulators() itself once came to advertise a quire that dot() rejected.
+    """
+
+    class Args:
+        accumulators = ["quire"]
+
+    # posit32 has one; takum32 does not.
+    assert "quire" in bench._accumulators_for("dot", "posit32", Args())
+    assert "quire" not in bench._accumulators_for("dot", "takum32", Args())
+    assert "quire" not in bench._accumulators_for("dot", "f64", Args())
+
+
+def test_the_default_is_always_swept_and_always_first(bench):
+    """Every other row's ratio is measured against it, so it cannot be
+    omitted, and it must be measured before the rows that reference it."""
+
+    class Args:
+        accumulators = ["quire", "f64"]
+
+    accs = bench._accumulators_for("dot", "posit32", Args())
+    assert accs[0] == bench.DEFAULT_ACC
+    assert set(accs) == {bench.DEFAULT_ACC, "quire", "f64"}
+
+
+def test_lu_and_qr_have_no_accumulator_axis(bench):
+    """They take no such parameter; sweeping them would invent an axis."""
+
+    class Args:
+        accumulators = ["quire", "f64"]
+
+    for kernel in ("lu", "qr"):
+        assert bench._accumulators_for(kernel, "posit32", Args()) == [bench.DEFAULT_ACC]
+    for kernel in bench.ACC_KERNELS:
+        assert len(bench._accumulators_for(kernel, "posit32", Args())) > 1
+
+
+def test_native_gemm_reports_an_accumulator_as_unavailable(bench):
+    """mtl5.matmul has no accumulator parameter, unlike mixed.matmul. That must
+    land as an `unavailable` row rather than crashing the sweep or, worse,
+    silently timing the default under another label."""
+
+    class Args:
+        seed = 0
+        min_time = 0.001
+        repeat = 1
+        max_op_seconds = 2.0
+
+    r = bench._measure("gemm", "f64", 8, Args(), "f64")
+    assert r.status == "unavailable"
+    assert r.accumulator == "f64"
+    assert "accumulator" in r.detail
+
+
+def test_accumulator_sweep_end_to_end(bench, tmp_path):
+    # f64 is included because the harness refuses to report a sweep whose
+    # baseline produced nothing — a posit32-only run exits 1 by design. It also
+    # exercises the other half of the axis: f64 has no quire, so it must come
+    # back with the default row alone rather than an error row.
+    out = tmp_path / "acc.json"
+    rc = bench.main(
+        [
+            "--kernels",
+            "dot",
+            "--dtypes",
+            "f64",
+            "posit32",
+            "--accumulators",
+            "quire",
+            "--sizes",
+            "512",
+            "--min-time",
+            "0.001",
+            "--repeat",
+            "1",
+            "--json",
+            str(out),
+        ]
+    )
+    assert rc == 0
+
+    rows = json.loads(out.read_text())["results"]
+    assert {r["accumulator"] for r in rows if r["dtype"] == "f64"} == {"default"}
+
+    by_acc = {r["accumulator"]: r for r in rows if r["status"] == "ok" and r["dtype"] == "posit32"}
+    assert set(by_acc) == {"default", "quire"}
+
+    # The default row is the reference for the ratio, so it carries none.
+    assert by_acc["default"]["slowdown_vs_default_accumulator"] == pytest.approx(1.0)
+    # The quire row must carry a ratio against it — structure, not magnitude.
+    assert by_acc["quire"]["slowdown_vs_default_accumulator"] is not None
+    assert by_acc["quire"]["slowdown_vs_default_accumulator"] > 0.0
