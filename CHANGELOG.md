@@ -295,6 +295,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.7 (2026-08-14)
+
+### Features
+
+- **bench**: Guard the benchmark numbers against regression
+  ([#77](https://github.com/stillwater-sc/mtl5-python/pull/77),
+  [`43fe974`](https://github.com/stillwater-sc/mtl5-python/commit/43fe9748dc49e63627db063d053e2bea802259a7))
+
+
 ## v5.9.6 (2026-08-14)
 
 ### Features
