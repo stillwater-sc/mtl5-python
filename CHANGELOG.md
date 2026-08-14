@@ -15,6 +15,51 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **`--accumulators` on the BLAS benchmark: what does exactness cost?**
+  ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73) item 2.)
+  `dot`, `gemv` and `gemm` take an `accumulator=` argument — the precision the
+  sum is carried in, independent of the element type — and its price had never
+  been measured. The new axis reports each accumulator against **the same
+  dtype's default**, not against float64, because the question is what
+  exactness costs for a given format rather than how slow that format is.
+
+  **There is no single answer — the quire's cost spans a factor of 40 across
+  formats.** On one recorded run (x86_64, single thread, `dot`), against each
+  dtype's own default accumulator:
+
+  | dtype | quire | `f64` accumulator |
+  |---|---:|---:|
+  | `posit32` | **0.86x** | 0.35x |
+  | `fixpnt16` | 1.66x | — |
+  | `cfloat32` | 3.02x | 0.50x |
+  | `lns32` | **36.7x** | 0.93x |
+
+  So for the posit family exactness is free — slightly *cheaper* than
+  accumulating in the element type, because posit addition is expensive to
+  emulate while a quire accumulate is fixed-point. For `lns32` it is
+  prohibitive: logarithmic multiplication is cheap, but every term has to leave
+  the log domain to reach a fixed-point accumulator. Anyone budgeting an
+  experiment on "the quire costs about X" would be wrong for three of these
+  four formats, which is the point of being able to measure it.
+
+  A second result falls out: accumulating in `f64` is consistently *cheaper*
+  than accumulating in the emulated element type (0.35x-0.93x), since a native
+  double add costs almost nothing next to an emulated one.
+
+  Accuracy was verified rather than assumed — a faster quire that had quietly
+  stopped accumulating exactly would look like a win. Against an exact rational
+  reference over the rounded operands, 4000 `posit32` terms: the quire is
+  correctly rounded at 1.3e-16 while the element default carries 9.2e-07, seven
+  orders of magnitude worse.
+
+  Availability is read from `mtl5.mixed.accumulators()` rather than hardcoded,
+  so only the four families Universal ships an `fdp.hpp` for are swept for a
+  quire; `takum32` and the cascades are skipped instead of filling the table
+  with rejections. `lu`/`qr` have no accumulator parameter and are not swept.
+  Native `f32`/`f64` `gemv`/`gemm` report the gap honestly: the top-level
+  `mtl5.matvec`/`matmul` take no accumulator, only the `mixed.*` entry points
+  do.
+
 - **Every dense factorization now covers every Universal number system.**
   `lq`, `cholesky`, `ldlt` and `bunch_kaufman` join `lu` and `qr`, so all six
   are available for float32, float64 and all fifteen Universal dtypes
