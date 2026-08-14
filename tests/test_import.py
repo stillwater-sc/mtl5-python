@@ -235,17 +235,39 @@ def test_an_unrelated_import_error_is_not_mislabelled():
     someone with a missing dependency off rebuilding a C++ extension.
     """
     result = _run("""
-        import sys, types
-        # A stand-in for mtl5.tensor that fails for an unrelated reason.
-        broken = types.ModuleType("mtl5.tensor")
-        def _boom():
-            raise ImportError("some unrelated dependency is not installed")
-        broken.__getattr__ = lambda name: _boom()
-        sys.modules["mtl5.tensor"] = broken
+        import sys
 
-        import mtl5  # tensor is already in sys.modules, so this should succeed
-        print("IMPORTED")
+        # Fail the mtl5.tensor import itself, from the import machinery, so the
+        # error is raised INSIDE the try that wraps the _core imports and the
+        # guard has to decide what to do with it. Stubbing sys.modules instead
+        # would not do: `from mtl5 import tensor` binds an already-cached
+        # module without ever touching it, so a stub that raises on attribute
+        # access never fires and the import quietly succeeds.
+        class Boom:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "mtl5.tensor":
+                    raise ImportError("some unrelated dependency is not installed")
+                return None
+
+        sys.meta_path.insert(0, Boom())
+
+        try:
+            import mtl5
+        except ImportError as exc:
+            print("RAISED:", exc)
+        else:
+            print("NO ERROR")
     """)
-    # The point is only that mtl5 does not blame _core for something else; if
-    # the import succeeds that is fine too.
-    assert "out of sync" not in result.stdout + result.stderr
+    out = result.stdout
+    ctx = f"\\nstdout={out!r}\\nstderr={result.stderr!r}"
+
+    assert "NO ERROR" not in out, "the unrelated failure never happened" + ctx
+    assert "some unrelated dependency is not installed" in out, (
+        "the original error must survive" + ctx
+    )
+    assert "out of sync" not in out, (
+        "an unrelated ImportError was mislabelled as a stale extension" + ctx
+    )
+    assert "pip install -e ." not in out, (
+        "must not tell someone with a missing dependency to rebuild C++" + ctx
+    )

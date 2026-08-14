@@ -212,7 +212,7 @@ against, and semantic-release manages only the **patch** component.
   "rebuild your extension" message, and it did not fire for the case that
   actually reached a user on an editable install:
 
-  ```
+  ```text
   ImportError: cannot import name 'DenseMatrix_cfloat32' from 'mtl5._core'
   ```
 
