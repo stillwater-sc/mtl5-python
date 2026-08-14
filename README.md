@@ -216,10 +216,17 @@ ld.diagonal()  # D — its signs are the inertia
 All accept an MTL5 matrix or a float32/float64 NumPy array, alongside the
 existing `mtl5.lu` and `mtl5.cholesky`.
 
+Coverage across the Universal number systems is not uniform, so it is worth
+knowing before planning a comparison. `lu` and `qr` cover **all fifteen**;
+`ldlt` and `cholesky` cover **ten** — every one except `cfloat32`, `takum32`
+and the three cascades; `lq` and `bunch_kaufman` are float32/float64 only. The
+gaps are tracked in
+[#73](https://github.com/stillwater-sc/mtl5-python/issues/73).
+
 ### Cholesky vs LDLᵀ across number systems
 
-`ldlt` and `cholesky` are both available for float32, float64 and **all ten
-Universal dtypes** — the integer element types are not supported — which is what
+`ldlt` and `cholesky` are both available for float32, float64 and ten of the
+Universal dtypes — the integer element types are not supported — which is what
 makes the interesting comparison possible. Cholesky takes square roots, so
 it refuses a matrix that has drifted out of positive-definiteness — the failure
 mode of a Kalman covariance update in low precision. LDLᵀ has no square roots,
@@ -884,6 +891,35 @@ Check what a given install actually has:
 
 `set_backend()` validates against this build rather than silently accepting a
 backend that was never compiled in; backend selection itself is compile-time.
+
+### Benchmarking the number systems
+
+The emulated formats are much slower than hardware float, and *how much* is the
+number that decides whether a mixed-precision experiment fits in a night.
+`benchmarks/bench_blas.py` measures it — `dot`, `gemv`, `gemm`, `lu` and `qr`
+across the bound number systems — and reports **slowdown against float64**
+rather than raw GFLOP/s, because that is the figure experiment planning is
+built from.
+
+```bash
+python benchmarks/bench_blas.py            # default sweep
+python benchmarks/bench_blas.py --quick    # smallest sizes, seconds
+python benchmarks/bench_blas.py --json out.json
+```
+
+For scale, one recorded run (x86_64, single thread, no `-march=native`), GEMM at
+n=64: `takum32` 434x float64, `cfloat32` 570x, `posit32` 4024x. Those are an
+example from one host, not portable constants — every report embeds
+`build_info()`, thread count and architecture for that reason.
+
+`cfloat32` is the one to compare against rather than `float`: it is IEEE
+binary32 through the same emulation layer, so `posit32 / cfloat32` separates
+what a *format* costs from what *emulation* costs.
+
+**[`benchmarks/README.md`](benchmarks/README.md)** documents the methodology and
+how to read the output — including two traps: the small-`n` rows understate
+every ratio, and a narrow format can time perfectly normally while computing
+nothing useful.
 
 ## Development
 
