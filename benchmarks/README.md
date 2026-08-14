@@ -146,6 +146,26 @@ For a like-for-like comparison against a tuned BLAS, build with
 - FLOP counts are the standard leading-order ones: `2n` (dot), `2n²` (gemv),
   `2n³` (gemm), `⅔n³` (lu), `⁴⁄₃n³` (qr).
 
+### Regression guard
+
+`tests/test_benchmark_regression.py` runs a small `gemm` sweep and asserts
+order-of-magnitude bounds on ratios taken **within** that run, so a build change
+that made an emulated path fall back, or silently turned the vectoriser off,
+fails the suite rather than passing unnoticed.
+
+Only `gemm` is guarded, and that was decided by measurement rather than
+preference. Over four runs per configuration, `gemm` ratios reproduced to
+1.03–1.04x while `gemv` moved 1.42x and `dot` up to 3.29x — `dot` stays
+unstable even at n=10000 and with best-of-3, so no size or repeat count
+rescues it. A guard that swings 3x between identical runs cannot tell a
+regression from a Tuesday.
+
+It costs about six seconds and is marked `perf`:
+
+```bash
+pytest -m "not perf"     # skip it where timing is meaningless
+```
+
 ### JSON output
 
 `--json` writes `{"meta": {...}, "results": [...]}`, where `meta` carries the
