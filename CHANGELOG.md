@@ -320,6 +320,19 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.8 (2026-08-14)
+
+### Bug Fixes
+
+- **import**: Catch a stale extension missing any symbol, not just a submodule
+  ([#78](https://github.com/stillwater-sc/mtl5-python/pull/78),
+  [`1c89169`](https://github.com/stillwater-sc/mtl5-python/commit/1c891698bca9eded57c2d13c3b8d2cd0ad62143f))
+
+- **tests**: Stop loading the extension by path in the stale-core test
+  ([#80](https://github.com/stillwater-sc/mtl5-python/pull/80),
+  [`b945f31`](https://github.com/stillwater-sc/mtl5-python/commit/b945f31ecc4282f01e5cc2013980d31749273a06))
+
+
 ## v5.9.7 (2026-08-14)
 
 ### Features
