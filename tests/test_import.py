@@ -178,36 +178,32 @@ def _run(code: str) -> subprocess.CompletedProcess:
 
 
 def test_a_stale_core_produces_the_actionable_message():
-    """Load the real extension, hide one class a newer .py layer imports, and
-    confirm the guard explains the rebuild instead of leaking the raw error.
+    """Hide one class a newer .py layer imports, and confirm the guard explains
+    the rebuild instead of leaking the raw error.
 
-    The extension is loaded through ExtensionFileLoader rather than
-    importlib.util.find_spec: find_spec imports the PARENT package first, which
-    would run mtl5/__init__.py to completion before anything could be hidden.
+    Covers the CLASS half of the hazard — the case that actually reached a
+    user — against the real extension's symbol table.
     """
     result = _run("""
-        import glob, importlib.machinery, importlib.util, os, sys
+        import sys, types
 
-        # Locate the extension WITHOUT importing it. find_spec on a top-level
-        # package does not execute its __init__.py, so _core is never
-        # initialised here — which matters: `import mtl5._core` followed by
-        # exec_module on the same file would initialise a single-phase
-        # extension twice in one process and abort the interpreter. (It did,
-        # silently, with empty stdout.)
-        pkg = importlib.util.find_spec("mtl5")
-        pkgdir = list(pkg.submodule_search_locations)[0]
-        cands = [
-            p
-            for suffix in importlib.machinery.EXTENSION_SUFFIXES
-            for p in glob.glob(os.path.join(pkgdir, "_core" + suffix))
-        ]
-        assert cands, f"no _core extension found in {pkgdir}"
+        # Import normally, then stand a PROXY in front of the real extension
+        # with one class removed. Deliberately not ExtensionFileLoader on the
+        # .pyd/.so directly: that bypasses mtl5/__init__.py, which on Windows
+        # is where a repaired wheel sets up the DLL search path, and the load
+        # fails with "DLL load failed while importing _core". It also avoids
+        # initialising a single-phase extension twice in one process. Copying
+        # the module dict reproduces a stale build for import purposes on every
+        # platform, which is all this test needs.
+        import mtl5._core as real
+        stale = types.ModuleType("mtl5._core")
+        stale.__dict__.update(vars(real))
+        del stale.DenseMatrix_cfloat32           # pretend it predates #70
 
-        loader = importlib.machinery.ExtensionFileLoader("mtl5._core", cands[0])
-        spec = importlib.util.spec_from_loader("mtl5._core", loader)
-        stale = importlib.util.module_from_spec(spec)
-        loader.exec_module(stale)
-        delattr(stale, "DenseMatrix_cfloat32")   # pretend it predates #70
+        # Drop the package so __init__.py re-runs against the proxy. _core
+        # itself must be replaced, not deleted, or the re-import would just
+        # load the real extension again.
+        del sys.modules["mtl5"]
         sys.modules["mtl5._core"] = stale
 
         try:
