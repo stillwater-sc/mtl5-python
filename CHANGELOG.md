@@ -15,6 +15,32 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Every dense factorization now covers every Universal number system.**
+  `lq`, `cholesky`, `ldlt` and `bunch_kaufman` join `lu` and `qr`, so all six
+  are available for float32, float64 and all fifteen Universal dtypes
+  ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73)).
+
+  Two separate gaps, one cause. `cholesky` and `ldlt` kept hand-copied
+  instantiation lists that stopped at `lns32`, so they missed the five types
+  added in #70; `lq` and `bunch_kaufman` were never extended past
+  float32/float64 at all. Every factorization now routes through the single
+  `for_each_universal<>` list added in #71, so adding a number type is one line
+  and coverage cannot drift again — asserted directly by a test that compares
+  the six coverage sets and fails on any difference.
+
+  Nothing upstream had to change: all four compile for all fifteen types.
+  Bunch-Kaufman's 1x1/2x2 block pivoting is comparisons and arithmetic, so no
+  number system has to opt in.
+
+  **Availability is not usability, and the two diverge sharply.** The
+  orthogonalizing pair fails first — `lq` inherits `qr`'s degeneracy exactly,
+  with `fp8` and `fixpnt8` returning `Q == I` while looking perfect. The
+  solving three have no orthogonality to lose and stay usable to 8 bits, the
+  worst measured residual being ~6e-2. One divergence is worth knowing:
+  `fixpnt16` is fine for `qr` and saturates for `lq` at the same width, because
+  LQ works along rows and on this fixture that order drives an intermediate
+  past `fixpnt<16,8>`'s limit of 128.
+
 - **`lu()` and `qr()` for every Universal number system.** Both were
   float32/float64 only, which was the last prerequisite in
   [#69](https://github.com/stillwater-sc/mtl5-python/issues/69) — the
