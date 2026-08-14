@@ -33,6 +33,14 @@ vectoriser silently off, an emulated path falling back, a format losing its
 fast route — not detecting a 20% drift that a busier runner produces anyway.
 Every bound has at least 3x headroom against every value measured across all
 configurations tried during #69-#73, including deliberately contended runs.
+
+Runtime is bounded rather than merely observed. `max_op_seconds` caps a single
+call, and because the harness applies it only after the warmup and not to the
+timing batches, the real ceiling is about `(1 + repeat) * max_op_seconds` —
+~20s at the 5s set below, against ~6s healthy. A regression slower than 5s per
+call marks the row `too_slow`, which drops the dtype and trips
+`test_the_guard_is_not_vacuous`, so a large regression fails fast rather than
+tying up a worker for minutes.
 """
 
 import importlib.util
@@ -84,7 +92,19 @@ def sweep(bench):
         accumulators = [bench.DEFAULT_ACC]
         min_time = 0.05
         repeat = 3
-        max_op_seconds = 30.0
+        # Bounds the worst case, and does it in the right direction. The
+        # harness checks this only AFTER the warmup call returns and applies no
+        # further wall-clock limit to the timing batches, so the true ceiling is
+        # roughly (1 + repeat) * max_op_seconds. At 5s that is ~20s; the 30s
+        # this first carried would have allowed ~100s on a CI worker while the
+        # docstring promised six.
+        #
+        # 5s is ~4.5x the healthy posit32 time, so it will not false-trip. And
+        # a regression bigger than that makes the row `too_slow`, which drops
+        # the dtype and fails test_the_guard_is_not_vacuous — a large
+        # regression therefore fails FAST rather than slowly, which is the
+        # behaviour worth having.
+        max_op_seconds = 5.0
         seed = 0
         verbose = False
 
@@ -133,9 +153,19 @@ def test_emulation_cost_stays_within_an_order_of_magnitude_band(sweep):
     between 2900x and 6600x across builds during #69-#73 without anything being
     wrong, because it also tracks how well the NATIVE side is vectorised.
     """
-    r = sweep["posit32"]["slowdown_vs_baseline"] if "posit32" in sweep else None
-    if r is None:
+    if "posit32" not in sweep:
         pytest.skip("posit32 produced no measurement")
+
+    # A missing ratio on a row that measured OK is a broken measurement, not a
+    # reason to skip. It means the harness could not pair this row with a
+    # baseline, and skipping would leave the guard silently unexecuted while
+    # the suite stayed green — the failure mode a regression guard can least
+    # afford.
+    r = sweep["posit32"]["slowdown_vs_baseline"]
+    assert r is not None, (
+        "posit32 measured OK but carries no slowdown_vs_baseline — the harness "
+        "found no f64 baseline to pair it with, so this guard never ran"
+    )
     assert 10.0 < r < 100_000.0, (
         f"posit32 {KERNEL} = {r:.0f}x float64, outside the 10-100000x band. "
         "Below the floor usually means the NATIVE path regressed — a "
