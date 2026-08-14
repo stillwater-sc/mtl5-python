@@ -217,6 +217,25 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.9.5 (2026-08-14)
+
+### Documentation
+
+- Make the benchmark findable and say what it is for in --help
+  ([#74](https://github.com/stillwater-sc/mtl5-python/pull/74),
+  [`b8f607d`](https://github.com/stillwater-sc/mtl5-python/commit/b8f607d25cc069200078cd17ce80ee6d0a7c0bfe))
+
+- **changelog**: Stop the benchmark entry contradicting the LU/QR entry
+  ([#72](https://github.com/stillwater-sc/mtl5-python/pull/72),
+  [`774ad8d`](https://github.com/stillwater-sc/mtl5-python/commit/774ad8d876d7c7164cbac9ccd0d0095388d87204))
+
+### Features
+
+- **factor**: Extend lq, cholesky, ldlt and bunch_kaufman to every Universal type
+  ([#75](https://github.com/stillwater-sc/mtl5-python/pull/75),
+  [`b9324d3`](https://github.com/stillwater-sc/mtl5-python/commit/b9324d30624988d5cad3f2ba8bfc1309e89b44ac))
+
+
 ## v5.9.4 (2026-08-13)
 
 ### Features
