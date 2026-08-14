@@ -226,33 +226,61 @@ class TestAcrossNumberSystems:
             assert msg.startswith(f"{name}:")
             assert "factor" not in msg.lower().replace("factorization", "")
 
-    def test_convert_hint_only_where_convert_would_help(self):
-        """lq is float-only, so pointing at convert() would just earn a second
-        TypeError. qr and ldlt have Universal instantiations, so for them the
-        hint is the useful answer.
+    def test_convert_hint_offered_by_every_dispatched_factorization(self):
+        """Every dense factorization now has Universal instantiations (#73), so
+        pointing an unsupported NumPy dtype at convert() is always the useful
+        answer.
 
-        The hint is chosen by probing _core, not from a hardcoded list, which is
-        why it followed qr gaining Universal instantiations in #69 without an
-        edit. This asserts the two branches stay distinguishable.
+        cholesky is excluded because it is not dispatched through the Python
+        layer at all — it is bound straight from _core, so nanobind implicitly
+        converts an int64 array to float32 and it never reaches this message.
+        Long-standing behaviour, unrelated to #73, but it does mean
+        `mtl5.cholesky(int_array)` silently picks a precision where the other
+        four raise.
         """
-        for fn in (mtl5.ldlt, mtl5.qr):
+        for fn in (mtl5.ldlt, mtl5.qr, mtl5.lq, mtl5.bunch_kaufman):
             with pytest.raises(TypeError, match="convert"):
                 fn(np.eye(3, dtype=np.int64))
 
+    def test_cholesky_silently_accepts_an_integer_array(self):
+        """Pinning the asymmetry above rather than leaving it as folklore.
+
+        Asserted on the class rather than a `.dtype` property, because the
+        native CholeskyFactor does not carry one — only the Universal
+        instantiations do. A second small inconsistency in the same corner.
+        """
+        fac = mtl5.cholesky(np.eye(3, dtype=np.int64))
+        assert type(fac).__name__ == "CholeskyFactor_f32"
+
+    def test_float_only_hint_survives_for_a_factorization_without_universal_support(self):
+        """The other branch of that hint no longer has a caller.
+
+        Nothing bound is float-only any more, so the "supports float32 and
+        float64 only" message is unreachable through the public functions. It
+        is kept for the next factorization added ahead of its instantiations,
+        and exercised here directly rather than deleted along with the last
+        function that happened to demonstrate it.
+        """
+        from mtl5 import _as_mtl5_matrix
+
         with pytest.raises(TypeError) as exc:
-            mtl5.lq(np.eye(3, dtype=np.int64))
+            _as_mtl5_matrix("newfac", "NoSuchFactor", np.eye(3, dtype=np.int64))
         assert "convert" not in str(exc.value)
         assert "float32 and float64 only" in str(exc.value)
 
-    def test_universal_dtype_rejected_by_float_only_factorizations(self):
-        """lq is the only one left that refuses a Universal dtype."""
-        M = mtl5.convert(np.eye(4), "posit32")
-        with pytest.raises(TypeError, match="lq is not available for dtype"):
-            mtl5.lq(M)
-
-    def test_qr_now_accepts_a_universal_dtype(self):
-        M = mtl5.convert(np.eye(4), "posit32")
-        assert mtl5.qr(M).dtype == "posit32"
+    @pytest.mark.parametrize(
+        "fn, name",
+        [
+            (mtl5.qr, "qr"),
+            (mtl5.lq, "lq"),
+            (mtl5.ldlt, "ldlt"),
+            (mtl5.cholesky, "cholesky"),
+            (mtl5.bunch_kaufman, "bunch_kaufman"),
+        ],
+    )
+    def test_every_factorization_accepts_a_universal_dtype(self, fn, name):
+        M = mtl5.convert(spd(4, seed=26), "posit32")
+        assert fn(M).dtype == "posit32"
 
     def test_rejects_a_non_matrix(self):
         with pytest.raises(TypeError, match="expected an MTL5 matrix"):
@@ -311,6 +339,8 @@ class TestBunchKaufman:
         with pytest.raises(ValueError, match="does not match factor size"):
             fac.solve(mtl5.vector(np.ones(3)))
 
-    def test_float_only(self):
-        with pytest.raises(TypeError, match="not available for dtype"):
-            mtl5.bunch_kaufman(mtl5.convert(sym(4, seed=25), "posit32"))
+    def test_available_for_universal_dtypes(self):
+        """Was float32/float64 only until #73. The 1x1/2x2 block pivoting is
+        comparisons and arithmetic, so no number system had to opt in."""
+        fac = mtl5.bunch_kaufman(mtl5.convert(sym(4, seed=25), "posit32"))
+        assert fac.dtype == "posit32"

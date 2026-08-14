@@ -332,10 +332,14 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
         suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
         if suffix is None:
             # Only suggest convert() for the factorizations that actually have
-            # Universal instantiations — lq is float32/float64 only, so sending
-            # a user there would just earn them a second TypeError. (qr and lu
-            # gained Universal instantiations in #69; this probe reads that off
-            # _core rather than a hardcoded list, so it followed along.)
+            # Universal instantiations, or the user earns a second TypeError.
+            #
+            # Since #73 every bound factorization has them, so the else branch
+            # has no caller today. It stays for the next factorization added
+            # ahead of its instantiations — this probe reads coverage off _core
+            # rather than a hardcoded list, which is why it tracked qr and lu
+            # gaining theirs in #69, then lq/cholesky/ldlt/bunch_kaufman in #73,
+            # without an edit either time.
             hint = (
                 " For another number system, convert first: mtl5.convert(a, 'posit32')."
                 if _has_universal_support(prefix)
@@ -402,6 +406,12 @@ def lq(A):
     num_cols` and L `num_rows x num_cols`. Unlike `qr`, which needs
     num_rows >= num_cols, there is no shape restriction.
 
+    Accepts float32/float64 (and complex), plus every Universal dtype via
+    `mtl5.convert()`. Being the row-space counterpart of `qr`, it shares that
+    machinery and its limits: `fp8` and `fixpnt8` degenerate to `Q == I` in the
+    same way, and `fixpnt16` saturates here even though `qr` tolerates it at
+    the same width. Read the result before trusting a narrow format.
+
     Returns a factorization exposing `.L` and `.Q`.
     """
     return _factor("lq", "LQFactor", A)
@@ -411,7 +421,8 @@ def bunch_kaufman(A):
     """Bunch-Kaufman LDL^T: symmetric indefinite with 1x1/2x2 block pivoting.
 
     The pivoting variant of `ldlt`, so it handles a symmetric matrix that plain
-    `ldlt` rejects on a zero pivot. float32 and float64 only.
+    `ldlt` rejects on a zero pivot. Available for float32/float64 and every
+    Universal dtype via `mtl5.convert()`.
 
     Returns a factorization exposing `.solve(b)` and `.ipiv()`.
     """
