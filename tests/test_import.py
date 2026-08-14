@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import tempfile
 import textwrap
 
 import mtl5
@@ -155,11 +156,24 @@ def test_all_has_no_duplicates():
 
 
 def _run(code: str) -> subprocess.CompletedProcess:
+    """Run a snippet in a fresh interpreter, from OUTSIDE the repository.
+
+    cwd matters and is not incidental. `python -c` prepends the working
+    directory to sys.path, and the subprocess inherits pytest's cwd — the repo
+    root in CI. From there the source `mtl5/` package shadows the installed one
+    and has no compiled `_core`, so the snippet dies before reaching what it
+    meant to test. That produced an empty stdout and an assertion complaining
+    about a missing substring, which said nothing about the cause.
+
+    Running from a temp directory makes the subprocess resolve `mtl5` the same
+    way an ordinary user would.
+    """
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=tempfile.gettempdir(),
     )
 
 
@@ -172,12 +186,24 @@ def test_a_stale_core_produces_the_actionable_message():
     would run mtl5/__init__.py to completion before anything could be hidden.
     """
     result = _run("""
-        import importlib.machinery, importlib.util, sys
-        import mtl5._core as probe
-        path = probe.__file__
-        del sys.modules["mtl5._core"], sys.modules["mtl5"], probe
+        import glob, importlib.machinery, importlib.util, os, sys
 
-        loader = importlib.machinery.ExtensionFileLoader("mtl5._core", path)
+        # Locate the extension WITHOUT importing it. find_spec on a top-level
+        # package does not execute its __init__.py, so _core is never
+        # initialised here — which matters: `import mtl5._core` followed by
+        # exec_module on the same file would initialise a single-phase
+        # extension twice in one process and abort the interpreter. (It did,
+        # silently, with empty stdout.)
+        pkg = importlib.util.find_spec("mtl5")
+        pkgdir = list(pkg.submodule_search_locations)[0]
+        cands = [
+            p
+            for suffix in importlib.machinery.EXTENSION_SUFFIXES
+            for p in glob.glob(os.path.join(pkgdir, "_core" + suffix))
+        ]
+        assert cands, f"no _core extension found in {pkgdir}"
+
+        loader = importlib.machinery.ExtensionFileLoader("mtl5._core", cands[0])
         spec = importlib.util.spec_from_loader("mtl5._core", loader)
         stale = importlib.util.module_from_spec(spec)
         loader.exec_module(stale)
@@ -192,10 +218,14 @@ def test_a_stale_core_produces_the_actionable_message():
             print("NO ERROR")
     """)
     out = result.stdout
-    assert "NO ERROR" not in out, "the guard did not fire on a stale extension"
-    assert "out of sync" in out
-    assert "DenseMatrix_cfloat32" in out, "the missing symbol must be named"
-    assert "pip install -e ." in out, "the message must say how to fix it"
+    # Surface stderr on failure: the first version of this test died in the
+    # subprocess and asserted against an empty string, which said nothing about
+    # why.
+    ctx = f"\\nstdout={out!r}\\nstderr={result.stderr!r}"
+    assert "NO ERROR" not in out, "the guard did not fire on a stale extension" + ctx
+    assert "out of sync" in out, ctx
+    assert "DenseMatrix_cfloat32" in out, "the missing symbol must be named" + ctx
+    assert "pip install -e ." in out, "the message must say how to fix it" + ctx
 
 
 def test_an_unrelated_import_error_is_not_mislabelled():
