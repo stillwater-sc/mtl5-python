@@ -455,7 +455,31 @@ def _positive_seconds(value: str) -> float:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
-        description="BLAS kernel throughput as a function of number type",
+        description=(
+            "Measure BLAS kernel throughput as a function of number type.\n"
+            "\n"
+            "Runs dot, gemv, gemm, lu and qr across the bound number systems and\n"
+            "reports SLOWDOWN AGAINST float64 rather than raw GFLOP/s — that is the\n"
+            "figure a mixed-precision experiment plan is built from ('posit32 GEMM\n"
+            "costs 4000x double' decides whether a sweep fits in a night).\n"
+            "\n"
+            "Reading the output:\n"
+            "  * f32/f64 gemv/gemm run MTL5's blocked, Highway-vectorised kernels\n"
+            "    while emulated types run the generic ones, so part of that gap is\n"
+            "    the vectoriser. lu and qr run the same kernel on both sides and\n"
+            "    are the like-for-like comparison.\n"
+            "  * cfloat32 is the control: IEEE binary32 through the same emulation\n"
+            "    layer, so posit32/cfloat32 separates format cost from emulation\n"
+            "    cost.\n"
+            "  * A '>' on a row means the float64 baseline is close to per-call\n"
+            "    overhead, so that ratio is a LOWER bound — prefer the larger sizes.\n"
+            "  * Timing cannot see a wrong answer. fp8 and fixpnt8 QR return the\n"
+            "    identity for Q and time perfectly normally.\n"
+            "\n"
+            "Ratios move with build flags, ISA dispatch, thread count and\n"
+            "architecture, so every report embeds all four. Full methodology:\n"
+            "benchmarks/README.md"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--kernels", nargs="+", default=KERNELS, choices=KERNELS)
