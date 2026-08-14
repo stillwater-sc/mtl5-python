@@ -15,6 +15,39 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **A regression guard on the benchmark numbers**
+  ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73) item 3, the
+  last one). The harness emitted JSON with build flags, thread count and
+  platform precisely so results could be tracked, and nothing consumed it: a
+  change that made posit32 GEMM 3x slower would not have been noticed.
+
+  Guarding timings is an easy way to build a flaky test, so both *what* is
+  asserted and *which kernel* it is asserted on were chosen from measured
+  stability. Four runs per configuration, ratios taken within each run:
+
+  | kernel | ratio | spread |
+  |---|---|---|
+  | `gemm` n=64 | posit32/takum32 | **1.04x** |
+  | `gemm` n=64 | posit32/f64 | **1.03x** |
+  | `gemv` n=256 | posit32/takum32 | 1.42x |
+  | `dot` n=10000 | posit32/takum32 | 3.29x |
+
+  **Only `gemm` is guarded.** `dot` and `gemv` were tried and rejected on those
+  numbers — a guard that swings 3x between identical runs cannot distinguish a
+  regression from a Tuesday. `dot` stays unstable even at n=10000, where the
+  operands are far above per-call overhead, and even with best-of-3, so the
+  instability is not something a larger size fixes.
+
+  Ratios are taken *within* a run, which cancels machine speed and scheduler
+  noise almost exactly and is what lets order-of-magnitude bounds hold on an
+  ordinary shared runner. The guards catch a structural regression — a
+  vectoriser silently off, an emulated path falling back, a format losing its
+  fast route — and were verified to fire by injecting each of those, rather
+  than merely observed to pass.
+
+  Marked `perf`, so `pytest -m "not perf"` skips it where timing is meaningless.
+  Costs about six seconds.
+
 - **`--accumulators` on the BLAS benchmark: what does exactness cost?**
   ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73) item 2.)
   `dot`, `gemv` and `gemm` take an `accumulator=` argument — the precision the
