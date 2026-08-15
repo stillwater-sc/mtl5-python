@@ -234,3 +234,220 @@ class TestFactorizationObjectReuse:
         A = rng.standard_normal((3, 5))
         with pytest.raises(ValueError, match="num_rows >= num_cols"):
             mtl5.qr(mtl5.convert(A, "posit32"))
+
+
+# ===========================================================================
+# LQ, Cholesky, LDL^T and Bunch-Kaufman (#73)
+#
+# These four were extended to the Universal types after LU and QR. All fifteen
+# compile, but they split into two very different groups, which is why they are
+# not tested with one shared tolerance table:
+#
+#   LQ                       shares QR's Householder machinery, so it inherits
+#                            QR's behaviour exactly -- including the fp8 /
+#                            fixpnt8 degeneracy where every reflector rounds to
+#                            zero. Orthogonalization is what narrow formats
+#                            cannot do.
+#   Cholesky / LDLT / BK     are solves, not orthogonalizations. There is no
+#                            orthogonality to lose, and they stay usable all
+#                            the way down: the worst 8-bit residual measured is
+#                            ~6e-2, against LQ's total failure at the same
+#                            width.
+# ===========================================================================
+
+# LQ tiers, measured on the same 8x8 in-range fixture. fixpnt16 is absent
+# deliberately -- see TestFixpnt16LQSaturates.
+LQ_TIERS = [
+    ("f64", 1e-14, 1e-14),
+    ("cfloat32", 1e-5, 1e-5),
+    ("posit32", 1e-6, 1e-6),
+    ("takum32", 1e-6, 1e-6),
+    ("posit64", 1e-14, 1e-14),
+    ("dd_cascade", 1e-14, 1e-14),
+    ("td_cascade", 1e-14, 1e-14),
+    ("qd_cascade", 1e-14, 1e-14),
+    ("lns32", 1e-3, 1e-3),
+    ("posit16", 1e-1, 1e-1),
+    ("fp16", 1e-1, 1e-1),
+    ("lns16", 1e-1, 1e-1),
+]
+
+# The solve-based three tolerate every width. Bounds are ~3x measured.
+SOLVE_TIERS = [
+    ("f64", 1e-14),
+    ("cfloat32", 1e-6),
+    ("posit32", 1e-7),
+    ("takum32", 1e-7),
+    ("posit64", 1e-14),
+    ("dd_cascade", 1e-14),
+    ("td_cascade", 1e-14),
+    ("qd_cascade", 1e-14),
+    ("lns32", 1e-4),
+    ("posit16", 1e-2),
+    ("fp16", 1e-2),
+    ("lns16", 1e-2),
+    ("fixpnt16", 1e-1),
+    ("posit8", 2e-1),
+    ("fp8", 2e-1),
+    ("fixpnt8", 2e-1),
+]
+
+
+def _spd(n=N, seed=10):
+    rng = np.random.default_rng(seed)
+    M = rng.standard_normal((n, n)) * 0.1
+    return (M @ M.T) / n + np.eye(n)
+
+
+def _indefinite(n=N, seed=11):
+    rng = np.random.default_rng(seed)
+    S = rng.standard_normal((n, n)) * 0.1
+    S = (S + S.T) / 2 + np.eye(n)
+    S[3, 3] = -0.5  # a direction that is genuinely negative
+    return S
+
+
+def _solve_residual(factor_fn, M, dtype):
+    """||M x - b|| / ||b|| for a right-hand side that cannot flatter the format.
+
+    b is M @ x_true for a RANDOM x_true, never M @ ones. With these
+    near-identity test matrices the true solution of `M x = ones` sits close to
+    ones itself, and at 8 bits every correction rounds away -- x is returned as
+    exactly ones, and the 'residual' measured is then ||M @ ones - ones||, a
+    property of the matrix rather than of the factorization. That artifact made
+    posit8, fp8 and fixpnt8 all score an identical 1.500e-02 and look far
+    better than they are.
+    """
+    x_true = np.random.default_rng(99).standard_normal(M.shape[0])
+    b = M @ x_true
+    x = np.asarray(factor_fn(mtl5.convert(M, dtype)).solve(mtl5.convert(b, dtype)).to_numpy())
+    return float(np.linalg.norm(M @ x - b) / np.linalg.norm(b))
+
+
+class TestNewlyExtendedAvailability:
+    @pytest.mark.parametrize(
+        "prefix", ["LQFactor", "CholeskyFactor", "LDLTFactor", "BunchKaufmanFactor"]
+    )
+    @pytest.mark.parametrize("dtype", ALL_UNIVERSAL)
+    def test_factor_class_exists(self, prefix, dtype):
+        assert hasattr(mtl5._core, f"{prefix}_{dtype}")
+
+    def test_coverage_is_uniform_across_every_factorization(self):
+        """The point of #73: no factorization may cover fewer dtypes than any
+        other. Asserted as a set comparison so a future factorization added
+        with a hand-copied list fails here rather than drifting quietly."""
+        prefixes = [
+            "LUFactor",
+            "QRFactor",
+            "LQFactor",
+            "CholeskyFactor",
+            "LDLTFactor",
+            "BunchKaufmanFactor",
+        ]
+        coverage = {
+            p: {d for d in ALL_UNIVERSAL if hasattr(mtl5._core, f"{p}_{d}")} for p in prefixes
+        }
+        full = set(ALL_UNIVERSAL)
+        gaps = {p: sorted(full - c) for p, c in coverage.items() if c != full}
+        assert not gaps, f"factorizations with incomplete dtype coverage: {gaps}"
+
+    def test_lq_numpy_error_now_points_at_convert(self):
+        """lq was the last float-only factorization; its hint had to flip."""
+        with pytest.raises(TypeError, match="convert"):
+            mtl5.lq(np.arange(16, dtype=np.int32).reshape(4, 4))
+
+
+@pytest.mark.parametrize("dtype, resid_tol, orth_tol", LQ_TIERS)
+class TestLQUsableTiers:
+    def test_lq_reconstructs_a(self, dtype, resid_tol, orth_tol):
+        A, _ = _problem()
+        f = mtl5.lq(mtl5.convert(A, dtype))
+        L = np.asarray(f.L.to_numpy())
+        Q = np.asarray(f.Q.to_numpy())
+        assert np.linalg.norm(L @ Q - A) / np.linalg.norm(A) < resid_tol
+
+    def test_q_is_orthogonal(self, dtype, resid_tol, orth_tol):
+        A, _ = _problem()
+        Q = np.asarray(mtl5.lq(mtl5.convert(A, dtype)).Q.to_numpy())
+        assert np.linalg.norm(Q @ Q.T - np.eye(Q.shape[0])) < orth_tol
+
+
+class TestLQInheritsQRDegeneracy:
+    """LQ is QR's Householder machinery applied to rows, so the failure carries
+    over unchanged. Asserted rather than assumed, because 'it should behave the
+    same' is exactly the reasoning that hides a difference."""
+
+    @pytest.mark.parametrize("dtype", DEGENERATE_QR)
+    def test_reflectors_vanish_and_q_is_the_identity(self, dtype):
+        A, _ = _problem()
+        Q = np.asarray(mtl5.lq(mtl5.convert(A, dtype)).Q.to_numpy())
+        np.testing.assert_array_equal(Q, np.eye(N))
+
+    def test_posit8_degrades_without_degenerating(self):
+        A, _ = _problem()
+        Q = np.asarray(mtl5.lq(mtl5.convert(A, "posit8")).Q.to_numpy())
+        assert not np.array_equal(Q, np.eye(N))
+        assert np.linalg.norm(Q @ Q.T - np.eye(N)) > 1e-2
+
+
+class TestFixpnt16LQSaturates:
+    """fixpnt16 is usable for QR (residual ~0.35) and NOT for LQ (~1.6, with
+    orthogonality ~4.6) — the one place the two Householder paths diverge.
+
+    fixpnt16 is fixpnt<16,8>, so it saturates at 128 with a resolution of
+    1/256. LQ works on rows rather than columns, and on this fixture that order
+    drives an intermediate past the saturation point where QR's does not.
+    Recorded because a reader who knows QR works here would reasonably expect
+    LQ to."""
+
+    def test_lq_is_unusable(self):
+        A, _ = _problem()
+        f = mtl5.lq(mtl5.convert(A, "fixpnt16"))
+        L = np.asarray(f.L.to_numpy())
+        Q = np.asarray(f.Q.to_numpy())
+        assert np.linalg.norm(L @ Q - A) / np.linalg.norm(A) > 1.0
+
+    def test_but_qr_is_fine_at_the_same_width(self):
+        A, _ = _problem()
+        resid, _, _ = _qr_errors("fixpnt16", A)
+        assert resid < 1.0
+
+
+@pytest.mark.parametrize("dtype, tol", SOLVE_TIERS)
+class TestSolveBasedFactorizationsAreRobust:
+    """Unlike QR/LQ these stay usable at every width, including 8 bits."""
+
+    def test_cholesky_solves(self, dtype, tol):
+        assert _solve_residual(mtl5.cholesky, _spd(), dtype) < tol
+
+    def test_ldlt_solves(self, dtype, tol):
+        assert _solve_residual(mtl5.ldlt, _indefinite(), dtype) < tol
+
+    def test_bunch_kaufman_solves(self, dtype, tol):
+        assert _solve_residual(mtl5.bunch_kaufman, _indefinite(), dtype) < tol
+
+
+class TestSolveResidualFixtureIsNotDegenerate:
+    """Guards the fixture itself. If b were M @ ones, the 8-bit formats would
+    return x == ones unchanged and score a residual that says nothing about
+    them — which is what the first version of this measurement did."""
+
+    def test_a_ones_rhs_would_have_hidden_the_error(self):
+        P = _spd()
+        x = np.asarray(
+            mtl5.cholesky(mtl5.convert(P, "posit8"))
+            .solve(mtl5.convert(P @ np.ones(N), "posit8"))
+            .to_numpy()
+        )
+        np.testing.assert_array_equal(x, np.ones(N))  # unmoved from the start
+
+    def test_the_random_rhs_actually_moves_the_solution(self):
+        P = _spd()
+        x_true = np.random.default_rng(99).standard_normal(N)
+        x = np.asarray(
+            mtl5.cholesky(mtl5.convert(P, "posit8"))
+            .solve(mtl5.convert(P @ x_true, "posit8"))
+            .to_numpy()
+        )
+        assert not np.array_equal(x, np.ones(N))
+        assert np.abs(x - x_true).max() > 0  # and is genuinely approximate

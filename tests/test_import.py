@@ -1,5 +1,10 @@
 """Basic smoke tests — verify the module loads and exposes expected symbols."""
 
+import subprocess
+import sys
+import tempfile
+import textwrap
+
 import mtl5
 
 
@@ -36,6 +41,10 @@ def test_stale_core_guard_is_actionable():
     Reproduces the editable-install hazard (updated the source, forgot to
     rebuild the extension) in a subprocess: inject a fake mtl5._core that is
     missing the newer `tensor` submodule, then import the source package.
+
+    Covers the SUBMODULE half of the hazard with a synthetic _core. The class
+    half — the one that actually reached a user — is covered against the real
+    extension in test_a_stale_core_produces_the_actionable_message below.
     """
     import pathlib
     import subprocess
@@ -56,7 +65,8 @@ def test_stale_core_guard_is_actionable():
             import mtl5
         except ImportError as e:
             msg = str(e)
-            assert "missing: tensor" in msg, msg
+            assert "out of sync" in msg, msg
+            assert "tensor" in msg, msg          # names what is missing
             assert "pip install" in msg, msg     # points at the fix
             print("GUARD_OK")
         else:
@@ -127,3 +137,133 @@ def test_all_matches_the_public_surface():
 
 def test_all_has_no_duplicates():
     assert len(mtl5.__all__) == len(set(mtl5.__all__)), "duplicate entries in __all__"
+
+
+# ---------------------------------------------------------------------------
+# The stale-extension guard
+#
+# mtl5/__init__.py reframes an ImportError from _core into an actionable
+# "rebuild your extension" message. It is worth testing because it has already
+# failed once in the field: the guard used to probe a fixed tuple of submodules,
+# so when #69-#73 added CLASSES to _core it passed happily and a user with an
+# editable install got the bare "cannot import name 'DenseMatrix_cfloat32'".
+#
+# Both directions matter — reframing too little leaves the original confusion,
+# reframing too much mislabels an unrelated failure as a stale build. Each runs
+# in a subprocess because it has to manipulate sys.modules before mtl5 is
+# imported, which cannot be undone within a live interpreter.
+# ---------------------------------------------------------------------------
+
+
+def _run(code: str) -> subprocess.CompletedProcess:
+    """Run a snippet in a fresh interpreter, from OUTSIDE the repository.
+
+    cwd matters and is not incidental. `python -c` prepends the working
+    directory to sys.path, and the subprocess inherits pytest's cwd — the repo
+    root in CI. From there the source `mtl5/` package shadows the installed one
+    and has no compiled `_core`, so the snippet dies before reaching what it
+    meant to test. That produced an empty stdout and an assertion complaining
+    about a missing substring, which said nothing about the cause.
+
+    Running from a temp directory makes the subprocess resolve `mtl5` the same
+    way an ordinary user would.
+    """
+    return subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=tempfile.gettempdir(),
+    )
+
+
+def test_a_stale_core_produces_the_actionable_message():
+    """Hide one class a newer .py layer imports, and confirm the guard explains
+    the rebuild instead of leaking the raw error.
+
+    Covers the CLASS half of the hazard — the case that actually reached a
+    user — against the real extension's symbol table.
+    """
+    result = _run("""
+        import sys, types
+
+        # Import normally, then stand a PROXY in front of the real extension
+        # with one class removed. Deliberately not ExtensionFileLoader on the
+        # .pyd/.so directly: that bypasses mtl5/__init__.py, which on Windows
+        # is where a repaired wheel sets up the DLL search path, and the load
+        # fails with "DLL load failed while importing _core". It also avoids
+        # initialising a single-phase extension twice in one process. Copying
+        # the module dict reproduces a stale build for import purposes on every
+        # platform, which is all this test needs.
+        import mtl5._core as real
+        stale = types.ModuleType("mtl5._core")
+        stale.__dict__.update(vars(real))
+        del stale.DenseMatrix_cfloat32           # pretend it predates #70
+
+        # Drop the package so __init__.py re-runs against the proxy. _core
+        # itself must be replaced, not deleted, or the re-import would just
+        # load the real extension again.
+        del sys.modules["mtl5"]
+        sys.modules["mtl5._core"] = stale
+
+        try:
+            import mtl5
+        except ImportError as exc:
+            print(exc)
+        else:
+            print("NO ERROR")
+    """)
+    out = result.stdout
+    # Surface stderr on failure: the first version of this test died in the
+    # subprocess and asserted against an empty string, which said nothing about
+    # why.
+    ctx = f"\\nstdout={out!r}\\nstderr={result.stderr!r}"
+    assert "NO ERROR" not in out, "the guard did not fire on a stale extension" + ctx
+    assert "out of sync" in out, ctx
+    assert "DenseMatrix_cfloat32" in out, "the missing symbol must be named" + ctx
+    assert "pip install -e ." in out, "the message must say how to fix it" + ctx
+
+
+def test_an_unrelated_import_error_is_not_mislabelled():
+    """A failure that is not about _core must surface as itself.
+
+    Reframing everything would be worse than reframing nothing: it would send
+    someone with a missing dependency off rebuilding a C++ extension.
+    """
+    result = _run("""
+        import sys
+
+        # Fail the mtl5.tensor import itself, from the import machinery, so the
+        # error is raised INSIDE the try that wraps the _core imports and the
+        # guard has to decide what to do with it. Stubbing sys.modules instead
+        # would not do: `from mtl5 import tensor` binds an already-cached
+        # module without ever touching it, so a stub that raises on attribute
+        # access never fires and the import quietly succeeds.
+        class Boom:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "mtl5.tensor":
+                    raise ImportError("some unrelated dependency is not installed")
+                return None
+
+        sys.meta_path.insert(0, Boom())
+
+        try:
+            import mtl5
+        except ImportError as exc:
+            print("RAISED:", exc)
+        else:
+            print("NO ERROR")
+    """)
+    out = result.stdout
+    ctx = f"\\nstdout={out!r}\\nstderr={result.stderr!r}"
+
+    assert "NO ERROR" not in out, "the unrelated failure never happened" + ctx
+    assert "some unrelated dependency is not installed" in out, (
+        "the original error must survive" + ctx
+    )
+    assert "out of sync" not in out, (
+        "an unrelated ImportError was mislabelled as a stale extension" + ctx
+    )
+    assert "pip install -e ." not in out, (
+        "must not tell someone with a missing dependency to rebuild C++" + ctx
+    )

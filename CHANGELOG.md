@@ -15,6 +15,110 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **A regression guard on the benchmark numbers**
+  ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73) item 3, the
+  last one). The harness emitted JSON with build flags, thread count and
+  platform precisely so results could be tracked, and nothing consumed it: a
+  change that made posit32 GEMM 3x slower would not have been noticed.
+
+  Guarding timings is an easy way to build a flaky test, so both *what* is
+  asserted and *which kernel* it is asserted on were chosen from measured
+  stability. Four runs per configuration, ratios taken within each run:
+
+  | kernel | ratio | spread |
+  |---|---|---|
+  | `gemm` n=64 | posit32/takum32 | **1.04x** |
+  | `gemm` n=64 | posit32/f64 | **1.03x** |
+  | `gemv` n=256 | posit32/takum32 | 1.42x |
+  | `dot` n=10000 | posit32/takum32 | 3.29x |
+
+  **Only `gemm` is guarded.** `dot` and `gemv` were tried and rejected on those
+  numbers — a guard that swings 3x between identical runs cannot distinguish a
+  regression from a Tuesday. `dot` stays unstable even at n=10000, where the
+  operands are far above per-call overhead, and even with best-of-3, so the
+  instability is not something a larger size fixes.
+
+  Ratios are taken *within* a run, which cancels machine speed and scheduler
+  noise almost exactly and is what lets order-of-magnitude bounds hold on an
+  ordinary shared runner. The guards catch a structural regression — a
+  vectoriser silently off, an emulated path falling back, a format losing its
+  fast route — and were verified to fire by injecting each of those, rather
+  than merely observed to pass.
+
+  Marked `perf`, so `pytest -m "not perf"` skips it where timing is meaningless.
+  Costs about six seconds.
+
+- **`--accumulators` on the BLAS benchmark: what does exactness cost?**
+  ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73) item 2.)
+  `dot`, `gemv` and `gemm` take an `accumulator=` argument — the precision the
+  sum is carried in, independent of the element type — and its price had never
+  been measured. The new axis reports each accumulator against **the same
+  dtype's default**, not against float64, because the question is what
+  exactness costs for a given format rather than how slow that format is.
+
+  **There is no single answer — the quire's cost spans a factor of 40 across
+  formats.** On one recorded run (x86_64, single thread, `dot`), against each
+  dtype's own default accumulator:
+
+  | dtype | quire | `f64` accumulator |
+  |---|---:|---:|
+  | `posit32` | **0.86x** | 0.35x |
+  | `fixpnt16` | 1.66x | — |
+  | `cfloat32` | 3.02x | 0.50x |
+  | `lns32` | **36.7x** | 0.93x |
+
+  So for the posit family exactness is free — slightly *cheaper* than
+  accumulating in the element type, because posit addition is expensive to
+  emulate while a quire accumulate is fixed-point. For `lns32` it is
+  prohibitive: logarithmic multiplication is cheap, but every term has to leave
+  the log domain to reach a fixed-point accumulator. Anyone budgeting an
+  experiment on "the quire costs about X" would be wrong for three of these
+  four formats, which is the point of being able to measure it.
+
+  A second result falls out: accumulating in `f64` is consistently *cheaper*
+  than accumulating in the emulated element type (0.35x-0.93x), since a native
+  double add costs almost nothing next to an emulated one.
+
+  Accuracy was verified rather than assumed — a faster quire that had quietly
+  stopped accumulating exactly would look like a win. Against an exact rational
+  reference over the rounded operands, 4000 `posit32` terms: the quire is
+  correctly rounded at 1.3e-16 while the element default carries 9.2e-07, seven
+  orders of magnitude worse.
+
+  Availability is read from `mtl5.mixed.accumulators()` rather than hardcoded,
+  so only the four families Universal ships an `fdp.hpp` for are swept for a
+  quire; `takum32` and the cascades are skipped instead of filling the table
+  with rejections. `lu`/`qr` have no accumulator parameter and are not swept.
+  Native `f32`/`f64` `gemv`/`gemm` report the gap honestly: the top-level
+  `mtl5.matvec`/`matmul` take no accumulator, only the `mixed.*` entry points
+  do.
+
+- **Every dense factorization now covers every Universal number system.**
+  `lq`, `cholesky`, `ldlt` and `bunch_kaufman` join `lu` and `qr`, so all six
+  are available for float32, float64 and all fifteen Universal dtypes
+  ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73)).
+
+  Two separate gaps, one cause. `cholesky` and `ldlt` kept hand-copied
+  instantiation lists that stopped at `lns32`, so they missed the five types
+  added in #70; `lq` and `bunch_kaufman` were never extended past
+  float32/float64 at all. Every factorization now routes through the single
+  `for_each_universal<>` list added in #71, so adding a number type is one line
+  and coverage cannot drift again — asserted directly by a test that compares
+  the six coverage sets and fails on any difference.
+
+  Nothing upstream had to change: all four compile for all fifteen types.
+  Bunch-Kaufman's 1x1/2x2 block pivoting is comparisons and arithmetic, so no
+  number system has to opt in.
+
+  **Availability is not usability, and the two diverge sharply.** The
+  orthogonalizing pair fails first — `lq` inherits `qr`'s degeneracy exactly,
+  with `fp8` and `fixpnt8` returning `Q == I` while looking perfect. The
+  solving three have no orthogonality to lose and stay usable to 8 bits, the
+  worst measured residual being ~6e-2. One divergence is worth knowing:
+  `fixpnt16` is fine for `qr` and saturates for `lq` at the same width, because
+  LQ works along rows and on this fixture that order drives an intermediate
+  past `fixpnt<16,8>`'s limit of 128.
+
 - **`lu()` and `qr()` for every Universal number system.** Both were
   float32/float64 only, which was the last prerequisite in
   [#69](https://github.com/stillwater-sc/mtl5-python/issues/69) — the
@@ -103,6 +207,31 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **The stale-extension guard now catches a missing class, not just a missing
+  submodule.** `mtl5/__init__.py` reframes an `ImportError` from `_core` into a
+  "rebuild your extension" message, and it did not fire for the case that
+  actually reached a user on an editable install:
+
+  ```text
+  ImportError: cannot import name 'DenseMatrix_cfloat32' from 'mtl5._core'
+  ```
+
+  The guard probed a fixed tuple of submodules — `tensor`, `view`, `mg`,
+  `mixed`, `array`, `backends`, `build_info`. All seven still existed in that
+  build, so the check passed and the bare error surfaced anyway. What #69-#73
+  added to `_core` were **classes**, which the tuple had no way to notice, and
+  its own comment ("extend the tuple when a new top-level submodule is added")
+  described a maintenance step that would not have helped.
+
+  The `_core` imports are now wrapped and the `ImportError` reframed, so every
+  symbol is covered with no list to maintain and nothing to keep in sync. The
+  reframing is conditional on the error mentioning `_core`: an unrelated
+  `ImportError` — a missing dependency inside `tensor.py`, say — still surfaces
+  as itself rather than sending someone off to rebuild a C++ extension for no
+  reason.
+
+  Both directions are tested, in subprocesses, against the real extension.
+
 - **The accumulator tests ranked accumulators against a float64 reference, so
   they penalised the quire for being exact.** Tests only — no shipped code
   changed, and the binding behaviour was always correct. The reference was
@@ -190,6 +319,56 @@ policy (minor follows the MTL5 release built against), not new surface.
   ([#57](https://github.com/stillwater-sc/mtl5-python/pull/57))
 
 <!-- version list -->
+
+## v5.9.8 (2026-08-14)
+
+### Bug Fixes
+
+- **import**: Catch a stale extension missing any symbol, not just a submodule
+  ([#78](https://github.com/stillwater-sc/mtl5-python/pull/78),
+  [`1c89169`](https://github.com/stillwater-sc/mtl5-python/commit/1c891698bca9eded57c2d13c3b8d2cd0ad62143f))
+
+- **tests**: Stop loading the extension by path in the stale-core test
+  ([#80](https://github.com/stillwater-sc/mtl5-python/pull/80),
+  [`b945f31`](https://github.com/stillwater-sc/mtl5-python/commit/b945f31ecc4282f01e5cc2013980d31749273a06))
+
+
+## v5.9.7 (2026-08-14)
+
+### Features
+
+- **bench**: Guard the benchmark numbers against regression
+  ([#77](https://github.com/stillwater-sc/mtl5-python/pull/77),
+  [`43fe974`](https://github.com/stillwater-sc/mtl5-python/commit/43fe9748dc49e63627db063d053e2bea802259a7))
+
+
+## v5.9.6 (2026-08-14)
+
+### Features
+
+- **bench**: Add an --accumulators axis to measure what exactness costs
+  ([#76](https://github.com/stillwater-sc/mtl5-python/pull/76),
+  [`6911eeb`](https://github.com/stillwater-sc/mtl5-python/commit/6911eeb7057be31e8c0ac1b2478aaf23b3d2b333))
+
+
+## v5.9.5 (2026-08-14)
+
+### Documentation
+
+- Make the benchmark findable and say what it is for in --help
+  ([#74](https://github.com/stillwater-sc/mtl5-python/pull/74),
+  [`b8f607d`](https://github.com/stillwater-sc/mtl5-python/commit/b8f607d25cc069200078cd17ce80ee6d0a7c0bfe))
+
+- **changelog**: Stop the benchmark entry contradicting the LU/QR entry
+  ([#72](https://github.com/stillwater-sc/mtl5-python/pull/72),
+  [`774ad8d`](https://github.com/stillwater-sc/mtl5-python/commit/774ad8d876d7c7164cbac9ccd0d0095388d87204))
+
+### Features
+
+- **factor**: Extend lq, cholesky, ldlt and bunch_kaufman to every Universal type
+  ([#75](https://github.com/stillwater-sc/mtl5-python/pull/75),
+  [`b9324d3`](https://github.com/stillwater-sc/mtl5-python/commit/b9324d30624988d5cad3f2ba8bfc1309e89b44ac))
+
 
 ## v5.9.4 (2026-08-13)
 

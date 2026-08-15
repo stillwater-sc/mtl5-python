@@ -27,7 +27,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "mtl5"
-version = "5.9.4"
+version = "5.9.8"
 description = "Python bindings for MTL5 — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch"
 readme = "README.md"
 license = {text = "MIT"}
@@ -70,6 +70,14 @@ MTL5_WITH_HIGHWAY = "ON"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    # Timing-sensitive regression guards over benchmarks/bench_blas.py. They
+    # assert order-of-magnitude bands on ratios measured WITHIN one run, which
+    # cancels machine speed, so they hold on an ordinary shared runner. Deselect
+    # with `pytest -m "not perf"` where timing is meaningless anyway — an
+    # emulated or heavily oversubscribed host.
+    "perf: benchmark regression guards (timing-sensitive; see tests/test_benchmark_regression.py)",
+]
 
 [tool.ruff]
 target-version = "py310"

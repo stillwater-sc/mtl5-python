@@ -216,17 +216,22 @@ ld.diagonal()  # D — its signs are the inertia
 All accept an MTL5 matrix or a float32/float64 NumPy array, alongside the
 existing `mtl5.lu` and `mtl5.cholesky`.
 
-Coverage across the Universal number systems is not uniform, so it is worth
-knowing before planning a comparison. `lu` and `qr` cover **all fifteen**;
-`ldlt` and `cholesky` cover **ten** — every one except `cfloat32`, `takum32`
-and the three cascades; `lq` and `bunch_kaufman` are float32/float64 only. The
-gaps are tracked in
-[#73](https://github.com/stillwater-sc/mtl5-python/issues/73).
+**Every** dense factorization — `lu`, `qr`, `lq`, `cholesky`, `ldlt` and
+`bunch_kaufman` — is available for float32, float64 and all fifteen Universal
+dtypes, which is what makes a like-for-like comparison across number systems
+possible. The integer element types are not supported.
+
+Availability is not usability, though, and the two diverge sharply at narrow
+widths. The orthogonalizing pair (`qr`, `lq`) fails first: below 16 bits every
+Householder reflector rounds to zero, so `Q` comes back as the exact identity
+and the factorization looks perfect while reconstructing nothing. The solving
+three (`cholesky`, `ldlt`, `bunch_kaufman`) have no orthogonality to lose and
+stay usable to 8 bits. `tests/test_universal_factorizations.py` records where
+each format stops.
 
 ### Cholesky vs LDLᵀ across number systems
 
-`ldlt` and `cholesky` are both available for float32, float64 and ten of the
-Universal dtypes — the integer element types are not supported — which is what
+`ldlt` and `cholesky` are both available in every bound precision, which is what
 makes the interesting comparison possible. Cholesky takes square roots, so
 it refuses a matrix that has drifted out of positive-definiteness — the failure
 mode of a Kalman covariance update in low precision. LDLᵀ has no square roots,
@@ -242,7 +247,7 @@ d = mtl5.ldlt(mtl5.convert(P, "posit16")).diagonal()
 ```
 
 `mtl5.bunch_kaufman(A)` is the pivoting variant, for a symmetric matrix that
-plain `ldlt` rejects on a zero pivot. float32/float64 only.
+plain `ldlt` rejects on a zero pivot.
 
 ## Eigenvalues, BLAS 2/3, and matrix properties
 

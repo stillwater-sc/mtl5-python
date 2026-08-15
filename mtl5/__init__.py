@@ -27,33 +27,236 @@ except _PackageNotFoundError:
         __version__ = "0.0.0-dev"
 
 # Guard against a compiled extension that is older than this Python layer — the
-# classic "updated the source, forgot to rebuild the C++ extension" with an
-# editable `pip install -e .`. The imports below pull submodules and symbols out
-# of _core (e.g. mtl5._core.tensor); when _core predates them the bare
-# ImportError ("cannot import name 'tensor' from 'mtl5._core'") is baffling.
-# Check the major always-compiled surfaces up front and, if any are missing,
-# fail with an actionable message. A version-string compare would NOT catch this
-# case: with an editable install the metadata and _core versions both stay at
-# the old build while only the source .py files advance. Extend the tuple when a
-# new top-level _core submodule is added.
-# (Assignments live inside the `if` so they don't count as module-level code
-# before the imports below — which would trip E402.)
-if not all(
-    hasattr(_core, _n)
-    for _n in ("tensor", "view", "mg", "mixed", "array", "backends", "build_info")
-):
-    _missing_core = [
-        _n
-        for _n in ("tensor", "view", "mg", "mixed", "array", "backends", "build_info")
-        if not hasattr(_core, _n)
-    ]
+# classic "updated the source, forgot to rebuild the C++ extension", most often
+# with an editable `pip install -e .` where the .py files advance while _core
+# stays at the last build.
+#
+# Every _core import below is wrapped, and the ImportError is reframed rather
+# than checked for in advance. The previous form probed a fixed tuple of
+# submodules ("tensor", "view", "mg", ...) and so only noticed staleness that
+# happened to remove one of those seven. It missed the real case: #69-#73 added
+# CLASSES (DenseMatrix_cfloat32 and friends), all seven submodules still
+# existed, the guard passed, and a user got the bare
+# "cannot import name 'DenseMatrix_cfloat32' from 'mtl5._core'" it exists to
+# prevent. Extending the tuple would only re-arm that trap for the next symbol;
+# catching the failure covers every name with no list to maintain.
+#
+# A version-string compare would NOT work here: with an editable install the
+# metadata and _core versions both stay at the old build while only the source
+# advances.
+try:
+    from mtl5 import tensor  # noqa: F401  -- submodule, imported for mtl5.tensor
+    from mtl5._core import (
+        # Cholesky factorization objects
+        CholeskyFactor_c64,
+        CholeskyFactor_c128,
+        CholeskyFactor_f32,
+        CholeskyFactor_f64,
+        # Complex types (zero-copy views over complex64/complex128)
+        DenseMatrix_c64,
+        DenseMatrix_c128,
+        # Extended number types (#69) — emulated binary32, takum, and the float
+        # cascades. isort keeps this block alphabetical, so these land split across
+        # the family comments rather than together; the comment above each name is
+        # the one that applies to it.
+        DenseMatrix_cfloat32,
+        DenseMatrix_dd_cascade,
+        # Native IEEE types (zero-copy views)
+        DenseMatrix_f32,
+        DenseMatrix_f64,
+        # Universal fixpnt types
+        DenseMatrix_fixpnt8,
+        DenseMatrix_fixpnt16,
+        # Universal cfloat types
+        DenseMatrix_fp8,
+        DenseMatrix_fp16,
+        DenseMatrix_i32,
+        DenseMatrix_i64,
+        # Universal lns types
+        DenseMatrix_lns16,
+        DenseMatrix_lns32,
+        # Universal posit types
+        DenseMatrix_posit8,
+        DenseMatrix_posit16,
+        DenseMatrix_posit32,
+        DenseMatrix_posit64,
+        # Extended number types, continued
+        DenseMatrix_qd_cascade,
+        DenseMatrix_takum32,
+        DenseMatrix_td_cascade,
+        DenseVector_c64,
+        DenseVector_c128,
+        DenseVector_cfloat32,
+        DenseVector_dd_cascade,
+        DenseVector_f32,
+        DenseVector_f64,
+        DenseVector_fixpnt8,
+        DenseVector_fixpnt16,
+        DenseVector_fp8,
+        DenseVector_fp16,
+        DenseVector_i32,
+        DenseVector_i64,
+        DenseVector_lns16,
+        DenseVector_lns32,
+        DenseVector_posit8,
+        DenseVector_posit16,
+        DenseVector_posit32,
+        DenseVector_posit64,
+        DenseVector_qd_cascade,
+        DenseVector_takum32,
+        DenseVector_td_cascade,
+        # QR / LQ factorization objects — complex only; the real ones are reached
+        # through mtl5.qr()/mtl5.lq(), which dispatch on dtype.
+        LQFactor_c64,
+        LQFactor_c128,
+        # LU factorization objects
+        LUFactor_c64,
+        LUFactor_c128,
+        LUFactor_f32,
+        LUFactor_f64,
+        QRFactor_c64,
+        QRFactor_c128,
+        # Complex operations
+        adjoint,
+        # N-dimensional array layer (mtl/array)
+        array,
+        # Backend management
+        backends,
+        # Build introspection
+        build_info,
+        cholesky,
+        condition_number,
+        conj,
+        # Mixed precision
+        convert,
+        # Device management
+        devices,
+        # Operations
+        dot,
+        dot_real,
+        dtypes,
+        eig,
+        eigh,
+        eigvals,
+        eigvalsh,
+        frobenius_norm,
+        ger,
+        get_backend,
+        # Threading
+        get_num_threads,
+        has_inf,
+        has_nan,
+        inertia,
+        inv,
+        is_banded,
+        is_diagonal,
+        is_diagonally_dominant,
+        is_empty,
+        is_finite,
+        is_hermitian,
+        is_indefinite,
+        is_invertible,
+        is_lower_triangular,
+        is_nonsingular,
+        is_normal,
+        is_normalized,
+        is_orthogonal,
+        is_orthogonal_to,
+        is_positive_definite,
+        is_singular,
+        is_spd,
+        is_square,
+        is_symmetric,
+        is_triangular,
+        is_unit,
+        is_unitary,
+        is_upper_triangular,
+        is_zero,
+        ldlt_solve,
+        lu,
+        matmul,
+        matrix,
+        matrix_cfloat32,
+        matrix_copy,
+        matrix_dd_cascade,
+        matrix_fixpnt8,
+        matrix_fixpnt16,
+        matrix_fp8,
+        matrix_fp16,
+        matrix_lns16,
+        matrix_lns32,
+        matrix_posit8,
+        matrix_posit16,
+        matrix_posit32,
+        matrix_posit64,
+        matrix_qd_cascade,
+        matrix_takum32,
+        matrix_td_cascade,
+        matvec,
+        # Smoothers, grid transfer and multigrid
+        mg,
+        # Mixed-precision submodule (element / accumulator / result precisions)
+        mixed,
+        norm,
+        nullity,
+        numerical_rank,
+        rcond,
+        set_backend,
+        set_num_threads,
+        solve,
+        spectral_radius,
+        svd,
+        svdvals,
+        symm,
+        symv,
+        syr2k,
+        syrk,
+        transpose,
+        trmm,
+        trmv,
+        trsm,
+        trsv,
+        vector,
+        vector_cfloat32,
+        vector_copy,
+        vector_dd_cascade,
+        vector_fixpnt8,
+        vector_fixpnt16,
+        vector_fp8,
+        vector_fp16,
+        vector_lns16,
+        vector_lns32,
+        vector_posit8,
+        vector_posit16,
+        vector_posit32,
+        vector_posit64,
+        vector_qd_cascade,
+        vector_takum32,
+        vector_td_cascade,
+        # Matrix views
+        view,
+    )
+    from mtl5._core import arange as _arange
+    from mtl5._core import det as _det
+    from mtl5._core import generators as _generators
+    from mtl5._core import geomspace as _geomspace
+    from mtl5._core import linspace as _linspace
+    from mtl5._core import logspace as _logspace
+except ImportError as _exc:  # pragma: no cover - depends on a stale build
+    # Only reframe a failure that is actually about _core. An ImportError from
+    # somewhere else (numpy missing inside tensor.py, say) must surface as
+    # itself rather than be mislabelled a stale build.
+    if "_core" not in str(_exc):
+        raise
+
     try:
         _pkg = _pkg_version("mtl5")
     except _PackageNotFoundError:
         _pkg = "<no installed metadata>"
+
     raise ImportError(
         "mtl5: the compiled extension (mtl5._core) is out of sync with the "
-        "Python package — it is missing: " + ", ".join(_missing_core) + ".\n"
+        f"Python package — {_exc}.\n"
         f"  Python package : {__file__}\n"
         f"  compiled _core : {getattr(_core, '__file__', '<unknown>')}\n"
         f"  versions       : package metadata {_pkg!r}, compiled _core "
@@ -61,210 +264,12 @@ if not all(
         "This usually means the C++ extension was not rebuilt after the source "
         "was updated (common with an editable 'pip install -e .').\n"
         "Rebuild or reinstall:\n"
-        "  pip install -e . --force-reinstall     # rebuild an editable/dev install\n"
-        "  # or a clean wheel install:\n"
+        "  pip install -e . --force-reinstall --no-deps   # rebuild a dev install\n"
+        "  # or a clean wheel install, from outside the repository:\n"
         "  pip uninstall -y mtl5 && pip install mtl5\n"
         "Also avoid launching Python from the repository root, where the source "
         "'mtl5/' directory shadows the installed package."
-    )
-
-from mtl5 import tensor  # noqa: F401  -- submodule, imported for mtl5.tensor
-from mtl5._core import (
-    # Cholesky factorization objects
-    CholeskyFactor_c64,
-    CholeskyFactor_c128,
-    CholeskyFactor_f32,
-    CholeskyFactor_f64,
-    # Complex types (zero-copy views over complex64/complex128)
-    DenseMatrix_c64,
-    DenseMatrix_c128,
-    # Extended number types (#69) — emulated binary32, takum, and the float
-    # cascades. isort keeps this block alphabetical, so these land split across
-    # the family comments rather than together; the comment above each name is
-    # the one that applies to it.
-    DenseMatrix_cfloat32,
-    DenseMatrix_dd_cascade,
-    # Native IEEE types (zero-copy views)
-    DenseMatrix_f32,
-    DenseMatrix_f64,
-    # Universal fixpnt types
-    DenseMatrix_fixpnt8,
-    DenseMatrix_fixpnt16,
-    # Universal cfloat types
-    DenseMatrix_fp8,
-    DenseMatrix_fp16,
-    DenseMatrix_i32,
-    DenseMatrix_i64,
-    # Universal lns types
-    DenseMatrix_lns16,
-    DenseMatrix_lns32,
-    # Universal posit types
-    DenseMatrix_posit8,
-    DenseMatrix_posit16,
-    DenseMatrix_posit32,
-    DenseMatrix_posit64,
-    # Extended number types, continued
-    DenseMatrix_qd_cascade,
-    DenseMatrix_takum32,
-    DenseMatrix_td_cascade,
-    DenseVector_c64,
-    DenseVector_c128,
-    DenseVector_cfloat32,
-    DenseVector_dd_cascade,
-    DenseVector_f32,
-    DenseVector_f64,
-    DenseVector_fixpnt8,
-    DenseVector_fixpnt16,
-    DenseVector_fp8,
-    DenseVector_fp16,
-    DenseVector_i32,
-    DenseVector_i64,
-    DenseVector_lns16,
-    DenseVector_lns32,
-    DenseVector_posit8,
-    DenseVector_posit16,
-    DenseVector_posit32,
-    DenseVector_posit64,
-    DenseVector_qd_cascade,
-    DenseVector_takum32,
-    DenseVector_td_cascade,
-    # QR / LQ factorization objects — complex only; the real ones are reached
-    # through mtl5.qr()/mtl5.lq(), which dispatch on dtype.
-    LQFactor_c64,
-    LQFactor_c128,
-    # LU factorization objects
-    LUFactor_c64,
-    LUFactor_c128,
-    LUFactor_f32,
-    LUFactor_f64,
-    QRFactor_c64,
-    QRFactor_c128,
-    # Complex operations
-    adjoint,
-    # N-dimensional array layer (mtl/array)
-    array,
-    # Backend management
-    backends,
-    # Build introspection
-    build_info,
-    cholesky,
-    condition_number,
-    conj,
-    # Mixed precision
-    convert,
-    # Device management
-    devices,
-    # Operations
-    dot,
-    dot_real,
-    dtypes,
-    eig,
-    eigh,
-    eigvals,
-    eigvalsh,
-    frobenius_norm,
-    ger,
-    get_backend,
-    # Threading
-    get_num_threads,
-    has_inf,
-    has_nan,
-    inertia,
-    inv,
-    is_banded,
-    is_diagonal,
-    is_diagonally_dominant,
-    is_empty,
-    is_finite,
-    is_hermitian,
-    is_indefinite,
-    is_invertible,
-    is_lower_triangular,
-    is_nonsingular,
-    is_normal,
-    is_normalized,
-    is_orthogonal,
-    is_orthogonal_to,
-    is_positive_definite,
-    is_singular,
-    is_spd,
-    is_square,
-    is_symmetric,
-    is_triangular,
-    is_unit,
-    is_unitary,
-    is_upper_triangular,
-    is_zero,
-    ldlt_solve,
-    lu,
-    matmul,
-    matrix,
-    matrix_cfloat32,
-    matrix_copy,
-    matrix_dd_cascade,
-    matrix_fixpnt8,
-    matrix_fixpnt16,
-    matrix_fp8,
-    matrix_fp16,
-    matrix_lns16,
-    matrix_lns32,
-    matrix_posit8,
-    matrix_posit16,
-    matrix_posit32,
-    matrix_posit64,
-    matrix_qd_cascade,
-    matrix_takum32,
-    matrix_td_cascade,
-    matvec,
-    # Smoothers, grid transfer and multigrid
-    mg,
-    # Mixed-precision submodule (element / accumulator / result precisions)
-    mixed,
-    norm,
-    nullity,
-    numerical_rank,
-    rcond,
-    set_backend,
-    set_num_threads,
-    solve,
-    spectral_radius,
-    svd,
-    svdvals,
-    symm,
-    symv,
-    syr2k,
-    syrk,
-    transpose,
-    trmm,
-    trmv,
-    trsm,
-    trsv,
-    vector,
-    vector_cfloat32,
-    vector_copy,
-    vector_dd_cascade,
-    vector_fixpnt8,
-    vector_fixpnt16,
-    vector_fp8,
-    vector_fp16,
-    vector_lns16,
-    vector_lns32,
-    vector_posit8,
-    vector_posit16,
-    vector_posit32,
-    vector_posit64,
-    vector_qd_cascade,
-    vector_takum32,
-    vector_td_cascade,
-    # Matrix views
-    view,
-)
-from mtl5._core import arange as _arange
-from mtl5._core import det as _det
-from mtl5._core import generators as _generators
-from mtl5._core import geomspace as _geomspace
-from mtl5._core import linspace as _linspace
-from mtl5._core import logspace as _logspace
+    ) from _exc
 
 _UNIVERSAL_DTYPES = (
     "fp8",
@@ -332,10 +337,14 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
         suffix = _NUMPY_TO_MTL5.get(A.dtype.name)
         if suffix is None:
             # Only suggest convert() for the factorizations that actually have
-            # Universal instantiations — lq is float32/float64 only, so sending
-            # a user there would just earn them a second TypeError. (qr and lu
-            # gained Universal instantiations in #69; this probe reads that off
-            # _core rather than a hardcoded list, so it followed along.)
+            # Universal instantiations, or the user earns a second TypeError.
+            #
+            # Since #73 every bound factorization has them, so the else branch
+            # has no caller today. It stays for the next factorization added
+            # ahead of its instantiations — this probe reads coverage off _core
+            # rather than a hardcoded list, which is why it tracked qr and lu
+            # gaining theirs in #69, then lq/cholesky/ldlt/bunch_kaufman in #73,
+            # without an edit either time.
             hint = (
                 " For another number system, convert first: mtl5.convert(a, 'posit32')."
                 if _has_universal_support(prefix)
@@ -402,6 +411,12 @@ def lq(A):
     num_cols` and L `num_rows x num_cols`. Unlike `qr`, which needs
     num_rows >= num_cols, there is no shape restriction.
 
+    Accepts float32/float64 (and complex), plus every Universal dtype via
+    `mtl5.convert()`. Being the row-space counterpart of `qr`, it shares that
+    machinery and its limits: `fp8` and `fixpnt8` degenerate to `Q == I` in the
+    same way, and `fixpnt16` saturates here even though `qr` tolerates it at
+    the same width. Read the result before trusting a narrow format.
+
     Returns a factorization exposing `.L` and `.Q`.
     """
     return _factor("lq", "LQFactor", A)
@@ -411,7 +426,8 @@ def bunch_kaufman(A):
     """Bunch-Kaufman LDL^T: symmetric indefinite with 1x1/2x2 block pivoting.
 
     The pivoting variant of `ldlt`, so it handles a symmetric matrix that plain
-    `ldlt` rejects on a zero pivot. float32 and float64 only.
+    `ldlt` rejects on a zero pivot. Available for float32/float64 and every
+    Universal dtype via `mtl5.convert()`.
 
     Returns a factorization exposing `.solve(b)` and `.ipiv()`.
     """

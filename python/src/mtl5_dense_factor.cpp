@@ -417,10 +417,13 @@ void register_float_only(nb::module_& m) {
     register_bunch_kaufman<T>(m);
 }
 
-// The Universal element types, in one place. LU (in mtl5_module.cpp, where
-// LUFactor lives) and QR both instantiate over exactly this set, and keeping
-// one list is what stops them drifting apart the way ldlt's and cholesky's
-// hand-copied lists could.
+// The Universal element types, in one place. EVERY dense factorization
+// instantiates over exactly this set, so coverage cannot drift apart again --
+// which it had: cholesky and ldlt kept hand-copied lists that stopped at lns32
+// and so missed the five types added in #70, while lq and bunch_kaufman were
+// never extended past float/double at all (#73).
+//
+// Adding a number type means adding one line here and nothing else.
 template <template <typename> class Reg>
 void for_each_universal(nb::module_& m) {
     (Reg<fp8>{}(m), Reg<fp16>{}(m),
@@ -434,6 +437,26 @@ void for_each_universal(nb::module_& m) {
 template <typename T>
 struct QRRegistrar {
     void operator()(nb::module_& m) const { register_qr<T>(m); }
+};
+
+template <typename T>
+struct LQRegistrar {
+    void operator()(nb::module_& m) const { register_lq<T>(m); }
+};
+
+template <typename T>
+struct LDLTRegistrar {
+    void operator()(nb::module_& m) const { register_ldlt<T>(m); }
+};
+
+template <typename T>
+struct CholeskyRegistrar {
+    void operator()(nb::module_& m) const { register_universal_cholesky<T>(m); }
+};
+
+template <typename T>
+struct BunchKaufmanRegistrar {
+    void operator()(nb::module_& m) const { register_bunch_kaufman<T>(m); }
 };
 
 }  // namespace
@@ -476,29 +499,24 @@ void register_dense_factorizations(nb::module_& m) {
     // than rediscovered.
     for_each_universal<QRRegistrar>(m);
 
+    // LQ and Bunch-Kaufman over the Universal types (#73). LQ is the row-space
+    // counterpart of QR and shares its Householder machinery, so it inherits
+    // QR's behaviour exactly — including the fp8/fixpnt8 degeneracy above.
+    // Bunch-Kaufman needed no more than the same instantiation: its 1x1/2x2
+    // block pivoting is comparisons and arithmetic, nothing a number system
+    // has to opt into.
+    //
+    // These were float32/float64 only for no reason anyone recorded. That left
+    // "which factorization works for which number system" answered by accident
+    // rather than chosen, which is the opposite of what #18 and #69 are for.
+    for_each_universal<LQRegistrar>(m);
+    for_each_universal<BunchKaufmanRegistrar>(m);
+
     // LDL^T everywhere — the point of #18 is comparing number systems.
     register_ldlt<float>(m);
     register_ldlt<double>(m);
-    register_ldlt<fp8>(m);
-    register_ldlt<fp16>(m);
-    register_ldlt<posit8>(m);
-    register_ldlt<posit16>(m);
-    register_ldlt<posit32>(m);
-    register_ldlt<posit64>(m);
-    register_ldlt<fixpnt8>(m);
-    register_ldlt<fixpnt16>(m);
-    register_ldlt<lns16>(m);
-    register_ldlt<lns32>(m);
+    for_each_universal<LDLTRegistrar>(m);
 
     // Cholesky for the Universal types only; float32/float64 already have it.
-    register_universal_cholesky<fp8>(m);
-    register_universal_cholesky<fp16>(m);
-    register_universal_cholesky<posit8>(m);
-    register_universal_cholesky<posit16>(m);
-    register_universal_cholesky<posit32>(m);
-    register_universal_cholesky<posit64>(m);
-    register_universal_cholesky<fixpnt8>(m);
-    register_universal_cholesky<fixpnt16>(m);
-    register_universal_cholesky<lns16>(m);
-    register_universal_cholesky<lns32>(m);
+    for_each_universal<CholeskyRegistrar>(m);
 }
