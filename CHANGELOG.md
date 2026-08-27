@@ -35,7 +35,63 @@ against, and semantic-release manages only the **patch** component.
   the same range, and the fallback moves to v2.15.0 to match what the bound
   resolves.
 
+### Changed
+
+- **MTL5 pinned to v5.10.0**, up from v5.9.0, and the `find_package` floor
+  raised to match. The bump is additive for these bindings: the full suite
+  passes unchanged against v5.10.0, and neither of upstream's two breaking
+  changes reaches this surface.
+
+  `Field<T>` now excludes integral `T`, and the 25 entry points that divide
+  require `FieldMatrix` — but `int32`/`int64` are registered through
+  `register_native<T>`, which binds containers, factories, norms and dot and no
+  factorization; `register_native_with_solve` is already constrained to floating
+  point, and the `__truediv__` on the array layer is instantiated for `f32`/`f64`
+  only. Runtime cache detection ships opt-in and off, byte-identical to before.
+
+  Two upstream defects fixed in this range are worth naming because they are
+  *not* reachable from Python and so needed no action here: the strided-view
+  fast-path bug lands on `strided_vector_ref`, which these bindings never
+  construct (`as_vector`/`as_matrix` copy, honouring strides), and the GCC 13
+  AVX2 integer-reduction miscompile is in `batch<T>` integer lanes, which
+  v5.10.0's `batch` still `static_assert`s away.
+
+- **`.refactor()` now calls MTL5's in-place entry points**
+  (`sparse_lu_refactor_in_place` / `supernodal_lu_refactor_in_place`, MTL5
+  [#310](https://github.com/stillwater-sc/mtl5/issues/310)) rather than the
+  value-returning forms. Those still exist and still compile, which is what made
+  this easy to miss: they are now wrappers that copy the factorization first,
+  and the copy *is* the cost — duplicating the two `nnz`-length solve schedules
+  costs about what rebuilding them costs. Upstream measures **26.3 → 20.3 ms per
+  refactor** on a 390K-nonzero factor, with markedly lower run-to-run variance
+  once the large allocation leaves the path. Same Python surface; the SPICE-style
+  one-factor-many-refactor loop is where it shows.
+
+  The "a failed refactor leaves the previous factor intact" guarantee is
+  unchanged, but it is now upstream's to keep rather than a side effect of
+  factoring into a copy, so it has a test:
+  `test_failed_refactor_leaves_the_factor_usable`.
+
 ### Added
+
+- **`mtl5.system_info()`**, and **`build_isa`** in `build_info()` (MTL5
+  [#443](https://github.com/stillwater-sc/mtl5/issues/443)). `build_isa` is the
+  SIMD ISA the binary was *compiled for*, read from the compiler's own
+  predefined macros; `system_info()["cpu_simd"]` is what the machine *supports*.
+  Only the first explains a throughput number, and until now nothing in the
+  Python surface reported it: `highway_simd: True` says the micro-kernel
+  vectorised, not how wide, and Highway's static dispatch fixes that at compile
+  time. On a wheel built the way CI builds them this reads `SSE2` against a
+  machine's `SSE2 AVX AVX2 FMA` — which is correct and intended, and now
+  visible rather than inferred. `system_info()` additionally reports CPU brand,
+  vendor, arch, logical cores, OS, compiler, `__cplusplus` and `Release`/`Debug`.
+
+  MTL5's sibling `<mtl/build_info.hpp>` (its git commit / dirty flag / configured
+  `cxx_flags`) is deliberately not used: it is CMake-generated into MTL5's binary
+  directory and is absent from MTL5's `install()` list, so depending on it would
+  compile under FetchContent and fail against an installed MTL5. Its one field
+  worth having here, `Release` vs `Debug`, comes from `compiler_info::build_type`
+  instead.
 
 - **A regression guard on the benchmark numbers**
   ([#73](https://github.com/stillwater-sc/mtl5-python/issues/73) item 3, the

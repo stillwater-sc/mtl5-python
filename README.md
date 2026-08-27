@@ -889,13 +889,34 @@ Check what a given install actually has:
 ```python
 >>> mtl5.build_info()
 {'blas': False, 'lapack': False, 'native_fast_gemm': True,
- 'highway_simd': True, 'kpu': False}
+ 'highway_simd': True, 'kpu': False, 'zlib': False, 'build_isa': 'SSE2'}
 >>> mtl5.get_backend()
 'native'
 ```
 
 `set_backend()` validates against this build rather than silently accepting a
 backend that was never compiled in; backend selection itself is compile-time.
+
+`build_isa` is the SIMD ISA this binary was **compiled for**, read from the
+compiler's own predefined macros. It is the field that makes the rest
+interpretable: `highway_simd: True` says Highway vectorised the micro-kernel,
+not how wide it went. Highway uses static dispatch — one ISA, fixed by the
+compiler flags — so a released wheel is x86-64 baseline whatever the machine
+running it supports. `mtl5.system_info()` reports that machine:
+
+```python
+>>> mtl5.system_info()["cpu_simd"]      # what the CPU can do
+'SSE2 AVX AVX2 FMA'
+>>> mtl5.build_info()["build_isa"]      # what this binary may use
+'SSE2'
+```
+
+A gap between those two is normal for a distributed wheel and is the reason
+`MTL5_NATIVE_ARCH=ON` is worth it for a local build. A gap you did *not* expect
+— after setting `-march=native` — means the flag never reached the compiler,
+which costs several x and shows up nowhere else. `system_info()` also carries
+the CPU brand, core count, OS, compiler and `Release`/`Debug`, which is what a
+benchmark report needs to be reproducible.
 
 ### Benchmarking the number systems
 

@@ -264,10 +264,20 @@ void register_sparse_lu(nb::module_& m) {
             require_default_acc_for_refactor(s.accumulator, "sparse_lu_refactor");
             nogil guard;
             // Numeric-only: reuses the ordering, symbolic structure and pivot
-            // sequence. Assign only after it succeeds, so a failed refactor
-            // leaves the previous factor intact and usable.
-            auto fresh = fact::sparse_lu_refactor(A, s.num);
-            s.num = std::move(fresh);
+            // sequence. The IN-PLACE form (MTL5 #310) is the one to call: the
+            // value-returning sparse_lu_refactor is now a wrapper that copies
+            // s.num first, and the copy is the cost -- duplicating the two
+            // nnz-length solve schedules costs about what rebuilding them
+            // costs, so the copy-then-move we used to do here paid the O(nnz)
+            // price the in-place path exists to avoid (26.3 -> 20.3 ms per
+            // refactor upstream, on a 390K-nonzero factor).
+            //
+            // The "assign only after it succeeds" guarantee the copy gave us is
+            // not lost: sparse_lu_refactor_in_place computes into scratch and
+            // installs only after the last column succeeds, so a zero pivot
+            // throws with s.num untouched and still solvable with its previous
+            // values. That is a documented strong guarantee, not an accident.
+            fact::sparse_lu_refactor_in_place(A, s.num);
         }, "A"_a,
            "Recompute the numeric factors for a matrix with the SAME sparsity "
            "pattern, reusing the ordering, symbolic analysis and pivot sequence")
@@ -684,8 +694,10 @@ void register_supernodal_lu(nb::module_& m) {
             nogil guard;
             require_default_acc_for_refactor(s.accumulator,
                                              "supernodal_lu_refactor");
-            auto fresh = fact::supernodal_lu_refactor(A, s.num);
-            s.num = std::move(fresh);
+            // In-place for the same reason as sparse_lu above (MTL5 #310):
+            // the value-returning form copies s.num, and that copy is the cost.
+            // Strong guarantee preserved -- a zero pivot leaves s.num intact.
+            fact::supernodal_lu_refactor_in_place(A, s.num);
         }, "A"_a,
            "Recompute the numeric factors for a matrix with the SAME sparsity "
            "pattern, reusing the ordering, supernode partition and pivot sequence")

@@ -211,6 +211,7 @@ try:
         symv,
         syr2k,
         syrk,
+        system_info,
         transpose,
         trmm,
         trmv,
@@ -663,6 +664,7 @@ __all__ = [
     "dtypes",
     # Build introspection & threading
     "build_info",
+    "system_info",
     "get_num_threads",
     "set_num_threads",
     # Eigenvalues, SVD, BLAS L2/L3, and property predicates

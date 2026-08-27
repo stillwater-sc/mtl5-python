@@ -30,6 +30,19 @@
 // Switch to the public API when one lands upstream.
 #include <mtl/detail/thread_pool.hpp>
 
+// CPU / OS / compiler identity, and build_isa_list() (MTL5 #443). Installed by
+// MTL5's `install(DIRECTORY include/mtl)`, so it is available on both the
+// FetchContent and the find_package build paths.
+//
+// Its sibling <mtl/build_info.hpp> (MTL5 git commit / dirty / cxx_flags) is
+// deliberately NOT used here: it is CMake-generated into MTL5's binary dir and
+// is not in MTL5's install() list, so including it would compile under
+// FetchContent and fail against an installed MTL5. What it uniquely offers is
+// MTL5's own git state, which for a released wheel is just the pinned tag that
+// is already in CMakeLists.txt. The one field of it worth having -- Release vs
+// Debug -- is in compiler_info::build_type below.
+#include <mtl/util/system_info.hpp>
+
 #include <cstddef>
 #include <cstdlib>
 #include <thread>
@@ -1503,8 +1516,45 @@ NB_MODULE(_core, m) {
         d["highway_simd"]     = has_highway;
         d["kpu"]              = has_kpu;
         d["zlib"]             = has_zlib;
+        // The ISA this binary was actually COMPILED for, read from the
+        // compiler's own predefined macros (MTL5 #443).
+        //
+        // This is the field that makes the booleans above interpretable.
+        // `highway_simd: True` says Highway vectorised the micro-kernel; it does
+        // not say how wide. Highway uses STATIC dispatch -- one ISA, fixed by
+        // the compiler flags -- and our wheels build with MTL5_NATIVE_ARCH=OFF,
+        // so a released wheel is x86-64 baseline (SSE2) no matter what the
+        // machine running it supports. Compare against system_info()["cpu_simd"]
+        // to see the gap: same flag, different answer, and only this one
+        // explains the throughput.
+        d["build_isa"]        = mtl::util::build_isa_list();
         return d;
-    }, "Compile-time feature flags of this build, as a dict");
+    }, "Compile-time feature flags of this build, as a dict. 'build_isa' is the "
+       "SIMD ISA the binary was compiled for; compare with "
+       "system_info()['cpu_simd'], which is what the machine supports.");
+
+    m.def("system_info", []() {
+        const mtl::util::system_info si = mtl::util::identify();
+        nb::dict d;
+        d["cpu_brand"]         = si.cpu.brand;
+        d["cpu_vendor"]        = si.cpu.vendor;
+        d["cpu_arch"]          = si.cpu.arch;
+        d["cpu_logical_cores"] = si.cpu.logical_cores;
+        // What the MACHINE supports. build_info()["build_isa"] is what this
+        // binary may actually use; the two differ whenever an intended -march
+        // flag did not take effect, which is the case that silently costs
+        // several x and shows up nowhere else.
+        d["cpu_simd"]          = mtl::util::simd_feature_list(si.cpu);
+        d["os_name"]           = si.os.name;
+        d["os_version"]        = si.os.version;
+        d["compiler"]          = si.compiler.name;
+        d["compiler_version"]  = si.compiler.version;
+        d["cpp_standard"]      = si.compiler.cpp_standard;
+        d["build_type"]        = si.compiler.build_type;
+        return d;
+    }, "CPU, OS and compiler identity of the machine this build is running on, "
+       "as a dict. Detected at run time; pair with build_info() to tell what the "
+       "machine can do apart from what this binary was built to use.");
 
     // ----- Threading ---------------------------------------------------------
     // MTL5's pool is a process-wide function-local static, sized ONCE from
