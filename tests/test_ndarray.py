@@ -548,6 +548,62 @@ class TestLifetime:
         gc.collect()
         np.testing.assert_array_equal(x.to_numpy(), arange(2, 3))
 
+    def test_a_view_of_an_OWNING_array_keeps_it_alive(self):
+        """The source owns its buffer, so only the keep-alive holds it.
+
+        The asarray() test above cannot catch a broken keep-alive: a view
+        derived from an asarray() array also carries the NumPy owner object, so
+        the buffer survives on that reference alone. An array built by copy()
+        owns its memory and has no second owner — if the parent is collected
+        without each view pinning it, every read below is a use-after-free.
+
+        This covers all three sites that pin manually (`__getitem__`, `reshape`,
+        `ravel`); `transpose` is covered by the asarray test and uses the
+        declarative nb::keep_alive<0, 1> instead.
+        """
+        import gc
+
+        base = arange(4, 6)
+        src = A.asarray(base).copy()
+        assert not src.is_view, "copy() must own its buffer for this to test anything"
+
+        sliced = src[1]
+        raveled = src.ravel()
+        reshaped = src.reshape([6, 4])
+
+        del src
+        gc.collect()
+
+        np.testing.assert_array_equal(sliced.to_numpy(), base[1])
+        np.testing.assert_array_equal(raveled.to_numpy(), base.ravel())
+        np.testing.assert_array_equal(reshaped.to_numpy(), base.reshape(6, 4))
+
+    def test_a_copy_does_not_pin_its_source(self):
+        """Only the aliasing paths pin the parent — the copying paths must not.
+
+        `__getitem__`, `reshape` and `ravel` each return a view on one path and
+        a copy on another, and they pin per path rather than per method. The
+        declarative nb::keep_alive<0, 1> annotation cannot express that: it
+        applies to every return, so a large source array would be held alive by
+        an independent copy of itself. This is the test that fails if someone
+        "simplifies" the manual calls into the annotation.
+
+        Refcount is the observable: pinning increfs the parent.
+        """
+        import sys
+
+        src = A.asarray(arange(4, 6)).copy()
+        before = sys.getrefcount(src)
+        view = src.ravel()  # C-contiguous -> view
+        assert view.is_view
+        assert sys.getrefcount(src) == before + 1, "a view must pin its source"
+
+        nc = A.asarray(arange(4, 6)).T  # non-contiguous
+        before_nc = sys.getrefcount(nc)
+        copied = nc.ravel()  # cannot alias -> copy
+        assert not copied.is_view
+        assert sys.getrefcount(nc) == before_nc, "a copy must NOT pin its source"
+
 
 class TestPublicSurface:
     def test_array_submodule_is_exported(self):
