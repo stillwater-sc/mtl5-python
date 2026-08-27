@@ -136,7 +136,27 @@ jobs:
       - name: Install python-semantic-release
         # Pinned to the v10 line the pyproject [tool.semantic_release] config was
         # verified against; a major bump could change parser/changelog behavior.
-        run: pip install "python-semantic-release>=10,<11"
+        #
+        # GitPython is pinned too, and it is not belt-and-braces. It is a
+        # TRANSITIVE dependency of semantic-release, so pinning semantic-release
+        # alone left it free to float -- and 3.1.60 removed Actor.name_email_regex,
+        # which semantic-release still uses. The release job then died with
+        #
+        #   type object 'Actor' has no attribute 'name_email_regex'
+        #
+        # on a push that changed no release machinery whatsoever. Present through
+        # 3.1.59, gone in 3.1.60; verified by running `semantic-release version
+        # --print` against this repo under both.
+        #
+        # It failed safely -- `released` was never set, so the build/publish jobs
+        # below short-circuited and nothing was tagged or pushed to PyPI -- but
+        # "safely" here means "no releases at all until this is pinned".
+        #
+        # This is the third dependency to break the pipeline this way (ruff in
+        # ci.yml, nanobind in pyproject.toml, now GitPython). The pattern worth
+        # remembering: pinning the direct dependency does nothing for the
+        # transitive one that actually breaks.
+        run: pip install "python-semantic-release>=10,<11" "GitPython<3.1.60"
 
       - name: Configure git identity for the release commit
         run: |
