@@ -16,9 +16,25 @@
 #     before CMake ever runs. Naming it here forces a modern packaging into the
 #     overlay, which precedes dist-packages on sys.path and wins. Observed on a
 #     Jetson (Ubuntu 22.04, system pip 22.0.2) installing the sdist.
+#
+# The nanobind upper bound is deliberate, and it is load-bearing rather than
+# cautious. python/CMakeLists.txt already pins its FetchContent fallback to
+# v2.4.0, but that fallback only runs when find_package(nanobind) fails -- and
+# under `pip install .` it never does, because this requirement puts a nanobind
+# in the build overlay for find_package to find. So THIS bound, not the CMake
+# one, is what a wheel build actually resolves, and unbounded it resolved
+# nanobind 3.0.0 the day that released.
+#
+# nanobind 3 is not a drop-in: it moved the internals to a backend-slot dispatch
+# model, so the free function nb::detail::keep_alive(nurse, patient) that
+# mtl5_ndarray.cpp uses to tie a view's lifetime to its owner is gone, replaced
+# by NB_CALL(keep_alive_py)(NB_CTX, ...) which needs a context not available at
+# those call sites. Lifting this cap is a real port, not a version edit; until
+# someone does it, pin the major so a nanobind release cannot retroactively fail
+# every build the way one already has.
 requires = [
     "scikit-build-core>=0.10",
-    "nanobind>=2.0",
+    "nanobind>=2.0,<3",
     "numpy>=1.24",
     "packaging>=22",
     "typing_extensions>=4.0; python_version < '3.11'",
