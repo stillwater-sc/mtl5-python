@@ -431,6 +431,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.10.1 (2026-08-27)
+
+### Continuous Integration
+
+- Pin GitPython below 3.1.60 in the release job
+  ([#86](https://github.com/stillwater-sc/mtl5-python/pull/86),
+  [`28f809c`](https://github.com/stillwater-sc/mtl5-python/commit/28f809cb4231dc4aadf4c2fb2b0b61744c4aafef))
+
+### Features
+
+- **build**: Support nanobind 3, widening the bound to <4
+  ([#87](https://github.com/stillwater-sc/mtl5-python/pull/87),
+  [`92da1c8`](https://github.com/stillwater-sc/mtl5-python/commit/92da1c8f5bfec452bc144c6b4d2bb595436ad278))
+
+
 ## v5.9.8 (2026-08-14)
 
 ### Bug Fixes
