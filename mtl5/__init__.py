@@ -70,6 +70,8 @@ try:
         # Universal cfloat types
         DenseMatrix_fp8,
         DenseMatrix_fp16,
+        DenseMatrix_i8,
+        DenseMatrix_i16,
         DenseMatrix_i32,
         DenseMatrix_i64,
         # Universal lns types
@@ -84,6 +86,7 @@ try:
         DenseMatrix_qd_cascade,
         DenseMatrix_takum32,
         DenseMatrix_td_cascade,
+        DenseMatrix_u8,
         DenseVector_c64,
         DenseVector_c128,
         DenseVector_cfloat32,
@@ -94,6 +97,8 @@ try:
         DenseVector_fixpnt16,
         DenseVector_fp8,
         DenseVector_fp16,
+        DenseVector_i8,
+        DenseVector_i16,
         DenseVector_i32,
         DenseVector_i64,
         DenseVector_lns16,
@@ -105,6 +110,7 @@ try:
         DenseVector_qd_cascade,
         DenseVector_takum32,
         DenseVector_td_cascade,
+        DenseVector_u8,
         # QR / LQ factorization objects — complex only; the real ones are reached
         # through mtl5.qr()/mtl5.lq(), which dispatch on dtype.
         LQFactor_c64,
@@ -586,8 +592,11 @@ __all__ = [
     "DenseVector_c128",
     "DenseVector_f32",
     "DenseVector_f64",
+    "DenseVector_i8",
+    "DenseVector_i16",
     "DenseVector_i32",
     "DenseVector_i64",
+    "DenseVector_u8",
     # Typed vector classes — Universal cfloat
     "DenseVector_fp8",
     "DenseVector_fp16",
@@ -613,8 +622,11 @@ __all__ = [
     "DenseMatrix_c128",
     "DenseMatrix_f32",
     "DenseMatrix_f64",
+    "DenseMatrix_i8",
+    "DenseMatrix_i16",
     "DenseMatrix_i32",
     "DenseMatrix_i64",
+    "DenseMatrix_u8",
     # Typed matrix classes — Universal cfloat
     "DenseMatrix_fp8",
     "DenseMatrix_fp16",

@@ -119,6 +119,14 @@ template <> constexpr const char* type_suffix<float>()   { return "f32"; }
 template <> constexpr const char* type_suffix<double>()  { return "f64"; }
 template <> constexpr const char* type_suffix<int32_t>() { return "i32"; }
 template <> constexpr const char* type_suffix<int64_t>() { return "i64"; }
+// Narrow integers, for MTL5's widening dot and integer GEMM: the accumulator is
+// int32 while the OPERANDS are 8- or 16-bit, which is what the hardware
+// multiply-accumulate instructions take. int8_t/uint8_t are signed/unsigned
+// char, so these are distinct specializations from the ones above rather than
+// aliases of them.
+template <> constexpr const char* type_suffix<int8_t>()  { return "i8"; }
+template <> constexpr const char* type_suffix<int16_t>() { return "i16"; }
+template <> constexpr const char* type_suffix<uint8_t>() { return "u8"; }
 template <> constexpr const char* type_suffix<fp8>()     { return "fp8"; }
 template <> constexpr const char* type_suffix<fp16>()    { return "fp16"; }
 template <> constexpr const char* type_suffix<posit8>()  { return "posit8"; }

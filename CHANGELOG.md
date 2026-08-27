@@ -15,6 +15,57 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Narrow integer element types: `i8`, `i16`, `u8`**
+  ([#88](https://github.com/stillwater-sc/mtl5-python/issues/88) phase 1).
+  These are the operand types of MTL5 v5.11.0's widening dot and integer GEMM —
+  the accumulator stays `int32`, which is what `vpdpbusd` / `vpmaddwd` / `SDOT`
+  take — so registering the containers is what makes those kernels reachable at
+  all. **Those kernels arrive with the v5.11.0 pin; this phase does not require
+  it** and is built and tested against the current v5.10.0.
+  `mtl5.vector(np.arange(4, dtype=np.int8))` now gives a
+  `DenseVector_i8`, zero-copy, alongside `DenseMatrix_i8` and the `u8`/`i16`
+  equivalents.
+
+  **This also fixes a silent wrong-dtype bug.** The native factories take
+  `nb::ndarray<T>` without `.noconvert()`, so nanobind's converting second pass
+  handed an int8 array to the *float* overload — registered first — and
+  `mtl5.vector(int8_array)` returned a `DenseVector_f32` that reported
+  `is_view=True` while being a view of the converted temporary, so writes
+  through the NumPy array were invisible. An exact match now resolves in the
+  first pass, before conversion is considered. The dtypes that remain
+  unregistered (`f16`, `uint16`, `uint32`, `uint64`) still behave the old way.
+
+  **`dot`, `norm` and `__matmul__` are deliberately not registered for these
+  types**, and that is a measurement rather than caution. All three default to
+  accumulating in the element type, so on 8- and 16-bit operands they overflow
+  almost immediately. One input covers all three, since each sums the same six
+  products — vectors of six 100s, and a 6×6 of 100s. Exact `dot` and exact
+  `A @ A` element are both 60000; exact `two_norm` is 244.9490:
+
+  | | `i8` | `i16` | `u8` |
+  |---|---|---|---|
+  | `dot` | 96 | −5536 | 96 |
+  | `two_norm` | 9.798 | **nan** | 9.798 |
+  | `A @ A` | 96 | −5536 | 96 |
+
+  `two_norm` is `sqrt(dot)`, which is what makes the `i16` nan legible: the sum
+  wrapped negative, and `sqrt(-5536)` has no answer to give.
+
+  These are MTL5's documented two's-complement wrapping and become correct the
+  moment an int32 accumulator is supplied. `i16` has real headroom — a 2×2 of
+  100s gives the exact 20000 — so its failure needs a longer `k` rather than
+  being immediate; that is a difference of degree, since `k=4` already wraps it
+  and nothing in the API tells a caller where the edge is. `i32` has the same
+  failure past ~46341, where an 8-bit sum of squares overflows at two elements
+  of 12 — an edge case there, essentially every input here.
+
+  `mtl5.dot(i8_vec, i8_vec)` and `i8_mat @ i8_mat` therefore raise `TypeError`
+  rather than returning a wrapped number, until phase 2 lands the accumulator.
+  `__matmul__` is registered on the matrix class itself, so this needed
+  `register_native_matrix` split from `register_native_matrix_matmul` — the
+  existing types are registered exactly as before.
+
+
 - **nanobind 3 is supported**, and the build requirement widens from
   `nanobind>=2.0,<3` to `>=2.0,<4`
   ([#85](https://github.com/stillwater-sc/mtl5-python/issues/85)). The cap added
