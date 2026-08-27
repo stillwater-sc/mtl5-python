@@ -15,6 +15,43 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Narrow integer element types: `i8`, `i16`, `u8`**
+  ([#88](https://github.com/stillwater-sc/mtl5-python/issues/88) phase 1).
+  These are the operand types of MTL5 v5.11.0's widening dot and integer GEMM —
+  the accumulator stays `int32`, which is what `vpdpbusd` / `vpmaddwd` / `SDOT`
+  take — so registering the containers is what makes those kernels reachable at
+  all. `mtl5.vector(np.arange(4, dtype=np.int8))` now gives a
+  `DenseVector_i8`, zero-copy, alongside `DenseMatrix_i8` and the `u8`/`i16`
+  equivalents.
+
+  **This also fixes a silent wrong-dtype bug.** The native factories take
+  `nb::ndarray<T>` without `.noconvert()`, so nanobind's converting second pass
+  handed an int8 array to the *float* overload — registered first — and
+  `mtl5.vector(int8_array)` returned a `DenseVector_f32` that reported
+  `is_view=True` while being a view of the converted temporary, so writes
+  through the NumPy array were invisible. An exact match now resolves in the
+  first pass, before conversion is considered. The dtypes that remain
+  unregistered (`f16`, `uint16`, `uint32`, `uint64`) still behave the old way.
+
+  **`dot` and `norm` are deliberately not registered for these types**, and that
+  is a measurement rather than caution. Both default to accumulating in the
+  element type, so on 8- and 16-bit operands they overflow almost immediately —
+  on six-element vectors of 100 (exact dot 80000, exact `two_norm` 244.9490):
+
+  | | `i8` | `i16` | `u8` |
+  |---|---|---|---|
+  | `dot` | −128 | 14464 | 128 |
+  | `two_norm` | 9.798 | **nan** | 9.798 |
+
+  The `dot` values are MTL5's documented two's-complement wrapping and become
+  correct the moment an int32 accumulator is supplied. `two_norm` is worse than
+  wrapping: it takes `sqrt` of a sum that has wrapped, and of a negative one for
+  `i16`. `i32` has the same failure, but only past ~46341, where an 8-bit sum of
+  squares overflows at two elements of 12 — an edge case there, essentially
+  every input here. `mtl5.dot(i8_vec, i8_vec)` therefore raises `TypeError`
+  rather than returning a wrapped number, until phase 2 lands the accumulator.
+
+
 - **nanobind 3 is supported**, and the build requirement widens from
   `nanobind>=2.0,<3` to `>=2.0,<4`
   ([#85](https://github.com/stillwater-sc/mtl5-python/issues/85)). The cap added

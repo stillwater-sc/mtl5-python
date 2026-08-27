@@ -100,6 +100,78 @@ class TestZeroCopyVectorInt:
         assert v.dtype == "i64"
 
 
+class TestNarrowIntegerStorage:
+    """int8 / int16 / uint8 — the operand types of MTL5's widening integer
+    kernels. Storage only for now: see TestNarrowIntegerHasNoArithmetic."""
+
+    NARROW = [(np.int8, "i8"), (np.int16, "i16"), (np.uint8, "u8")]
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_dispatches_to_its_own_type(self, dt, suffix):
+        """The bug this closes: with no i8/i16/u8 overload registered, nanobind's
+        converting second pass handed these to the float overload (registered
+        first), so `vector(int8 array)` returned a DenseVector_f32 that reported
+        is_view=True while being a view of the converted temporary."""
+        v = mtl5.vector(np.array([10, 20, 30], dtype=dt))
+        assert isinstance(v, getattr(mtl5, f"DenseVector_{suffix}"))
+        assert v.dtype == suffix
+        assert v[2] == 30
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_is_actually_zero_copy(self, dt, suffix):
+        """`is_view` alone would not have caught the old behaviour — the view of
+        the converted temporary reported True. Writing through the NumPy array
+        is what distinguishes an alias from a copy."""
+        a = np.array([10, 20, 30], dtype=dt)
+        v = mtl5.vector(a)
+        assert v.is_view
+        a[0] = 99
+        assert v[0] == 99, "the vector must alias the NumPy buffer, not a copy"
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_matrix_and_round_trip(self, dt, suffix):
+        base = np.arange(6, dtype=dt).reshape(2, 3)
+        m = mtl5.matrix(base)
+        assert isinstance(m, getattr(mtl5, f"DenseMatrix_{suffix}"))
+        assert m.dtype == suffix
+        np.testing.assert_array_equal(m.to_numpy(), base)
+        assert m.to_numpy().dtype == np.dtype(dt)
+
+
+class TestNarrowIntegerHasNoArithmetic:
+    """`dot` and `norm` are deliberately not registered for i8/i16/u8.
+
+    Both default to accumulating in the ELEMENT type, which on 8- and 16-bit
+    operands overflows almost immediately. Measured on six-element vectors of
+    100 (exact dot 80000, exact two_norm 244.9490):
+
+        dot       i8 -> -128     i16 -> 14464    u8 -> 128
+        two_norm  i8 -> 9.798    i16 -> nan      u8 -> 9.798
+
+    The dot values are MTL5's documented two's-complement wrapping and become
+    correct once an int32 accumulator is supplied. `two_norm` is worse than
+    wrapping — it takes sqrt of a wrapped, sometimes negative, sum. i32 has the
+    same failure but only past ~46341, where an 8-bit sum of squares overflows
+    at two elements of 12.
+
+    A TypeError is the honest answer until the accumulator exists. If this test
+    starts failing because someone registered the generic overloads, the fix is
+    the accumulator, not deleting the test.
+    """
+
+    @pytest.mark.parametrize("dt", [np.int8, np.int16, np.uint8], ids=["i8", "i16", "u8"])
+    def test_dot_is_not_offered(self, dt):
+        v = mtl5.vector(np.full(6, 100, dtype=dt))
+        with pytest.raises(TypeError):
+            mtl5.dot(v, v)
+
+    @pytest.mark.parametrize("dt", [np.int8, np.int16, np.uint8], ids=["i8", "i16", "u8"])
+    def test_norm_is_not_offered(self, dt):
+        v = mtl5.vector(np.full(6, 100, dtype=dt))
+        with pytest.raises(TypeError):
+            mtl5.norm(v, 2)
+
+
 class TestNonContiguous:
     def test_non_contiguous_implicitly_copied(self):
         """nanobind implicitly copies non-contiguous arrays to make them contiguous.

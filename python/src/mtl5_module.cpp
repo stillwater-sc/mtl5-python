@@ -1004,13 +1004,26 @@ void register_universal_solve(nb::module_& m) {
 // ===========================================================================
 // Convenience: register all bindings for one type
 // ===========================================================================
+/// Containers and the zero-copy NumPy factories -- storage, no arithmetic.
+///
+/// Split out from register_native because the narrow integer types can carry
+/// data long before they can compute with it: their operations need an
+/// accumulator wider than the element type, and until that exists the generic
+/// element-typed forms are not merely inexact but wrong. See the registration
+/// site for the measurements.
 template <typename T>
     requires std::is_arithmetic_v<T>
-void register_native(nb::module_& m) {
+void register_native_storage(nb::module_& m) {
     register_native_vector<T>(m);
     register_native_matrix<T>(m);
     register_native_vector_factory<T>(m);
     register_native_matrix_factory<T>(m);
+}
+
+template <typename T>
+    requires std::is_arithmetic_v<T>
+void register_native(nb::module_& m) {
+    register_native_storage<T>(m);
     register_native_norm_overload<T>(m);
     register_native_dot_overload<T>(m);
 }
@@ -1598,6 +1611,47 @@ NB_MODULE(_core, m) {
     register_native_with_solve<double>(m);    // f64
     register_native<int32_t>(m);              // i32
     register_native<int64_t>(m);              // i64
+
+    // Narrow integers: STORAGE ONLY, deliberately. These are the OPERAND types
+    // of MTL5's widening dot and integer GEMM -- the accumulator stays int32,
+    // which is what vpdpbusd / vpmaddwd / SDOT take. Registering the containers
+    // is what makes those kernels reachable at all; the accumulator policy that
+    // drives them is a separate step (mtl5.mixed).
+    //
+    // `norm` and `dot` are NOT registered for these, and that is a measurement
+    // rather than caution. Both default to accumulating in the ELEMENT type, so
+    // on 8- and 16-bit operands they overflow almost immediately:
+    //
+    //   dot, six-element vectors of 100, exact answer 80000
+    //     i8  -> -128      i16 -> 14464      u8  -> 128
+    //   two_norm, same data, exact answer 244.9490
+    //     i8  -> 9.798     i16 -> nan        u8  -> 9.798
+    //
+    // The dot results are MTL5's documented two's-complement wrapping and become
+    // useful the moment an int32 accumulator is supplied. `two_norm` is worse
+    // than wrapping: it takes sqrt of a sum that has wrapped, and of a NEGATIVE
+    // one for i16, so it yields nan. i32 has the same failure but only past
+    // ~46341, where an 8-bit sum of squares overflows at two elements of 12 --
+    // an edge case there, essentially every input here.
+    //
+    // Exposing an operation that is wrong for almost all inputs is worse than
+    // not exposing it, so these three carry data and nothing else until the
+    // accumulator lands. `mtl5.dot(i8_vec, i8_vec)` raises TypeError rather than
+    // returning a wrapped number.
+    //
+    // Registering the containers also fixes a silent wrong-dtype bug. These
+    // factories take nb::ndarray<T> WITHOUT .noconvert(), so nanobind's second
+    // (converting) pass used to hand an int8 array to the float overload --
+    // registered first -- and `mtl5.vector(np.arange(4, dtype=np.int8))`
+    // returned a DenseVector_f32 that reported is_view=True while being a view
+    // of the converted temporary, so writes through the NumPy array were
+    // invisible. An exact match now resolves in the FIRST pass, before
+    // conversion is considered. Every dtype still unregistered (f16, uint16,
+    // uint32, uint64) keeps that behaviour -- see the note in mtl5_ndarray.cpp,
+    // where .noconvert() was added for exactly this.
+    register_native_storage<int8_t>(m);       // i8
+    register_native_storage<int16_t>(m);      // i16
+    register_native_storage<uint8_t>(m);      // u8
 
     // ----- Sparse matrices (CSR via mtl::compressed2D) -----------------------
     register_sparse_matrix<float>(m);
