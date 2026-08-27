@@ -30,9 +30,16 @@
 // builds the view through ndarray's (pointer, shape, strides) constructor,
 // which is the same primitive `slice` is built on.
 //
-// Lifetime: every method returning a view uses nb::keep_alive<0, 1>, so the
-// array it borrows from cannot be collected first. `asarray` additionally holds
-// the NumPy object, which is what keeps the underlying buffer alive.
+// Lifetime: a method that returns a view keeps the array it borrows from alive,
+// so the parent cannot be collected first. `asarray` and the `as_ndarray`
+// converters do that with nb::keep_alive<0, 1>, the declarative form.
+//
+// `__getitem__`, `reshape` and `ravel` cannot: each returns a view on one path
+// and a copy (or, for a fully-integer index, a scalar) on another, while the
+// annotation applies to every return of a `.def`. Pinning a large parent array
+// to an independent copy of itself is a memory-retention bug, so those three
+// call `keep_view_alive` on exactly the aliasing paths. See its comment below --
+// that split is the reason the port to nanobind 3 was not a one-line rename.
 
 #include "mtl5_types.hpp"
 
@@ -57,6 +64,32 @@ using namespace nb::literals;
 namespace {
 
 namespace ma = mtl::array;
+
+/// Tie `patient`'s lifetime to `nurse`: the patient cannot be collected while
+/// the nurse is alive. Used where we hand back a VIEW that aliases another
+/// array's memory, so the buffer cannot be freed out from under it.
+///
+/// Spelled here rather than at the call sites because nanobind moved it. 2.x
+/// exposed a free `nb::detail::keep_alive(nurse, patient)`; 3.x routes the same
+/// operation through a backend slot that has to be handed this extension's
+/// context pointer. `NB_CTX` resolves to that pointer in extension code (it is
+/// only unavailable inside nanobind's own build, under NB_BUILD), so the 3.x
+/// form is usable directly -- it just cannot be spelled the old way.
+///
+/// Both branches are still nanobind-internal API. The alternative is the public
+/// `nb::keep_alive<Nurse, Patient>` annotation, which does NOT fit here: it
+/// applies unconditionally to every return of a `.def`, and all three callers
+/// below return a view on one path and a copy (or a scalar) on another. Pinning
+/// the parent to a copy would be a silent memory-retention regression -- a
+/// large source array held alive by an independent copy of it -- so the
+/// conditional, per-path call is the behaviour to preserve, not an accident.
+inline void keep_view_alive(nb::handle nurse, nb::handle patient) {
+#if defined(NB_VERSION_MAJOR) && NB_VERSION_MAJOR >= 3
+    NB_CALL(keep_alive_py)(NB_CTX, nurse.ptr(), patient.ptr());
+#else
+    nb::detail::keep_alive(nurse.ptr(), patient.ptr());
+#endif
+}
 
 /// An ndarray plus, when it borrows NumPy memory, the object owning it.
 ///
@@ -337,7 +370,7 @@ void register_ndarray(nb::module_& m) {
             }
             NDArrayView<T, M> out(ma::ndarray<T, M>(ptr, sh, st), v.owner);
             nb::object o = nb::cast(std::move(out));
-            nb::detail::keep_alive(o.ptr(), self.ptr());
+            keep_view_alive(o, self);
             return o;
         };
         switch (kept) {
@@ -364,7 +397,7 @@ void register_ndarray(nb::module_& m) {
                 NDArrayView<T, M> out(
                     ma::ndarray<T, M>(const_cast<T*>(v.arr.data()), sh), v.owner);
                 nb::object o = nb::cast(std::move(out));
-                nb::detail::keep_alive(o.ptr(), self.ptr());
+                keep_view_alive(o, self);
                 return o;
             }
             // Not contiguous in its own order: pack into logical order first.
@@ -403,7 +436,7 @@ void register_ndarray(nb::module_& m) {
             NDArrayView<T, 1> out(
                 ma::ndarray<T, 1>(const_cast<T*>(v.arr.data()), sh), v.owner);
             nb::object o = nb::cast(std::move(out));
-            nb::detail::keep_alive(o.ptr(), self.ptr());
+            keep_view_alive(o, self);
             return o;
         }
         ma::shape<1> sh;

@@ -13,6 +13,39 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Added
+
+- **nanobind 3 is supported**, and the build requirement widens from
+  `nanobind>=2.0,<3` to `>=2.0,<4`
+  ([#85](https://github.com/stillwater-sc/mtl5-python/issues/85)). The cap added
+  when nanobind 3.0.0 broke every wheel build was a hold, not a fix; this is the
+  port. **Both majors are built and tested** — 1374 passed, 3 skipped under each
+  of nanobind 2.15.0 and 3.0.0.
+
+  nanobind 3 removed the free `nb::detail::keep_alive(nurse, patient)`, routing
+  the same operation through a backend slot that must be handed the extension's
+  context pointer. `mtl5_ndarray.cpp` now spells it once, in `keep_view_alive()`,
+  which selects the form on `NB_VERSION_MAJOR` — so the bound moved rather than
+  jumped, and a source build against either major produces the same behaviour.
+
+  The obvious simplification is wrong, and there is now a test saying so.
+  Replacing these calls with the declarative `nb::keep_alive<0, 1>` annotation
+  would compile and pass the old suite, but the annotation applies to **every**
+  return of a `.def`, and `__getitem__`, `reshape` and `ravel` each return a
+  view on one path and a copy (or, for a fully-integer index, a scalar) on
+  another. Pinning a large source array to an independent copy of itself is a
+  memory-retention bug, so the pin has to stay per-path.
+
+  Two gaps in the lifetime tests are closed as part of this, both of which a
+  broken keep-alive would previously have survived:
+  - `test_a_view_of_an_OWNING_array_keeps_it_alive` — the existing test derives
+    its views from `asarray()`, where the view *also* carries the NumPy owner
+    object, so the buffer survives on that reference alone. A `copy()` owns its
+    memory with no second owner, which is the configuration where dropping the
+    parent is a genuine use-after-free.
+  - `test_a_copy_does_not_pin_its_source` — asserts the aliasing/copying split
+    directly, via refcount: a view increfs its parent, a copy does not.
+
 ### Fixed
 
 - **nanobind capped below 3.0** (`nanobind>=2.0,<3`), which unbreaks every wheel

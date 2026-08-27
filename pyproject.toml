@@ -25,16 +25,15 @@
 # one, is what a wheel build actually resolves, and unbounded it resolved
 # nanobind 3.0.0 the day that released.
 #
-# nanobind 3 is not a drop-in: it moved the internals to a backend-slot dispatch
-# model, so the free function nb::detail::keep_alive(nurse, patient) that
-# mtl5_ndarray.cpp uses to tie a view's lifetime to its owner is gone, replaced
-# by NB_CALL(keep_alive_py)(NB_CTX, ...) which needs a context not available at
-# those call sites. Lifting this cap is a real port, not a version edit; until
-# someone does it, pin the major so a nanobind release cannot retroactively fail
-# every build the way one already has.
+# The bound is now <4, i.e. nanobind 2 AND 3 are supported and tested. It was
+# <3 while mtl5_ndarray.cpp still called the free nb::detail::keep_alive that
+# nanobind 3 removed; keep_view_alive() there now spells that operation for
+# both majors, so the cap moved rather than disappeared. Keep an upper bound:
+# nanobind 3.0.0 broke every build the day it released precisely because there
+# was none.
 requires = [
     "scikit-build-core>=0.10",
-    "nanobind>=2.0,<3",
+    "nanobind>=2.0,<4",
     "numpy>=1.24",
     "packaging>=22",
     "typing_extensions>=4.0; python_version < '3.11'",

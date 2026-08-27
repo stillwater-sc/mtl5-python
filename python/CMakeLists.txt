@@ -6,7 +6,7 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 # find_package almost always wins under `pip install .`, because pyproject.toml's
 # build requirement puts a nanobind in the build overlay. The FetchContent tag
 # below is the fallback for a bare CMake build with no nanobind installed -- and
-# it is kept in step with the `nanobind>=2.0,<3` bound in pyproject.toml on
+# it is kept in step with the `nanobind>=2.0,<4` bound in pyproject.toml on
 # purpose. When the two drifted (fallback v2.4.0, requirement unbounded), a local
 # CMake build and a CI wheel build compiled against different major versions of
 # nanobind, so a source change could pass locally and fail every CI job. Move
@@ -17,7 +17,7 @@ if(NOT nanobind_FOUND)
     FetchContent_Declare(
         nanobind
         GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG        v2.15.0
+        GIT_TAG        v3.0.0
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(nanobind)
