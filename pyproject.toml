@@ -42,7 +42,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "mtl5"
-version = "5.10.1"
+version = "5.10.2"
 description = "Python bindings for MTL5 — NumPy/SciPy/JAX/PyTorch interop with hardware accelerator dispatch"
 readme = "README.md"
 license = {text = "MIT"}

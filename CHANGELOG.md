@@ -482,6 +482,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.10.2 (2026-08-27)
+
+### Features
+
+- **types**: Add i8/i16/u8 element types, storage only
+  ([#89](https://github.com/stillwater-sc/mtl5-python/pull/89),
+  [`4c9f4e4`](https://github.com/stillwater-sc/mtl5-python/commit/4c9f4e427868968f8368046ab113ec68440fdf4a))
+
+
 ## v5.10.1 (2026-08-27)
 
 ### Continuous Integration
