@@ -13,6 +13,28 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Fixed
+
+- **nanobind capped below 3.0** (`nanobind>=2.0,<3`), which unbreaks every wheel
+  build. The bound was open, nanobind 3.0.0 released, and every `build-and-test`
+  job on every platform and both compilers began failing on
+  `nb::detail::keep_alive` — a free function nanobind 3 removed when it moved its
+  internals to a backend-slot dispatch model (`NB_CALL(keep_alive_py)(NB_CTX,
+  ...)`, which needs a context the call sites in `mtl5_ndarray.cpp` do not have).
+  Nothing in this repository changed; a dependency released.
+
+  This is the same failure mode the ruff pin in `.github/workflows/ci.yml` was
+  added to prevent, and lifting the cap is a real port rather than a version
+  edit.
+
+  `python/CMakeLists.txt` had *already* pinned its FetchContent fallback to
+  v2.4.0 — which is precisely why this was invisible until CI ran. `pip install`
+  puts a nanobind in the build overlay, so `find_package` succeeds and the
+  fallback never executes: the unbounded requirement was what wheel builds
+  actually resolved, while local CMake builds quietly used 2.4.0. Both now name
+  the same range, and the fallback moves to v2.15.0 to match what the bound
+  resolves.
+
 ### Added
 
 - **A regression guard on the benchmark numbers**
