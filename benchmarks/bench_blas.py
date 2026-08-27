@@ -52,8 +52,14 @@ tests/test_universal_factorizations.py for where each format stops being
 usable.
 
 Build flags dominate the numbers, so every run records `mtl5.build_info()`,
-thread count and host architecture in its output. A figure quoted without that
-context is not reproducible. For scale: the top-level CMakeLists records
+`mtl5.system_info()`, thread count and host architecture in its output. A figure
+quoted without that context is not reproducible.
+
+Read `build_isa` and `cpu_simd` together: the first is the ISA this binary may
+use, the second is what the machine supports, and a run that is slower than
+expected is usually the gap between them rather than anything in the kernel.
+
+For scale: the top-level CMakeLists records
 double-precision matmul at 0.79 GF/s with the blocked GEMM alone against
 2.15-3.51 GF/s with both flags off (GCC -O3, single thread, no -march=native,
 n=200..1000) — roughly 3.4x slower without Highway to vectorise the
@@ -479,6 +485,10 @@ def run(args) -> Report:
         meta={
             "mtl5_version": mtl5.__version__,
             "build_info": mtl5.build_info(),
+            # CPU brand, real SIMD support, OS and compiler. platform.processor()
+            # below is routinely empty on Linux, which left a recorded run unable
+            # to say which machine produced it.
+            "system_info": mtl5.system_info(),
             "num_threads": mtl5.get_num_threads(),
             "baseline_dtype": BASELINE,
             "call_floor_s": floors,
@@ -502,11 +512,20 @@ def run(args) -> Report:
 
 def print_table(report: Report) -> None:
     bi = report.meta["build_info"]
-    flags = ", ".join(k for k, v in bi.items() if v) or "none"
+    # Booleans only. build_info() also carries string fields (build_isa), and a
+    # plain truthiness filter would list those as though they were enabled
+    # feature flags -- printing "build_isa" where the informative thing is its
+    # value.
+    flags = ", ".join(k for k, v in bi.items() if v is True) or "none"
     print()
     print(f"mtl5 {report.meta['mtl5_version']} — build flags: {flags}")
+    # build_isa is what the binary may use; cpu_simd is what the machine has.
+    # A benchmark number is only interpretable against the first, and only
+    # comparable across machines once you can see both.
+    si = report.meta.get("system_info", {})
+    print(f"built for {bi.get('build_isa', '?')} — cpu supports {si.get('cpu_simd') or 'unknown'}")
     print(
-        f"{report.meta['platform']['machine']}, "
+        f"{si.get('cpu_brand') or report.meta['platform']['machine']}, "
         f"{report.meta['num_threads']} thread(s), "
         f"baseline {BASELINE}"
     )

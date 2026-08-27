@@ -70,6 +70,61 @@ class TestBuildInfo:
         assert ("native" in backends) == info["native_fast_gemm"]
         assert "reference" in backends, "reference is always the fallback"
 
+    def test_build_isa_is_reported(self):
+        isa = mtl5.build_info()["build_isa"]
+        assert isinstance(isa, str) and isa, "build_isa must never be empty"
+        # "baseline" is the honest answer on an ISA with no recognised flags;
+        # anything else is a space-separated feature list.
+        assert isa == "baseline" or all(tok.isalnum() for tok in isa.split())
+
+
+class TestSystemInfo:
+    def test_keys_and_types(self):
+        si = mtl5.system_info()
+        assert isinstance(si, dict)
+        for key in [
+            "cpu_brand",
+            "cpu_vendor",
+            "cpu_arch",
+            "cpu_simd",
+            "os_name",
+            "os_version",
+            "compiler",
+            "compiler_version",
+            "build_type",
+        ]:
+            assert key in si, f"system_info() missing '{key}'"
+            assert isinstance(si[key], str)
+        assert isinstance(si["cpu_logical_cores"], int)
+        assert isinstance(si["cpp_standard"], int)
+
+    def test_reports_this_build(self):
+        si = mtl5.system_info()
+        assert si["cpu_logical_cores"] >= 1
+        assert si["cpp_standard"] >= 202002, "the bindings require C++20"
+        assert si["build_type"] in {"Release", "Debug"}
+        assert si["compiler"] in {"GCC", "Clang", "Apple Clang", "MSVC"}
+
+    def test_build_isa_is_a_subset_of_cpu_simd(self):
+        """The binary cannot use an ISA the machine does not have.
+
+        The two are different facts and the gap is the point: `cpu_simd` is what
+        the machine supports, `build_isa` is what this binary was compiled to
+        use. Our wheels build with MTL5_NATIVE_ARCH=OFF, so on any modern x86
+        box build_isa is a PROPER subset -- SSE2 against SSE2/AVX/AVX2/FMA. The
+        reverse containment would mean we emitted instructions the CPU cannot
+        run, which is a crash, not a slowdown.
+        """
+        isa = mtl5.build_info()["build_isa"]
+        if isa == "baseline":
+            pytest.skip("no recognised ISA flags on this target")
+        simd = set(mtl5.system_info()["cpu_simd"].split())
+        if not simd:
+            pytest.skip("no SIMD features reported (non-x86)")
+        assert set(isa.split()) <= simd, (
+            f"build_isa {isa!r} is not supported by cpu_simd {sorted(simd)}"
+        )
+
 
 class TestBackendReporting:
     def test_get_backend_is_first_in_dispatch_order(self):

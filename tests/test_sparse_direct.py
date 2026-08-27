@@ -143,6 +143,36 @@ class TestRefactor:
         assert lu.ordering == "amd"
         assert lu.nnz == nnz_before  # same pattern => same fill
 
+    def test_failed_refactor_leaves_the_factor_usable(self, system):
+        """A zero pivot must leave the factorization exactly as it was.
+
+        This is a strong exception guarantee, and it became load-bearing when
+        `.refactor()` moved to MTL5's in-place entry point (#310). The previous
+        code got it for free by factoring into a copy and move-assigning only on
+        success; the in-place path earns it instead by computing into scratch
+        and installing only after the last column succeeds. Same promise, but
+        now it is upstream's to keep -- so assert it here rather than assume it.
+        """
+        A, _, _ = system
+        rng = np.random.default_rng(17)
+        xt = rng.standard_normal(A.shape[0])
+        b = A @ xt
+
+        lu = ms.splu(A, ordering="natural")
+        before = lu.solve(b).to_numpy()
+
+        # Same sparsity pattern, numerically singular: zero the stored values of
+        # row 0 in place, so the pattern (and thus the replayed pivot sequence)
+        # is untouched while the pivot itself vanishes.
+        singular = A.copy()
+        singular.data[singular.indptr[0] : singular.indptr[1]] = 0.0
+        assert singular.nnz == A.nnz, "the pattern must not change"
+
+        with pytest.raises(RuntimeError, match="zero pivot"):
+            lu.refactor(ms.from_scipy(singular))
+
+        np.testing.assert_allclose(lu.solve(b).to_numpy(), before, rtol=1e-12)
+
     def test_refactor_rejects_wrong_size(self, system):
         A, _, _ = system
         lu = ms.splu(A)

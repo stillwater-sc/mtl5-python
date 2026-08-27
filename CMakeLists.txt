@@ -85,23 +85,32 @@ endif()
 # reproducible, and it is the thing to bump when tracking MTL5 upstream:
 # mtl5-python's minor version follows the MTL5 tag named here.
 #
-# v5.9.0 is a floor, not a preference. The bindings will NOT compile against
-# v5.8.0: mtl5_mixed_precision.cpp needs the two_norm<Accumulator, Result> /
-# frobenius_norm<Accumulator, Result> forms (v5.8.0 has no Result parameter),
-# and mtl5_complex.cpp needs the Hermitian factorizations cholesky_h_factor /
-# cholesky_h_solve / ldlt_h_factor / ldlt_h_solve and CHOLESKY_NOT_HERMITIAN.
-# Both landed after v5.8.0.
+# v5.10.0 is a floor, not a preference. Three things the bindings now need,
+# each from a different release, so the floor is the newest of them:
+#   v5.9.0  -- mtl5_mixed_precision.cpp needs the two_norm<Accumulator, Result> /
+#              frobenius_norm<Accumulator, Result> forms (v5.8.0 has no Result
+#              parameter), and mtl5_complex.cpp needs the Hermitian
+#              factorizations cholesky_h_factor / cholesky_h_solve /
+#              ldlt_h_factor / ldlt_h_solve and CHOLESKY_NOT_HERMITIAN.
+#   v5.9.1  -- mtl5_sparse_direct.cpp calls sparse_lu_refactor_in_place and
+#              supernodal_lu_refactor_in_place (MTL5 #310). The value-returning
+#              sparse_lu_refactor / supernodal_lu_refactor still exist and still
+#              compile, so dropping below this floor would silently reintroduce
+#              the copy the in-place forms were written to remove -- a 23%
+#              regression on the refactor path, with no diagnostic.
+#   v5.10.0 -- mtl5_module.cpp calls mtl::util::build_isa_list() (MTL5 #443),
+#              which does not exist before this tag.
 #
 # The version argument to find_package is what applies that floor to the OTHER
 # build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
 # MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
 # installed would silently build against it and get ~140 template errors deep
 # inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
-# with COMPATIBILITY SameMajorVersion, under which 5.9.0 rejects an installed
-# 5.7.0 and accepts 5.9.0 or 5.10.0 -- exactly the floor we want. (It also
+# with COMPATIBILITY SameMajorVersion, under which 5.10.0 rejects an installed
+# 5.9.x and accepts 5.10.0 or 5.11.0 -- exactly the floor we want. (It also
 # rejects a 6.x install, which is correct: an MTL5 major bump is the manual
 # intervention case in the version policy, not something to absorb silently.)
-find_package(MTL5 5.9.0 QUIET)
+find_package(MTL5 5.10.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -111,7 +120,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        v5.9.0
+        GIT_TAG        v5.10.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
