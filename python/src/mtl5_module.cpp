@@ -133,13 +133,17 @@ void register_native_vector(nb::module_& m) {
         });
 }
 
+/// The DenseMatrix_<T> class: storage, indexing, conversion. NO arithmetic --
+/// `__matmul__` is registered separately by register_native_matrix_matmul, so a
+/// type can carry data without also advertising a product it cannot compute
+/// correctly. Returns the class so the caller can add that back.
 template <typename T>
     requires std::is_arithmetic_v<T>
-void register_native_matrix(nb::module_& m) {
+nb::class_<MatrixView<T>> register_native_matrix(nb::module_& m) {
     using MV = MatrixView<T>;
     std::string name = std::string("DenseMatrix_") + type_suffix<T>();
 
-    nb::class_<MV>(m, name.c_str())
+    return nb::class_<MV>(m, name.c_str())
         .def_prop_ro("num_rows", [](const MV& mv) { return mv.mat.num_rows(); })
         .def_prop_ro("num_cols", [](const MV& mv) { return mv.mat.num_cols(); })
         .def_prop_ro("shape", [](const MV& mv) {
@@ -177,40 +181,6 @@ void register_native_matrix(nb::module_& m) {
                         AT(j, i) = mv.mat(i, j);
             }
             return MV(std::move(AT));
-        })
-        .def("__matmul__", [](const MV& A, const MV& B) {
-            if (A.mat.num_cols() != B.mat.num_rows())
-                throw std::invalid_argument("matmul: A.num_cols != B.num_rows");
-            mtl::mat::dense2D<T> C(A.mat.num_rows(), B.mat.num_cols());
-            {
-                nogil guard;
-                mtl::mat::dense2D<T> Ac(A.mat.num_rows(), A.mat.num_cols());
-                for (std::size_t i = 0; i < A.mat.num_rows(); ++i)
-                    for (std::size_t j = 0; j < A.mat.num_cols(); ++j)
-                        Ac(i, j) = A.mat(i, j);
-                mtl::mat::dense2D<T> Bc(B.mat.num_rows(), B.mat.num_cols());
-                for (std::size_t i = 0; i < B.mat.num_rows(); ++i)
-                    for (std::size_t j = 0; j < B.mat.num_cols(); ++j)
-                        Bc(i, j) = B.mat(i, j);
-                mtl::mult(Ac, Bc, C);
-            }
-            return MV(std::move(C));
-        })
-        .def("__matmul__", [](const MV& A, const VectorView<T>& x) {
-            if (A.mat.num_cols() != x.vec.size())
-                throw std::invalid_argument("matmul: A.num_cols != len(x)");
-            mtl::vec::dense_vector<T> y(A.mat.num_rows());
-            {
-                nogil guard;
-                mtl::mat::dense2D<T> Ac(A.mat.num_rows(), A.mat.num_cols());
-                for (std::size_t i = 0; i < A.mat.num_rows(); ++i)
-                    for (std::size_t j = 0; j < A.mat.num_cols(); ++j)
-                        Ac(i, j) = A.mat(i, j);
-                mtl::vec::dense_vector<T> xc(x.vec.size());
-                for (std::size_t i = 0; i < x.vec.size(); ++i) xc[i] = x.vec[i];
-                mtl::mult(Ac, xc, y);
-            }
-            return VectorView<T>(std::move(y));
         })
         .def("copy", [](const MV& mv) {
             auto owned = mtl::mat::dense2D<T>(mv.mat.num_rows(), mv.mat.num_cols());
@@ -274,6 +244,52 @@ void register_native_vector_factory(nb::module_& m) {
 // ---------------------------------------------------------------------------
 // Zero-copy matrix() factory — creates a view borrowing NumPy memory
 // ---------------------------------------------------------------------------
+/// The matrix products. Split out of register_native_matrix because they
+/// accumulate in the ELEMENT type: on an 8- or 16-bit operand that overflows
+/// almost immediately (a 2x2 of 100s gives 32 where the answer is 20000), so the
+/// narrow integer types get the container without it. mtl5.mixed is where an
+/// int32 accumulator will make these meaningful for them.
+template <typename T>
+    requires std::is_arithmetic_v<T>
+void register_native_matrix_matmul(nb::class_<MatrixView<T>>& cls) {
+    using MV = MatrixView<T>;
+    cls
+        .def("__matmul__", [](const MV& A, const MV& B) {
+            if (A.mat.num_cols() != B.mat.num_rows())
+                throw std::invalid_argument("matmul: A.num_cols != B.num_rows");
+            mtl::mat::dense2D<T> C(A.mat.num_rows(), B.mat.num_cols());
+            {
+                nogil guard;
+                mtl::mat::dense2D<T> Ac(A.mat.num_rows(), A.mat.num_cols());
+                for (std::size_t i = 0; i < A.mat.num_rows(); ++i)
+                    for (std::size_t j = 0; j < A.mat.num_cols(); ++j)
+                        Ac(i, j) = A.mat(i, j);
+                mtl::mat::dense2D<T> Bc(B.mat.num_rows(), B.mat.num_cols());
+                for (std::size_t i = 0; i < B.mat.num_rows(); ++i)
+                    for (std::size_t j = 0; j < B.mat.num_cols(); ++j)
+                        Bc(i, j) = B.mat(i, j);
+                mtl::mult(Ac, Bc, C);
+            }
+            return MV(std::move(C));
+        })
+        .def("__matmul__", [](const MV& A, const VectorView<T>& x) {
+            if (A.mat.num_cols() != x.vec.size())
+                throw std::invalid_argument("matmul: A.num_cols != len(x)");
+            mtl::vec::dense_vector<T> y(A.mat.num_rows());
+            {
+                nogil guard;
+                mtl::mat::dense2D<T> Ac(A.mat.num_rows(), A.mat.num_cols());
+                for (std::size_t i = 0; i < A.mat.num_rows(); ++i)
+                    for (std::size_t j = 0; j < A.mat.num_cols(); ++j)
+                        Ac(i, j) = A.mat(i, j);
+                mtl::vec::dense_vector<T> xc(x.vec.size());
+                for (std::size_t i = 0; i < x.vec.size(); ++i) xc[i] = x.vec[i];
+                mtl::mult(Ac, xc, y);
+            }
+            return VectorView<T>(std::move(y));
+        });
+}
+
 template <typename T>
     requires std::is_arithmetic_v<T>
 void register_native_matrix_factory(nb::module_& m) {
@@ -1013,17 +1029,21 @@ void register_universal_solve(nb::module_& m) {
 /// site for the measurements.
 template <typename T>
     requires std::is_arithmetic_v<T>
-void register_native_storage(nb::module_& m) {
+nb::class_<MatrixView<T>> register_native_storage(nb::module_& m) {
     register_native_vector<T>(m);
-    register_native_matrix<T>(m);
+    auto mat_cls = register_native_matrix<T>(m);
     register_native_vector_factory<T>(m);
     register_native_matrix_factory<T>(m);
+    // Returned rather than discarded so register_native can add `__matmul__`
+    // back. The vector class needs no such treatment: it carries no arithmetic.
+    return mat_cls;
 }
 
 template <typename T>
     requires std::is_arithmetic_v<T>
 void register_native(nb::module_& m) {
-    register_native_storage<T>(m);
+    auto mat_cls = register_native_storage<T>(m);
+    register_native_matrix_matmul<T>(mat_cls);
     register_native_norm_overload<T>(m);
     register_native_dot_overload<T>(m);
 }
@@ -1618,14 +1638,25 @@ NB_MODULE(_core, m) {
     // is what makes those kernels reachable at all; the accumulator policy that
     // drives them is a separate step (mtl5.mixed).
     //
-    // `norm` and `dot` are NOT registered for these, and that is a measurement
-    // rather than caution. Both default to accumulating in the ELEMENT type, so
-    // on 8- and 16-bit operands they overflow almost immediately:
+    // `norm`, `dot` and `__matmul__` are NOT registered for these, and that is a
+    // measurement rather than caution. All three default to accumulating in the
+    // ELEMENT type, so on 8- and 16-bit operands they overflow almost
+    // immediately. One input covers all three, because each sums the same six
+    // products: vectors of six 100s, and a 6x6 of 100s. Exact dot and exact
+    // A@A element are both 60000; exact two_norm is 244.9490.
     //
-    //   dot, six-element vectors of 100, exact answer 80000
-    //     i8  -> -128      i16 -> 14464      u8  -> 128
-    //   two_norm, same data, exact answer 244.9490
-    //     i8  -> 9.798     i16 -> nan        u8  -> 9.798
+    //     op         i8        i16        u8
+    //     dot        96        -5536      96
+    //     two_norm   9.798     nan        9.798
+    //     A @ A      96        -5536      96
+    //
+    // two_norm is sqrt(dot), which is what makes the i16 nan legible: the sum
+    // wrapped NEGATIVE, and sqrt(-5536) has no answer to give.
+    //
+    // i16 has real headroom -- a 2x2 of 100s gives the exact 20000 -- so its
+    // failure needs a longer k rather than being immediate. That is a difference
+    // of degree, not of kind: k=4 already wraps it to -25536, and nothing in the
+    // API tells a caller where the edge is. The accumulator is what moves it.
     //
     // The dot results are MTL5's documented two's-complement wrapping and become
     // useful the moment an int32 accumulator is supplied. `two_norm` is worse
@@ -1636,8 +1667,8 @@ NB_MODULE(_core, m) {
     //
     // Exposing an operation that is wrong for almost all inputs is worse than
     // not exposing it, so these three carry data and nothing else until the
-    // accumulator lands. `mtl5.dot(i8_vec, i8_vec)` raises TypeError rather than
-    // returning a wrapped number.
+    // accumulator lands. `mtl5.dot(i8_vec, i8_vec)` and `i8_mat @ i8_mat` raise
+    // TypeError rather than returning a wrapped number.
     //
     // Registering the containers also fixes a silent wrong-dtype bug. These
     // factories take nb::ndarray<T> WITHOUT .noconvert(), so nanobind's second

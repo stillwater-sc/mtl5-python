@@ -139,20 +139,27 @@ class TestNarrowIntegerStorage:
 
 
 class TestNarrowIntegerHasNoArithmetic:
-    """`dot` and `norm` are deliberately not registered for i8/i16/u8.
+    """`dot`, `norm` and `__matmul__` are deliberately not registered for
+    i8/i16/u8.
 
-    Both default to accumulating in the ELEMENT type, which on 8- and 16-bit
-    operands overflows almost immediately. Measured on six-element vectors of
-    100 (exact dot 80000, exact two_norm 244.9490):
+    All three default to accumulating in the ELEMENT type, which on 8- and
+    16-bit operands overflows almost immediately. One input covers all of them,
+    since each sums the same six products — vectors of six 100s, and a 6x6 of
+    100s. Exact dot and exact A@A element are both 60000; exact two_norm is
+    244.9490. Measured:
 
-        dot       i8 -> -128     i16 -> 14464    u8 -> 128
+        dot       i8 -> 96       i16 -> -5536    u8 -> 96
         two_norm  i8 -> 9.798    i16 -> nan      u8 -> 9.798
+        A @ A     i8 -> 96       i16 -> -5536    u8 -> 96
 
-    The dot values are MTL5's documented two's-complement wrapping and become
-    correct once an int32 accumulator is supplied. `two_norm` is worse than
-    wrapping — it takes sqrt of a wrapped, sometimes negative, sum. i32 has the
-    same failure but only past ~46341, where an 8-bit sum of squares overflows
-    at two elements of 12.
+    two_norm is sqrt(dot), which is what makes the i16 nan legible: the sum
+    wrapped negative, and sqrt(-5536) has no answer to give.
+
+    These are MTL5's documented two's-complement wrapping and become correct
+    once an int32 accumulator is supplied. i16 has real headroom — a 2x2 of
+    100s gives the exact 20000 — so its failure needs a longer k rather than
+    being immediate, but that is a difference of degree: k=4 already wraps it,
+    and nothing in the API tells a caller where the edge is.
 
     A TypeError is the honest answer until the accumulator exists. If this test
     starts failing because someone registered the generic overloads, the fix is
@@ -170,6 +177,30 @@ class TestNarrowIntegerHasNoArithmetic:
         v = mtl5.vector(np.full(6, 100, dtype=dt))
         with pytest.raises(TypeError):
             mtl5.norm(v, 2)
+
+    @pytest.mark.parametrize("dt", [np.int8, np.int16, np.uint8], ids=["i8", "i16", "u8"])
+    def test_matmul_is_not_offered(self, dt):
+        """`register_native_matrix` registers `__matmul__` on the class itself,
+        so splitting norm/dot out of `register_native` was not enough — the
+        narrow types still exposed a matrix product that accumulates in the
+        element type (a 6x6 of 100s gave 96 where the answer is 60000)."""
+        m = mtl5.matrix(np.full((6, 6), 100, dtype=dt))
+        with pytest.raises(TypeError):
+            m @ m
+
+    @pytest.mark.parametrize("dt", [np.int8, np.int16, np.uint8], ids=["i8", "i16", "u8"])
+    def test_matvec_is_not_offered(self, dt):
+        m = mtl5.matrix(np.full((6, 6), 100, dtype=dt))
+        v = mtl5.vector(np.full(6, 100, dtype=dt))
+        with pytest.raises(TypeError):
+            m @ v
+
+    def test_existing_types_keep_their_matmul(self):
+        """The split must not have removed arithmetic from f32/f64/i32/i64."""
+        for dt in (np.float64, np.float32, np.int32, np.int64):
+            a = np.eye(2, dtype=dt) * 3
+            m = mtl5.matrix(a)
+            np.testing.assert_array_equal((m @ m).to_numpy(), a @ a)
 
 
 class TestNonContiguous:
