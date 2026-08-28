@@ -32,7 +32,12 @@
 # nanobind 3.0.0 broke every build the day it released precisely because there
 # was none.
 requires = [
-    "scikit-build-core>=0.10",
+    # Capped at the major. scikit-build-core is the PEP 517 backend -- it drives
+    # every wheel build and supplies the CMake that runs (4.4.2 as of this
+    # writing). The 0.x -> 1.0 major already crossed under the open bound
+    # without anyone selecting it. Capped rather than exact-pinned because patch
+    # fixes to a build backend are worth taking automatically; a major is not.
+    "scikit-build-core>=0.10,<2",
     "nanobind>=2.0,<4",
     "numpy>=1.24",
     "packaging>=22",
