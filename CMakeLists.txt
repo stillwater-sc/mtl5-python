@@ -100,17 +100,26 @@ endif()
 #              regression on the refactor path, with no diagnostic.
 #   v5.10.0 -- mtl5_module.cpp calls mtl::util::build_isa_list() (MTL5 #443),
 #              which does not exist before this tag.
+#   v5.11.0 -- mtl5_mixed_precision.cpp offers accumulator='i32', which is the
+#              widening integer dot: int32 accumulation over 8- and 16-bit
+#              operands, on vpmaddwd / vpdpbusd / SDOT. Two things arrive with
+#              this tag and neither is optional. batch<int32_t> does not exist
+#              before it, so the kernels are simply absent. And
+#              detail/wrapping_arithmetic.hpp is new here: without it the
+#              generic integer loops are UB on overflow rather than the
+#              documented two's-complement wrap, and overflow is the NORMAL
+#              regime for these operand widths, not an edge case.
 #
 # The version argument to find_package is what applies that floor to the OTHER
 # build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
 # MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
 # installed would silently build against it and get ~140 template errors deep
 # inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
-# with COMPATIBILITY SameMajorVersion, under which 5.10.0 rejects an installed
-# 5.9.x and accepts 5.10.0 or 5.11.0 -- exactly the floor we want. (It also
+# with COMPATIBILITY SameMajorVersion, under which 5.11.0 rejects an installed
+# 5.10.x and accepts 5.11.0 or 5.12.0 -- exactly the floor we want. (It also
 # rejects a 6.x install, which is correct: an MTL5 major bump is the manual
 # intervention case in the version policy, not something to absorb silently.)
-find_package(MTL5 5.10.0 QUIET)
+find_package(MTL5 5.11.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -120,7 +129,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        v5.10.0
+        GIT_TAG        v5.11.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )

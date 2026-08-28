@@ -15,6 +15,66 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **MTL5 pinned to v5.11.0, and `accumulator='i32'`**
+  ([#88](https://github.com/stillwater-sc/mtl5-python/issues/88) phase 2). The
+  narrow integer element types phase 1 registered can now compute:
+
+  ```python
+  a = np.random.randint(0, 256, 4096, dtype=np.uint8)  # activations
+  w = np.random.randint(-128, 128, 4096, dtype=np.int8)  # weights
+  mtl5.mixed.dot(a, w, accumulator="i32")
+  ```
+
+  MTL5 v5.11.0 routes `dot<int32_t>` over 8- and 16-bit operands onto the
+  hardware widening multiply-accumulate — `vpmaddwd` / `vpdpbusd` on x86,
+  `SMLAL` / `SDOT` on NEON — and an int32 accumulator is what those
+  instructions accumulate into.
+
+  **Every signedness pairing is accepted, in either order.** `u8 × i8` is VNNI's
+  native shape on x86 and what quantized inference is written in; ARM implements
+  the symmetric pairings first. A dot product is symmetric, so MTL5 swaps the
+  operands onto whichever form the machine has. The kernel below
+  (`simd::reduce_dot_widen`) rejects `(int8, uint8)`, but that restriction is the
+  kernel's and re-exposing it would refuse a call the library can serve.
+
+  **The overflow contract is part of the API, not a footnote.** Products are
+  always exact; the sum wraps, and how soon depends on operand *magnitude*
+  rather than vector length — roughly `2^(31-2b)` terms at `b` bits. Measured at
+  full range: one `i16 × i16` product uses 2³⁰ of the int32 range, so **two**
+  already overflow it, while `i8 × i8` holds **131071** terms. That five order
+  of magnitude gap is why the quantized-inference instructions are 8-bit. The
+  wrap is two's complement and therefore bit-identical across lane counts,
+  backends and thread partitions — reproducible, but still wrapping. It is
+  stated in the docstring and asserted in the tests rather than left to be
+  discovered.
+
+  Two guardrails, both deliberate. `accumulator=` is **required** for these
+  dtypes, unlike every other: omitting it means element precision, which is
+  exactly the wrapping phase 1 refused to expose, and silently redefining `None`
+  for three dtypes alone would be worse than asking. And `result='element'` is
+  **refused**, since rounding an int32 sum back to an 8-bit element
+  re-introduces the wrap the accumulator exists to avoid.
+
+  `norm` and `frobenius_norm` remain unregistered for these types: `two_norm`
+  takes `sqrt` of the accumulated sum, and the API has no way to say
+  "accumulate in int32, deliver a real square root".
+
+  `mtl5.dtypes()` is deliberately **unchanged**. Its contract is the set
+  `convert()` can target — the suite parametrizes over it and converts into
+  every entry — and `convert()` cannot target an integer: re-quantizing reals
+  into 8 bits is a quantization scheme (scale, zero point, rounding mode), not
+  a cast, and a naive version would silently clip everything outside
+  [-128, 127]. `mtl5.mixed.accumulators('i8')` answers for them instead.
+
+  The v5.11.0 pin is what makes this sound rather than merely available.
+  `batch<int32_t>` does not exist before it, so the kernels are absent — and
+  `detail/wrapping_arithmetic.hpp` is new in it, without which the generic
+  integer loops are **UB** on overflow rather than the documented modular wrap.
+  For these operand widths overflow is the normal regime, not an edge case.
+
+
+### Added
+
 - **Narrow integer element types: `i8`, `i16`, `u8`**
   ([#88](https://github.com/stillwater-sc/mtl5-python/issues/88) phase 1).
   These are the operand types of MTL5 v5.11.0's widening dot and integer GEMM —
