@@ -76,6 +76,32 @@ jobs:
       - name: Run tests
         run: pytest -v
 
+  # The ecosystem dependencies below are deliberately UNPINNED, and that is a
+  # decision rather than an oversight -- see #90, and the dependency float audit
+  # that pinned ruff, nanobind, GitPython, cibuildwheel, build and
+  # scikit-build-core. The argument for pinning those is that they build or
+  # publish an artifact, so an upstream release retroactively changes what ships.
+  # This job is the opposite: its whole value is telling us early when a torch,
+  # jax, pandas or scikit-learn release breaks interop, which a pinned job by
+  # construction cannot do.
+  #
+  # The usual objection -- "an upstream release will block every PR" -- does not
+  # apply here, and that was checked rather than assumed:
+  #
+  #   * the `protect-main` ruleset carries only `deletion` and
+  #     `non_fast_forward`. There are NO required status checks, so a red job
+  #     cannot block a merge.
+  #   * nothing depends on this job. The release chain in wheels.yml gates on
+  #     `validate-wheels` (a different workflow), never on this one, so a failure
+  #     here cannot stop a release either.
+  #
+  # So a failure is loud (a red check on the PR, a failed run) and cheap (blocks
+  # nothing) -- which is exactly what an early-warning lane should be.
+  #
+  # REVISIT IF THAT CHANGES: adding required status checks to the ruleset would
+  # turn this into a queue-blocker, and the tradeoff flips. At that point either
+  # pin these and bump deliberately, or move the floating sweep to a scheduled
+  # run that opens an issue instead of gating a PR.
   ecosystem-test:
     runs-on: ubuntu-22.04
     steps:
