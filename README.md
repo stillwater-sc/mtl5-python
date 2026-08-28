@@ -31,6 +31,24 @@ pip install .
 
 See [Development](#development) for an editable install.
 
+### Upgrading to 5.10.3
+
+**5.10.3 changes behaviour.** `mtl5.vector()` and `mtl5.matrix()` no longer
+silently convert their input, so code that worked on 5.10.2 can raise
+`TypeError`. You are affected if you pass a **non-contiguous** array (`a[::2]`,
+a column, a transpose) or a dtype outside `float32`, `float64`, `int8`,
+`int16`, `int32`, `int64`, `uint8`, `complex64`, `complex128`.
+
+```python
+mtl5.vector(np.ascontiguousarray(a))  # keeps float64
+mtl5.vector(a.astype(np.float64))  # or convert deliberately
+```
+
+That is a fix rather than a restriction: the old path silently downcast a
+`float64` slice to `float32` — losing precision — while reporting
+`is_view=True` and aliasing nothing. Full explanation in the
+[v5.10.3 release notes](https://github.com/stillwater-sc/mtl5-python/releases/tag/v5.10.3).
+
 ## Quick start
 
 ```python
