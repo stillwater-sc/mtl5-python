@@ -225,7 +225,14 @@ void register_native_vector_factory(nb::module_& m) {
     // Zero-copy: borrow memory from the NumPy array
     m.def("vector", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         return VectorView<T>(a.shape(0), a.data(), nb::cast(a));
-    }, "a"_a, "Create a zero-copy MTL5 vector view of a 1-D NumPy array");
+    }, nb::arg("a").noconvert(),
+       "Create a zero-copy MTL5 vector view of a 1-D NumPy array.\n\n"
+       "The dtype must match a registered one exactly and the array must be\n"
+       "C-contiguous. Anything else raises TypeError rather than converting,\n"
+       "because a converted array is a view of a temporary: neither zero-copy\n"
+       "nor the dtype you asked for. A float64 slice such as a[::2] used to\n"
+       "come back as a float32 vector reporting is_view=True. Pass\n"
+       "np.ascontiguousarray(a), or a.astype(...), to say so deliberately.");
 
     // Explicit copy variant
     m.def("vector_copy", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
@@ -238,7 +245,11 @@ void register_native_vector_factory(nb::module_& m) {
                 v[i] = src[i];
         }
         return VectorView<T>(std::move(v));
-    }, "a"_a, "Create an owning MTL5 vector (copies data from NumPy array)");
+    }, nb::arg("a").noconvert(),
+       "Create an owning MTL5 vector (copies data from a NumPy array).\n\n"
+       "Exact dtype and C-contiguity are required here too: this copies the\n"
+       "data but not the TYPE, so a silent conversion would still hand back a\n"
+       "vector of the wrong precision.");
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +307,14 @@ void register_native_matrix_factory(nb::module_& m) {
     // Zero-copy: borrow memory from the NumPy array
     m.def("matrix", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         return MatrixView<T>(a.shape(0), a.shape(1), a.data(), nb::cast(a));
-    }, "a"_a, "Create a zero-copy MTL5 matrix view of a 2-D NumPy array");
+    }, nb::arg("a").noconvert(),
+       "Create a zero-copy MTL5 matrix view of a 2-D NumPy array.\n\n"
+       "The dtype must match a registered one exactly and the array must be\n"
+       "C-contiguous. Anything else raises TypeError rather than converting,\n"
+       "because a converted array is a view of a temporary: neither zero-copy\n"
+       "nor the dtype you asked for. A float64 slice such as a[::2] used to\n"
+       "come back as a float32 matrix reporting is_view=True. Pass\n"
+       "np.ascontiguousarray(a), or a.astype(...), to say so deliberately.");
 
     // Explicit copy variant
     m.def("matrix_copy", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
@@ -310,7 +328,11 @@ void register_native_matrix_factory(nb::module_& m) {
                     M(r, c) = src[r * cols + c];
         }
         return MatrixView<T>(std::move(M));
-    }, "a"_a, "Create an owning MTL5 matrix (copies data from NumPy array)");
+    }, nb::arg("a").noconvert(),
+       "Create an owning MTL5 matrix (copies data from a NumPy array).\n\n"
+       "Exact dtype and C-contiguity are required here too: this copies the\n"
+       "data but not the TYPE, so a silent conversion would still hand back a\n"
+       "matrix of the wrong precision.");
 }
 
 // ---------------------------------------------------------------------------

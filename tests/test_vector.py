@@ -204,18 +204,82 @@ class TestNarrowIntegerHasNoArithmetic:
 
 
 class TestNonContiguous:
-    def test_non_contiguous_implicitly_copied(self):
-        """nanobind implicitly copies non-contiguous arrays to make them contiguous.
-        The resulting view is NOT shared with the original (safe behavior)."""
+    """A non-contiguous array is rejected rather than silently repacked.
+
+    This used to be accepted, and what it did was worse than the old docstring
+    said. nanobind's converting pass repacks layout AND dtype together, and it
+    takes the first overload that converts — which is float32. So a float64
+    slice came back as a *float32* vector, losing precision, while reporting
+    `is_view=True` and not aliasing anything:
+
+        a = np.array([0.1, 1.0, 0.2, 2.0, 0.3, 3.0])
+        mtl5.vector(a[::2])[0]  ->  0.10000000149011612   (exact f64: 0.1)
+
+    The values in the old test (1.0, 3.0, 5.0) are exact in float32, which is
+    why it never noticed. `.noconvert()` on the factories makes this a
+    TypeError; `np.ascontiguousarray` is the deliberate way to ask for the copy.
+    """
+
+    def test_non_contiguous_is_rejected(self):
         a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-        sliced = a[::2]  # non-contiguous: [1, 3, 5]
-        v = mtl5.vector(sliced)
+        with pytest.raises(TypeError):
+            mtl5.vector(a[::2])
+
+    def test_ascontiguousarray_is_the_way_through(self):
+        a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        v = mtl5.vector(np.ascontiguousarray(a[::2]))
+        assert isinstance(v, mtl5.DenseVector_f64), "and it keeps float64"
         assert len(v) == 3
-        assert v[0] == pytest.approx(1.0)
         assert v[1] == pytest.approx(3.0)
-        # Mutation does NOT propagate back to original (implicit copy)
+        # An explicit copy, so mutation does not reach the source -- same
+        # end behaviour as before, but now the caller asked for it.
         v[0] = 99.0
         assert a[0] == 1.0
+
+    def test_a_float64_slice_no_longer_becomes_float32(self):
+        """The regression this closes: silent precision loss on ordinary
+        slicing. 0.1 is not representable in float32."""
+        a = np.array([0.1, 1.0, 0.2, 2.0, 0.3, 3.0], dtype=np.float64)
+        with pytest.raises(TypeError):
+            mtl5.vector(a[::2])
+        v = mtl5.vector(np.ascontiguousarray(a[::2]))
+        assert v[0] == 0.1, "float64 must survive the round trip exactly"
+
+
+class TestFactoryRejectsUnregisteredDtypes:
+    """`.noconvert()` also stops unregistered dtypes being silently converted.
+
+    Before, `mtl5.vector(np.arange(4, dtype=np.float16))` returned a
+    DenseVector_f32 reporting is_view=True — a view of the converted temporary,
+    so writes through the NumPy array were invisible.
+    """
+
+    @pytest.mark.parametrize(
+        "dt",
+        [np.float16, np.uint16, np.uint32, np.uint64],
+        ids=["f16", "u16", "u32", "u64"],
+    )
+    def test_unregistered_dtype_raises(self, dt):
+        with pytest.raises(TypeError):
+            mtl5.vector(np.arange(4, dtype=dt))
+
+    @pytest.mark.parametrize(
+        "dt",
+        [
+            np.float32,
+            np.float64,
+            np.int8,
+            np.int16,
+            np.int32,
+            np.int64,
+            np.uint8,
+            np.complex64,
+            np.complex128,
+        ],
+    )
+    def test_registered_dtypes_still_dispatch_exactly(self, dt):
+        v = mtl5.vector(np.arange(4, dtype=dt))
+        assert v.to_numpy().dtype == np.dtype(dt)
 
 
 class TestNorm:

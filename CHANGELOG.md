@@ -97,6 +97,38 @@ against, and semantic-release manages only the **patch** component.
   - `test_a_copy_does_not_pin_its_source` — asserts the aliasing/copying split
     directly, via refcount: a view increfs its parent, a copy does not.
 
+### Fixed
+
+- **`vector()` and `matrix()` no longer silently convert their input.** All
+  eight factory overloads (native and complex, view and copy) take
+  `.noconvert()`, so the dtype must match a registered one exactly and the
+  array must be C-contiguous.
+
+  The reported symptom was unregistered dtypes — `f16`, `uint16`, `uint32`,
+  `uint64` — coming back as `DenseVector_f32`. Fixing it turned up something
+  worse, because nanobind's converting pass repacks **layout and dtype
+  together** and takes the first overload that converts, which is `float32`:
+
+  ```python
+  a = np.array([0.1, 1.0, 0.2, 2.0, 0.3, 3.0])  # float64
+  v = mtl5.vector(a[::2])
+  # v is a DenseVector_f32, v.is_view is True, and v[0] == 0.10000000149011612
+  ```
+
+  An ordinary float64 slice was **silently downcast to float32** while
+  reporting `is_view=True` and aliasing nothing. The old test covering this
+  used values (1.0, 3.0, 5.0) that are exact in float32, which is why it read
+  as benign.
+
+  Both now raise `TypeError`, listing every accepted dtype. `np.ascontiguousarray(a)`
+  is the deliberate way to ask for the copy, and it keeps float64. This matches
+  what `mtl5.array.asarray` has always done — its `.noconvert()` carries the
+  same reasoning, and the factories simply never got it.
+
+  **This is a behaviour change.** Code passing a non-contiguous array, or a
+  dtype outside {f32, f64, i8, i16, i32, i64, u8, c64, c128}, now raises where
+  it used to return a quietly converted result.
+
 ### Changed
 
 - **The build toolchain is pinned**: `cibuildwheel==4.2.0` and `build==1.6.0` in

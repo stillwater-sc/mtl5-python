@@ -316,7 +316,7 @@ template <typename T>
 void register_complex_factories(nb::module_& m) {
     m.def("vector", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         return VectorView<T>(a.shape(0), a.data(), nb::cast(a));
-    }, "a"_a, "Create a zero-copy MTL5 vector view of a 1-D complex NumPy array");
+    }, nb::arg("a").noconvert(), "Create a zero-copy MTL5 vector view of a 1-D complex NumPy array");
 
     m.def("vector_copy", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t n = a.shape(0);
@@ -327,11 +327,11 @@ void register_complex_factories(nb::module_& m) {
             for (std::size_t i = 0; i < n; ++i) v[i] = src[i];
         }
         return VectorView<T>(std::move(v));
-    }, "a"_a, "Create an owning MTL5 vector (copies from a complex NumPy array)");
+    }, nb::arg("a").noconvert(), "Create an owning MTL5 vector (copies from a complex NumPy array)");
 
     m.def("matrix", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         return MatrixView<T>(a.shape(0), a.shape(1), a.data(), nb::cast(a));
-    }, "a"_a, "Create a zero-copy MTL5 matrix view of a 2-D complex NumPy array");
+    }, nb::arg("a").noconvert(), "Create a zero-copy MTL5 matrix view of a 2-D complex NumPy array");
 
     m.def("matrix_copy", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t r = a.shape(0), c = a.shape(1);
@@ -344,7 +344,7 @@ void register_complex_factories(nb::module_& m) {
                     M(i, j) = src[i * c + j];
         }
         return MatrixView<T>(std::move(M));
-    }, "a"_a, "Create an owning MTL5 matrix (copies from a complex NumPy array)");
+    }, nb::arg("a").noconvert(), "Create an owning MTL5 matrix (copies from a complex NumPy array)");
 }
 
 // ---------------------------------------------------------------------------
