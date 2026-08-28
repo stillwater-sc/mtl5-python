@@ -316,7 +316,15 @@ template <typename T>
 void register_complex_factories(nb::module_& m) {
     m.def("vector", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         return VectorView<T>(a.shape(0), a.data(), nb::cast(a));
-    }, nb::arg("a").noconvert(), "Create a zero-copy MTL5 vector view of a 1-D complex NumPy array");
+    }, nb::arg("a").noconvert(),
+       "Create a zero-copy MTL5 vector view of a 1-D complex NumPy array.\n\n"
+       "The view aliases the NumPy buffer; writes through either are visible in both.\n"
+       "The dtype must be complex64 or complex128 exactly -- whichever this\n"
+       "overload is for -- and the array must be C-contiguous. Anything else\n"
+       "raises TypeError rather than converting: a converted array is a view\n"
+       "of a temporary, so it is neither zero-copy nor the dtype you asked\n"
+       "for, and a real array would silently acquire an imaginary part. Pass\n"
+       "np.ascontiguousarray(a), or a.astype(...), to convert deliberately.");
 
     m.def("vector_copy", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t n = a.shape(0);
@@ -327,11 +335,27 @@ void register_complex_factories(nb::module_& m) {
             for (std::size_t i = 0; i < n; ++i) v[i] = src[i];
         }
         return VectorView<T>(std::move(v));
-    }, nb::arg("a").noconvert(), "Create an owning MTL5 vector (copies from a complex NumPy array)");
+    }, nb::arg("a").noconvert(),
+       "Create an owning MTL5 vector (copies from a complex NumPy array).\n\n"
+       "The dtype must be complex64 or complex128 exactly -- whichever this\n"
+       "overload is for -- and the array must be C-contiguous. Anything else\n"
+       "raises TypeError rather than converting. This copies the DATA but not\n"
+       "the TYPE, so a silent conversion would still hand back a container of\n"
+       "the wrong precision, and a real array would quietly acquire an\n"
+       "imaginary part. Pass np.ascontiguousarray(a), or a.astype(...), to\n"
+       "convert deliberately.");
 
     m.def("matrix", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         return MatrixView<T>(a.shape(0), a.shape(1), a.data(), nb::cast(a));
-    }, nb::arg("a").noconvert(), "Create a zero-copy MTL5 matrix view of a 2-D complex NumPy array");
+    }, nb::arg("a").noconvert(),
+       "Create a zero-copy MTL5 matrix view of a 2-D complex NumPy array.\n\n"
+       "The view aliases the NumPy buffer; writes through either are visible in both.\n"
+       "The dtype must be complex64 or complex128 exactly -- whichever this\n"
+       "overload is for -- and the array must be C-contiguous. Anything else\n"
+       "raises TypeError rather than converting: a converted array is a view\n"
+       "of a temporary, so it is neither zero-copy nor the dtype you asked\n"
+       "for, and a real array would silently acquire an imaginary part. Pass\n"
+       "np.ascontiguousarray(a), or a.astype(...), to convert deliberately.");
 
     m.def("matrix_copy", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t r = a.shape(0), c = a.shape(1);
@@ -344,7 +368,15 @@ void register_complex_factories(nb::module_& m) {
                     M(i, j) = src[i * c + j];
         }
         return MatrixView<T>(std::move(M));
-    }, nb::arg("a").noconvert(), "Create an owning MTL5 matrix (copies from a complex NumPy array)");
+    }, nb::arg("a").noconvert(),
+       "Create an owning MTL5 matrix (copies from a complex NumPy array).\n\n"
+       "The dtype must be complex64 or complex128 exactly -- whichever this\n"
+       "overload is for -- and the array must be C-contiguous. Anything else\n"
+       "raises TypeError rather than converting. This copies the DATA but not\n"
+       "the TYPE, so a silent conversion would still hand back a container of\n"
+       "the wrong precision, and a real array would quietly acquire an\n"
+       "imaginary part. Pass np.ascontiguousarray(a), or a.astype(...), to\n"
+       "convert deliberately.");
 }
 
 // ---------------------------------------------------------------------------
