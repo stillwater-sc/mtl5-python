@@ -539,6 +539,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.10.3 (2026-08-28)
+
+### Bug Fixes
+
+- **factories**: Reject conversion in vector() and matrix()
+  ([#92](https://github.com/stillwater-sc/mtl5-python/pull/92),
+  [`7df54bd`](https://github.com/stillwater-sc/mtl5-python/commit/7df54bdaa4129b964a6fb18f00d053aa740c80c5))
+
+### Continuous Integration
+
+- Pin the build toolchain (cibuildwheel, build, scikit-build-core)
+  ([#91](https://github.com/stillwater-sc/mtl5-python/pull/91),
+  [`efd98f9`](https://github.com/stillwater-sc/mtl5-python/commit/efd98f925b72fdad9c07010060c6c6f4025f8771))
+
+
 ## v5.10.2 (2026-08-27)
 
 ### Features
