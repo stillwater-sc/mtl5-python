@@ -97,6 +97,31 @@ against, and semantic-release manages only the **patch** component.
   - `test_a_copy_does_not_pin_its_source` — asserts the aliasing/copying split
     directly, via refcount: a view increfs its parent, a copy does not.
 
+### Changed
+
+- **The build toolchain is pinned**: `cibuildwheel==4.2.0` and `build==1.6.0` in
+  `wheels.yml`, and `scikit-build-core>=0.10,<2` in `pyproject.toml`. Only the
+  last is user-visible, and only for a source install.
+
+  These three build, repair, test and publish every wheel, and all three were
+  unbounded — the same exposure that took ruff, nanobind and GitPython out. It
+  had already happened silently: **cibuildwheel 3.x → 4.x and scikit-build-core
+  0.x → 1.0 both crossed under the open bounds**, so the wheels published as
+  5.10.2 were built by tooling nobody selected. They worked; nothing chose them.
+
+  `scikit-build-core` is capped at the major rather than exact-pinned, since
+  patch fixes to a build backend are worth taking automatically and a major is
+  not. It also supplies the CMake that runs (4.4.2 as of this writing), which is
+  a constraint arriving from a dependency the project never names.
+
+  Deliberately **not** pinned: `numpy` stays `>=1.24`. That would normally be the
+  ABI trap, but there are no numpy C headers anywhere in the extension —
+  `nb::ndarray` goes through DLPack and the buffer protocol — so numpy is a
+  stub-generation build dep and a runtime import with no compile-time coupling.
+  The ecosystem test dependencies (torch, jax, pandas, scikit-learn) are also
+  left floating pending a decision on what that job is for; see
+  [#90](https://github.com/stillwater-sc/mtl5-python/issues/90).
+
 ### Fixed
 
 - **nanobind capped below 3.0** (`nanobind>=2.0,<3`), which unbreaks every wheel

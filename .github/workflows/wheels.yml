@@ -87,7 +87,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install cibuildwheel
-        run: pip install cibuildwheel
+        # Pinned. cibuildwheel builds, repairs and TESTS every wheel published
+        # from this workflow, so an unpinned release retroactively changes what
+        # ships -- the same failure mode that took ruff, nanobind and GitPython
+        # out. It had already happened here quietly: the 3.x -> 4.x major landed
+        # unnoticed, and the wheels for 5.10.2 were built by a version nobody
+        # chose. Bump deliberately, and re-read the arch note below when you do.
+        run: pip install cibuildwheel==4.2.0
 
       - name: Build and test a repaired wheel (discarded)
         # Relative path, matching build-wheels below: an absolute /tmp is not a
@@ -228,7 +234,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install cibuildwheel
-        run: pip install cibuildwheel
+        # Pinned. cibuildwheel builds, repairs and TESTS every wheel published
+        # from this workflow, so an unpinned release retroactively changes what
+        # ships -- the same failure mode that took ruff, nanobind and GitPython
+        # out. It had already happened here quietly: the 3.x -> 4.x major landed
+        # unnoticed, and the wheels for 5.10.2 were built by a version nobody
+        # chose. Bump deliberately, and re-read the arch note below when you do.
+        run: pip install cibuildwheel==4.2.0
 
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
@@ -241,8 +253,8 @@ jobs:
           # and on Linux whatever the runner itself is -- x86_64 on ubuntu-22.04,
           # aarch64 on ubuntu-22.04-arm. That is why the arm64 wheel needs no
           # CIBW_ARCHS_LINUX override: the runner, not the arch list, selects it.
-          # (Linux i686 was already dropped from "auto" in cibuildwheel 3.0, so
-          # it is not a factor here.)
+          # (Linux i686 was dropped from "auto" in cibuildwheel 3.0, so it is not
+          # a factor at the pinned 4.2.0 either.)
           CIBW_ARCHS: "auto64"
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_SKIP: "*-musllinux*"
@@ -269,7 +281,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install build
+      # Pinned for the same reason as cibuildwheel above: this builds the sdist
+      # that is published alongside the wheels.
+      - run: pip install build==1.6.0
       - run: python -m build --sdist
       - uses: actions/upload-artifact@v7
         with:
