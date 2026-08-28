@@ -127,6 +127,20 @@ double dispatch_acc(AccKind kind, F&& f) {
                 return f.template operator()<typename quire_for<T>::type>();
             else
                 throw std::invalid_argument("accumulator='quire' unavailable for this dtype");
+        case AccKind::I32:
+            // Guarded exactly as Quire is, and for the same reason: a discarded
+            // if-constexpr branch is not instantiated, so `mtl::dot<int32_t>`
+            // over a posit or cfloat vector is never formed. parse_acc rejects
+            // 'i32' for those dtypes first; this is the second line of defence
+            // and the one the compiler enforces.
+            //
+            // int32 is exactly representable in a double's 53-bit significand,
+            // so returning it through this function's double is lossless. That
+            // is worth stating because it looks like a narrowing bug and is not.
+            if constexpr (std::is_integral_v<T>)
+                return f.template operator()<std::int32_t>();
+            else
+                throw std::invalid_argument("accumulator='i32' unavailable for this dtype");
     }
     throw std::invalid_argument("unreachable accumulator kind");
 }
@@ -314,6 +328,169 @@ void register_mixed_native(nb::module_& mx) {
     }, "A"_a, "accumulator"_a = nb::none());
 }
 
+/// Dot over two DIFFERENT narrow integer operand types.
+///
+/// The signedness pairing is not a detail: `u8 x i8` -- unsigned activations
+/// against signed weights -- is VNNI's NATIVE shape on x86 and the one quantized
+/// inference is written in. A same-type-only surface would put the whole point
+/// of the 8-bit path out of reach.
+///
+/// MTL5 accepts every pairing at the `dot` level and swaps the operands onto
+/// whichever the machine implements, because a dot product is symmetric. The
+/// asymmetry is real one level down -- `simd::reduce_dot_widen` rejects
+/// `(int8, uint8)` at compile time -- but that restriction is the kernel's, and
+/// re-exposing it here would refuse a call the library can serve.
+template <typename TA, typename TB, typename VA, typename VB>
+double mixed_dot_pair(const VA& a, const VB& b, AccKind kind) {
+    if (a.size() != b.size())
+        throw std::invalid_argument("dot: vectors must have the same length");
+    nogil guard;
+    return dispatch_acc<TA>(kind, [&]<typename Acc>() -> double {
+        if constexpr (std::is_same_v<Acc, void>)
+            return static_cast<double>(mtl::dot<>(a, b));
+        else
+            return static_cast<double>(mtl::dot<Acc, double>(a, b));
+    });
+}
+
+/// The narrow integer element types (i8, i16, u8): `dot` only, and only with an
+/// accumulator wider than the element.
+///
+/// This is what phase 1 registered the containers for. MTL5 v5.11.0 routes
+/// `dot<int32_t>` over 8- and 16-bit operands onto the hardware widening
+/// multiply-accumulate -- vpmaddwd / vpdpbusd on x86, SMLAL / SDOT on NEON --
+/// and an int32 accumulator is what those instructions accumulate into.
+///
+/// `norm` and `frobenius_norm` are deliberately absent, for the reason phase 1
+/// gave: two_norm takes sqrt of the accumulated sum, and on a wrapped -- and for
+/// i16 negative -- sum that yields nan. An int32 accumulator would fix the sum
+/// but the API has no way to say "accumulate in int32, deliver a real square
+/// root", so the honest surface is not to offer it yet.
+///
+/// `accumulator` is REQUIRED here, unlike every other dtype. Omitting it means
+/// element precision, which for these widths is exactly the wrapping that phase
+/// 1 refused to expose: six products of 100 give 96 for i8 where the answer is
+/// 60000. Rather than silently redefine None for these dtypes alone, ask.
+/// Register `dot` for one ordered pair of distinct narrow integer operands.
+template <typename TA, typename TB>
+void register_mixed_narrow_int_pair(nb::module_& mx) {
+    const char* kPairDoc =
+        "Dot product over mixed-signedness 8-bit operands, accumulated in int32.\n\n"
+        "accumulator='i32' is required. u8 x i8 is VNNI's native pairing on x86\n"
+        "(unsigned activations against signed weights); ARM implements the\n"
+        "symmetric pairings first instead. Either order is accepted here -- a dot\n"
+        "product is symmetric, so MTL5 swaps the operands onto whichever form the\n"
+        "machine has rather than dropping to the generic loop.\n\n"
+        "The overflow contract is the same as the same-type form: products are\n"
+        "exact, the sum wraps, and 8-bit operands give roughly 131000 terms of\n"
+        "headroom in an int32.";
+
+    auto acc_of = [](const std::optional<std::string>& spec) {
+        if (!spec)
+            throw std::invalid_argument(
+                "mixed.dot on mixed 8-bit operands requires an explicit "
+                "accumulator: pass accumulator='i32'.");
+        return parse_acc(spec, type_suffix<TA>(), /*quire_ok=*/false, /*i32_ok=*/true);
+    };
+
+    mx.def("dot", [acc_of](const VectorView<TA>& a, const VectorView<TB>& b,
+                           std::optional<std::string> accumulator,
+                           std::optional<std::string> result) {
+        if (result)
+            throw std::invalid_argument(
+                "mixed.dot on narrow integer operands does not accept result=.");
+        return mixed_dot_pair<TA, TB>(a.vec, b.vec, acc_of(accumulator));
+    }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none(), kPairDoc);
+
+    mx.def("dot", [acc_of](nb::ndarray<TA, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                           nb::ndarray<TB, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
+                           std::optional<std::string> accumulator,
+                           std::optional<std::string> result) {
+        if (result)
+            throw std::invalid_argument(
+                "mixed.dot on narrow integer operands does not accept result=.");
+        const AccKind kind = acc_of(accumulator);
+        const std::size_t n = a.shape(0);
+        auto va = mtl::vec::dense_vector<TA>(n, const_cast<TA*>(a.data()));
+        auto vb = mtl::vec::dense_vector<TB>(n, const_cast<TB*>(b.data()));
+        return mixed_dot_pair<TA, TB>(va, vb, kind);
+    }, nb::arg("a").noconvert(), nb::arg("b").noconvert(),
+       "accumulator"_a = nb::none(), "result"_a = nb::none(), kPairDoc);
+}
+
+template <typename T>
+void register_mixed_narrow_int(nb::module_& mx) {
+    using VV = VectorView<T>;
+    record_quire_support<T>();
+
+    auto acc_of = [](const std::optional<std::string>& spec) {
+        if (!spec)
+            throw std::invalid_argument(
+                std::string("mixed.dot on '") + type_suffix<T>() + "' requires an "
+                "explicit accumulator: pass accumulator='i32'. The default is "
+                "element precision, and an 8- or 16-bit accumulator overflows "
+                "almost immediately -- six products of 100 wrap to 96 where the "
+                "exact answer is 60000. See mtl5.mixed.accumulators('" +
+                type_suffix<T>() + "').");
+        return parse_acc(spec, type_suffix<T>(), /*quire_ok=*/false, /*i32_ok=*/true);
+    };
+
+    // The overflow contract, stated where a caller will meet it. This is not
+    // decoration: the headroom differs by four orders of magnitude across the
+    // operand widths, and a caller who does not know that gets silent wraparound.
+    const char* kDoc =
+        "Dot product accumulated in a precision wider than the element.\n\n"
+        "accumulator='i32' is required. On 8-bit operands this is the quad\n"
+        "multiply-accumulate (vpdpbusd / SDOT); on 16-bit it is the widening\n"
+        "multiply-accumulate (vpmaddwd / SMLAL).\n\n"
+        "OVERFLOW IS THE CONTRACT, not an error case. Products are always\n"
+        "exact -- two int16 cannot overflow an int32 product -- but the SUM\n"
+        "wraps, and how soon depends on the operand magnitude rather than the\n"
+        "vector length: at b bits of magnitude the headroom is about 2^(31-2b)\n"
+        "terms. Measured at full range: one i16 x i16 product uses 2^30 of the\n"
+        "int32 range, so TWO of them already overflow it, while i8 x i8 holds\n"
+        "131071 terms. That five order of magnitude gap is why the\n"
+        "quantized-inference instructions are 8-bit. Wrapping is two's\n"
+        "complement and therefore bit-identical across lane counts, backends\n"
+        "and thread partitions -- reproducible, but still wrapping.\n\n"
+        "Every signedness pairing is accepted. The hardware implements only\n"
+        "some of them (x86 does unsigned x signed first, ARM the symmetric\n"
+        "ones), and a dot product is symmetric, so MTL5 swaps the operands onto\n"
+        "whichever the machine has rather than refusing or falling back to the\n"
+        "generic loop.";
+
+    mx.def("dot", [acc_of](const VV& a, const VV& b,
+                           std::optional<std::string> accumulator,
+                           std::optional<std::string> result) {
+        if (result)
+            throw std::invalid_argument(
+                std::string("mixed.dot on '") + type_suffix<T>() + "' does not accept "
+                "result=: rounding an int32 sum back to an 8- or 16-bit element "
+                "would re-introduce the wrap the accumulator exists to avoid. The "
+                "result is delivered as a Python float, which holds every int32 "
+                "exactly.");
+        return mixed_dot<T>(a.vec, b.vec, acc_of(accumulator), /*result_element=*/false);
+    }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none(), kDoc);
+
+    mx.def("dot", [acc_of](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                           nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
+                           std::optional<std::string> accumulator,
+                           std::optional<std::string> result) {
+        if (a.shape(0) != b.shape(0))
+            throw std::invalid_argument("dot: vectors must have the same length");
+        if (result)
+            throw std::invalid_argument(
+                std::string("mixed.dot on '") + type_suffix<T>() + "' does not accept "
+                "result=: see the docstring.");
+        const AccKind kind = acc_of(accumulator);
+        const std::size_t n = a.shape(0);
+        auto va = mtl::vec::dense_vector<T>(n, const_cast<T*>(a.data()));
+        auto vb = mtl::vec::dense_vector<T>(n, const_cast<T*>(b.data()));
+        return mixed_dot<T>(va, vb, kind, /*result_element=*/false);
+    }, nb::arg("a").noconvert(), nb::arg("b").noconvert(),
+       "accumulator"_a = nb::none(), "result"_a = nb::none(), kDoc);
+}
+
 // ===========================================================================
 // convert() — element-wise re-quantization into a target number system
 //
@@ -490,6 +667,16 @@ void register_mixed_precision(nb::module_& m) {
     register_mixed_native<float>(mx);
     register_mixed_native<double>(mx);
 
+    // Narrow integers: dot only, accumulator required. See
+    // register_mixed_narrow_int for why norm/frobenius_norm are absent.
+    register_mixed_narrow_int<std::int8_t>(mx);
+    register_mixed_narrow_int<std::int16_t>(mx);
+    register_mixed_narrow_int<std::uint8_t>(mx);
+    // Mixed-signedness 8-bit pairings, both orders. u8 x i8 is what VNNI
+    // implements natively on x86 and what quantized inference is written in.
+    register_mixed_narrow_int_pair<std::uint8_t, std::int8_t>(mx);
+    register_mixed_narrow_int_pair<std::int8_t, std::uint8_t>(mx);
+
     register_mixed_universal<fp8>(mx);
     register_mixed_universal<fp16>(mx);
     register_mixed_universal<posit8>(mx);
@@ -513,6 +700,12 @@ void register_mixed_precision(nb::module_& m) {
     register_mixed_universal<qd_cascade>(mx);
 
     mx.def("accumulators", [](const std::string& dtype) {
+        // The narrow integer types answer differently: an int32 accumulator is
+        // the one that maps to hardware, and the float accumulators are not
+        // offered because dot<float> over int8 operands takes the generic loop
+        // and would quietly be the slow path dressed as a precision choice.
+        if (dtype == "i8" || dtype == "i16" || dtype == "u8")
+            return std::vector<std::string>{"i32"};
         std::vector<std::string> v{"f32", "f64", "fma32", "fma64"};
         // Answered from the registry the registration templates fill with
         // quire_for<T>::ok -- the SAME trait dispatch_acc() consults -- so what
@@ -554,7 +747,17 @@ void register_mixed_precision(nb::module_& m) {
             "fixpnt8", "fixpnt16", "lns16", "lns32",
             "cfloat32", "takum32",
             "dd_cascade", "td_cascade", "qd_cascade"};
-    }, "Element dtypes accepted by convert() and the mixed-precision operations");
+    }, "Element dtypes accepted by convert() and the mixed-precision operations.\n\n"
+       "This is the set convert() can TARGET, and callers rely on that -- the\n"
+       "test suite parametrizes over it and converts into every entry.\n\n"
+       "The narrow integer element types (i8, i16, u8) are deliberately NOT\n"
+       "here. They are real element types with containers and a mixed.dot\n"
+       "(accumulator='i32'), but convert() cannot target them: it re-quantizes\n"
+       "a float64 array, and rounding reals into an 8-bit integer is a\n"
+       "quantization scheme -- scale, zero point, rounding mode -- rather than\n"
+       "a cast. A naive version would silently clip everything outside\n"
+       "[-128, 127]. Build them with NumPy and pass them in;\n"
+       "mtl5.mixed.accumulators('i8') answers for them.");
 
     // ----- Dense mixed-precision iterative refinement -------------------------
     mx.def("lu_iterative_refine",

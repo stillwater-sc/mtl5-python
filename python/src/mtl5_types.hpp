@@ -228,20 +228,33 @@ void register_dense_ops(nb::module_& m);
 // Shared between the mixed-precision operations and the sparse factorizations
 // so that `accumulator=` means the same thing everywhere it appears.
 // ===========================================================================
-enum class AccKind { Default, F32, F64, FMA32, FMA64, Quire };
+enum class AccKind { Default, F32, F64, FMA32, FMA64, Quire, I32 };
 
 inline constexpr const char* kAccumulatorHelp =
     "valid accumulators: None (element precision), 'f32', 'f64', "
-    "'fma32', 'fma64'/'fma', 'quire'";
+    "'fma32', 'fma64'/'fma', 'quire', 'i32' (8- and 16-bit integer operands)";
 
+/// `i32_ok` is true only for the narrow integer element types, where an int32
+/// accumulator is the whole point -- it is what vpmaddwd / vpdpbusd / SDOT
+/// accumulate into. Offering it on a float or posit dtype would be meaningless,
+/// so it is rejected by name rather than silently ignored.
 inline AccKind parse_acc(const std::optional<std::string>& spec,
-                         const char* dtype, bool quire_ok) {
+                         const char* dtype, bool quire_ok, bool i32_ok = false) {
     if (!spec || *spec == "none" || *spec == "default") return AccKind::Default;
     const std::string& a = *spec;
     if (a == "f32" || a == "float32") return AccKind::F32;
     if (a == "f64" || a == "float64") return AccKind::F64;
     if (a == "fma32")                 return AccKind::FMA32;
     if (a == "fma" || a == "fma64")   return AccKind::FMA64;
+    if (a == "i32" || a == "int32") {
+        if (!i32_ok)
+            throw std::invalid_argument(
+                std::string("accumulator='i32' is not available for dtype '") + dtype +
+                "': an int32 accumulator is for 8- and 16-bit INTEGER operands "
+                "(i8, i16, u8), which is what the hardware widening "
+                "multiply-accumulate takes. Use 'f64' to accumulate in double.");
+        return AccKind::I32;
+    }
     if (a == "quire") {
         if (!quire_ok)
             throw std::invalid_argument(

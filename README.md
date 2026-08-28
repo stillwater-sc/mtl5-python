@@ -115,6 +115,39 @@ quires have known upstream limitations documented in
 `accumulator=` is available on `dot`, `norm` (ord=2), `frobenius_norm`,
 `matvec` and `matmul`.
 
+### Integer operands: `accumulator="i32"`
+
+The same idea with integers, which is where the hardware is. `int8` and `int16`
+operands accumulated in `int32` map onto the widening multiply-accumulate —
+`vpmaddwd` / `vpdpbusd` on x86, `SMLAL` / `SDOT` on NEON:
+
+```python
+a = np.random.randint(0, 256, 4096, dtype=np.uint8)  # activations
+w = np.random.randint(-128, 128, 4096, dtype=np.int8)  # weights
+mtl5.mixed.dot(a, w, accumulator="i32")
+```
+
+`u8 × i8` is VNNI's native pairing on x86; ARM implements the symmetric ones
+first. Either order works — a dot product is symmetric, so MTL5 swaps the
+operands onto whatever the machine has.
+
+**The sum wraps, and sooner than vector length suggests.** Products are always
+exact, but headroom goes as operand *magnitude*: about `2^(31-2b)` terms at `b`
+bits. Measured at full range, one `int16 × int16` product uses 2³⁰ of the int32
+range so **two** overflow it, while `int8 × int8` holds **131071** terms. That
+gap is why quantized inference is 8-bit. The wrap is two's complement, hence
+bit-identical across lane counts, backends and thread counts.
+
+`accumulator="i32"` is required for these dtypes — the default is element
+precision, and an 8-bit accumulator overflows almost immediately. Build the
+arrays with NumPy: `convert()` does not target integers, because re-quantizing
+reals into 8 bits is a quantization scheme rather than a cast.
+
+A released wheel is built at the x86-64 baseline, so it gets int8's **bandwidth**
+win — one byte per element against float64's eight — but not the VNNI
+instruction. `mtl5.build_info()["build_isa"]` reports which you have; build with
+`-C cmake.define.MTL5_NATIVE_ARCH=ON` to reach it.
+
 ### Iterative refinement
 
 Factor cheaply in a low precision, then recover accuracy with a residual formed

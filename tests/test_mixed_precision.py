@@ -50,6 +50,18 @@ QUIRE_DTYPES = [
 ]
 
 
+def _wrap32(x: int) -> int:
+    """Reduce an exact integer to what an int32 accumulator holds.
+
+    Two's-complement wrapping is MTL5's documented contract for integer lanes,
+    and it is what makes an integer reduction bit-identical across lane counts,
+    backends and thread partitions. Tests assert against this rather than
+    against "no overflow", so they stay true in the regime these operand widths
+    actually run in.
+    """
+    return ((x + 2**31) % 2**32) - 2**31
+
+
 class TestConvert:
     def test_dtypes_listed(self):
         d = mtl5.dtypes()
@@ -420,3 +432,118 @@ class TestFormerlyBrokenUpstream:
         )
         assert info["converged"]
         assert np.linalg.norm(x - xt) / np.linalg.norm(xt) < 1e-10
+
+
+class TestIntegerAccumulator:
+    """`accumulator='i32'` over 8- and 16-bit integer operands (#88 phase 2).
+
+    MTL5 v5.11.0 routes `dot<int32_t>` over narrow integer operands onto the
+    hardware widening multiply-accumulate — vpmaddwd / vpdpbusd on x86, SMLAL /
+    SDOT on NEON. An int32 accumulator is what those instructions accumulate
+    into, so it is the accumulator this path exists for.
+    """
+
+    NARROW = [(np.int8, "i8"), (np.int16, "i16"), (np.uint8, "u8")]
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_accumulators_offers_only_i32(self, dt, suffix):
+        assert mtl5.mixed.accumulators(suffix) == ["i32"]
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_matches_an_exact_int64_reference(self, dt, suffix):
+        rng = np.random.default_rng(0)
+        info = np.iinfo(dt)
+        a = rng.integers(info.min, info.max + 1, size=2000, dtype=dt)
+        b = rng.integers(info.min, info.max + 1, size=2000, dtype=dt)
+        got = mtl5.mixed.dot(a, b, accumulator="i32")
+        want = int(np.dot(a.astype(np.int64), b.astype(np.int64)))
+        assert int(got) == _wrap32(want)
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_container_and_ndarray_forms_agree(self, dt, suffix):
+        a = np.arange(1, 17, dtype=dt)
+        via_np = mtl5.mixed.dot(a, a, accumulator="i32")
+        via_vec = mtl5.mixed.dot(mtl5.vector(a), mtl5.vector(a), accumulator="i32")
+        assert via_np == via_vec
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_accumulator_is_required(self, dt, suffix):
+        """Omitting it means element precision, which is exactly the wrapping
+        phase 1 refused to expose. Ask rather than silently redefine None."""
+        v = mtl5.vector(np.full(6, 100, dtype=dt))
+        with pytest.raises(ValueError, match="requires an explicit accumulator"):
+            mtl5.mixed.dot(v, v)
+
+    @pytest.mark.parametrize("dt,suffix", NARROW, ids=[s for _, s in NARROW])
+    def test_result_element_is_refused(self, dt, suffix):
+        """Rounding the int32 sum back to an 8- or 16-bit element would
+        re-introduce the wrap the accumulator exists to avoid."""
+        v = mtl5.vector(np.full(6, 100, dtype=dt))
+        with pytest.raises(ValueError, match="does not accept result="):
+            mtl5.mixed.dot(v, v, accumulator="i32", result="element")
+
+    def test_i32_is_refused_on_non_integer_dtypes(self):
+        v = mtl5.vector(np.ones(4))
+        with pytest.raises(ValueError, match="not available for dtype"):
+            mtl5.mixed.dot(v, v, accumulator="i32")
+
+    def test_the_wrap_is_twos_complement_not_undefined(self):
+        """Overflow is the contract, not an error case — and it is well defined.
+
+        This is what the v5.11.0 pin buys: before it, the generic integer loops
+        were UB on overflow rather than the documented modular wrap, and for
+        these operand widths overflow is the normal regime.
+
+        Full range i8: each -128 * -128 product is 16384, so an int32 holds
+        exactly 131071 terms and 131072 is the first that does not.
+        """
+        for n in (131071, 131072, 131073):
+            a = np.full(n, -128, dtype=np.int8)
+            exact = n * 16384
+            assert int(mtl5.mixed.dot(a, a, accumulator="i32")) == _wrap32(exact)
+        assert 131071 * 16384 <= 2**31 - 1, "131071 terms must still be exact"
+        assert 131072 * 16384 > 2**31 - 1, "...and 131072 must not"
+
+    def test_i16_headroom_is_two_products(self):
+        """One full-range i16 product uses 2^30 of the int32 range, so two
+        already overflow it — five orders of magnitude less headroom than i8,
+        which is why the quantized-inference instructions are 8-bit."""
+        one = np.full(1, -32768, dtype=np.int16)
+        assert int(mtl5.mixed.dot(one, one, accumulator="i32")) == 2**30
+        two = np.full(2, -32768, dtype=np.int16)
+        assert int(mtl5.mixed.dot(two, two, accumulator="i32")) == _wrap32(2**31)
+
+
+class TestIntegerAccumulatorMixedSignedness:
+    """`u8 x i8` is VNNI's native pairing on x86 — unsigned activations against
+    signed weights — and is what quantized inference is written in.
+
+    MTL5 accepts every pairing at the `dot` level and swaps the operands onto
+    whichever form the machine implements, because a dot product is symmetric.
+    The kernel below it (`simd::reduce_dot_widen`) rejects `(int8, uint8)`, but
+    that restriction is the kernel's; re-exposing it here would refuse a call
+    the library can serve.
+    """
+
+    def _operands(self):
+        rng = np.random.default_rng(7)
+        u = rng.integers(0, 256, size=2048, dtype=np.uint8)
+        i = rng.integers(-128, 128, size=2048, dtype=np.int8)
+        return u, i, int(np.dot(u.astype(np.int64), i.astype(np.int64)))
+
+    def test_u8_times_i8(self):
+        u, i, exact = self._operands()
+        assert int(mtl5.mixed.dot(u, i, accumulator="i32")) == _wrap32(exact)
+
+    def test_i8_times_u8_is_accepted_too(self):
+        u, i, exact = self._operands()
+        assert int(mtl5.mixed.dot(i, u, accumulator="i32")) == _wrap32(exact)
+
+    def test_the_two_orders_agree(self):
+        u, i, _ = self._operands()
+        assert mtl5.mixed.dot(u, i, accumulator="i32") == mtl5.mixed.dot(i, u, accumulator="i32")
+
+    def test_container_form_works_for_pairs(self):
+        u, i, exact = self._operands()
+        got = mtl5.mixed.dot(mtl5.vector(u), mtl5.vector(i), accumulator="i32")
+        assert int(got) == _wrap32(exact)
