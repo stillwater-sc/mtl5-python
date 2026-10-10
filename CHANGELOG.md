@@ -13,6 +13,34 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Changed
+
+- **MTL5 pinned to v5.13.1**, up from v5.11.0, and the `find_package` floor
+  raised to match. Package version `5.13.0`, since the minor tracks MTL5's
+  `5.13`. Full suite: 1408 passed, 4 skipped.
+
+  One upstream change reaches this surface. MTL5 5.13 makes `Accumulator` the
+  **leading** template parameter of the sparse numeric factorizations (MTL5
+  #542), so the five `<T, mtl::mat::parameters<>, Acc>` lists in
+  `mtl5_sparse_direct.cpp` become `<Acc>`, with the value and parameter types
+  deduced. `with_acc` always passes a concrete type (`T` for the default), which
+  is exactly what the old explicit lists did, so results are unchanged.
+
+  **Why v5.13.1 and not v5.13.0:** this bump found a regression in v5.13.0.
+  `accumulator_traits::clear()` reset with `Acc{}`, and Universal's `lns{}` is
+  1.0, not 0. 5.13.0 put that on the default Householder path, so QR and LQ
+  over `lns16`/`lns32` were wrong outright: 8 failures in
+  `test_universal_factorizations.py`, Q orthogonality error 1.5. Fixed upstream
+  in MTL5 #544 and released as 5.13.1. It compiles cleanly against 5.13.0, so the
+  floor is the only thing that keeps a system install of 5.13.0 out.
+
+  The other breaking changes in the range don't reach these bindings. 5.12's
+  `Field` requirement on `mtl::itl` doesn't affect them because the Krylov and
+  multigrid bindings register no integral type. 5.13's leading `Accumulator` on
+  the BLAS, Krylov and eigen entry points doesn't either, because none of those
+  are called here with explicit template arguments. That includes the one
+  silent case, where `axpy<S>`'s first argument now names the accumulator.
+
 ### Added
 
 - **MTL5 pinned to v5.11.0, and `accumulator='i32'`**

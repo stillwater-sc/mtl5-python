@@ -85,8 +85,8 @@ endif()
 # reproducible, and it is the thing to bump when tracking MTL5 upstream:
 # mtl5-python's minor version follows the MTL5 tag named here.
 #
-# v5.10.0 is a floor, not a preference. Three things the bindings now need,
-# each from a different release, so the floor is the newest of them:
+# The pin is a floor, not a preference. The bindings need things from several
+# releases, so the floor is the newest of them:
 #   v5.9.0  -- mtl5_mixed_precision.cpp needs the two_norm<Accumulator, Result> /
 #              frobenius_norm<Accumulator, Result> forms (v5.8.0 has no Result
 #              parameter), and mtl5_complex.cpp needs the Hermitian
@@ -109,17 +109,28 @@ endif()
 #              generic integer loops are UB on overflow rather than the
 #              documented two's-complement wrap, and overflow is the NORMAL
 #              regime for these operand widths, not an edge case.
+#   v5.13.0 -- mtl5_sparse_direct.cpp selects the accumulator as the LEADING
+#              template argument, sparse_lu_numeric<Acc>(A, sym) and likewise for
+#              native_klu_factor / supernodal_lu_numeric / supernodal_ldlt_numeric
+#              (MTL5 #542). Before this tag Accumulator was the trailing
+#              parameter, so <Acc> alone would bind it as the VALUE type and fail
+#              to compile; the two spellings are mutually exclusive.
+#   v5.13.1 -- not v5.13.0. In 5.13.0, accumulator_traits::clear() reset with
+#              Acc{} rather than zero, and Universal's lns{} is 1.0, so QR/LQ
+#              over lns (lns16/lns32, test_universal_factorizations.py) were
+#              wrong outright: Q orthogonality error 1.5 (MTL5 #544). It
+#              compiles cleanly against 5.13.0, so only the floor stops it.
 #
 # The version argument to find_package is what applies that floor to the OTHER
 # build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
 # MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
 # installed would silently build against it and get ~140 template errors deep
 # inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
-# with COMPATIBILITY SameMajorVersion, under which 5.11.0 rejects an installed
-# 5.10.x and accepts 5.11.0 or 5.12.0 -- exactly the floor we want. (It also
+# with COMPATIBILITY SameMajorVersion, under which 5.13.1 rejects an installed
+# 5.13.0 or older and accepts 5.13.1 or any later 5.x -- exactly the floor we want. (It also
 # rejects a 6.x install, which is correct: an MTL5 major bump is the manual
 # intervention case in the version policy, not something to absorb silently.)
-find_package(MTL5 5.11.0 QUIET)
+find_package(MTL5 5.13.1 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -129,7 +140,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        v5.11.0
+        GIT_TAG        v5.13.1
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
