@@ -225,7 +225,7 @@ void register_sparse_lu(nb::module_& m) {
             {
                 nogil guard;
                 num = with_acc<T>(acc, [&]<typename Acc>() {
-                    return fact::sparse_lu_numeric<T, mtl::mat::parameters<>, Acc>(
+                    return fact::sparse_lu_numeric<Acc>(
                         A, sym, static_cast<T>(threshold),
                         static_cast<T>(pivot_perturb));
                 });
@@ -305,7 +305,7 @@ void register_klu(nb::module_& m) {
             {
                 nogil guard;
                 num = with_acc<T>(acc, [&]<typename Acc>() {
-                    return fact::native_klu_factor<T, mtl::mat::parameters<>, Acc>(
+                    return fact::native_klu_factor<Acc>(
                         A, static_cast<T>(threshold), scale,
                         static_cast<T>(pivot_perturb));
                 });
@@ -655,7 +655,7 @@ void register_supernodal_lu(nb::module_& m) {
             {
                 nogil guard;
                 num = with_acc<T>(acc, [&]<typename Acc>() {
-                    return fact::supernodal_lu_numeric<T, mtl::mat::parameters<>, Acc>(
+                    return fact::supernodal_lu_numeric<Acc>(
                         A, sym, static_cast<T>(threshold), max_super, scale,
                         static_cast<T>(pivot_perturb));
                 });
@@ -724,7 +724,7 @@ void register_supernodal_ldlt(nb::module_& m) {
             {
                 nogil guard;
                 num = with_acc<T>(acc, [&]<typename Acc>() {
-                    return fact::supernodal_ldlt_numeric<T, mtl::mat::parameters<>, Acc>(A, sym);
+                    return fact::supernodal_ldlt_numeric<Acc>(A, sym);
                 });
             }
             new (self) Wrap{std::move(sym), std::move(num), ordering, A.num_rows(),
@@ -757,7 +757,7 @@ void register_supernodal_ldlt(nb::module_& m) {
                 s.accumulator == "default" ? std::optional<std::string>{}
                                            : std::optional<std::string>{s.accumulator}),
                 [&]<typename Acc>() {
-                    return fact::supernodal_ldlt_numeric<T, mtl::mat::parameters<>, Acc>(A, s.sym);
+                    return fact::supernodal_ldlt_numeric<Acc>(A, s.sym);
                 });
             s.num = std::move(fresh);
         }, "A"_a,
