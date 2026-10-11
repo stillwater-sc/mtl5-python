@@ -15,6 +15,13 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.13.2**, up from v5.13.1. The `find_package` floor stays at
+  5.13.1, since nothing here needs 5.13.2. That release lets the scalar
+  operators (`scalar * matrix`, `matrix / scalar` and the vector forms) accept
+  any non-container `Scalar`, not just `is_arithmetic` types (MTL5 #548). It
+  also adds eigensolver accumulator tests (MTL5 #547). Neither changes what
+  these bindings compute. Full suite: 1408 passed, 4 skipped.
+
 - **MTL5 pinned to v5.13.1**, up from v5.11.0, and the `find_package` floor
   raised to match. Package version `5.13.0`, since the minor tracks MTL5's
   `5.13`. Full suite: 1408 passed, 4 skipped.
