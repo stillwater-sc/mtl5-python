@@ -15,6 +15,21 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.15.0**, up from v5.14.0, and the package version set to
+  5.15.0, since the minor tracks MTL5's. The `find_package` floor stays at
+  5.13.1, since nothing here needs 5.15.0. Nothing these bindings compute
+  changes. 5.15.0 adds an opt-in textbook Householder reflector for QR and LQ
+  (MTL5 #559), which these bindings don't expose. The untagged `qr_factor` and
+  `lq_factor` they call are unchanged. It also makes `qr_solve` skip a
+  reflector with τ = 0 (MTL5 #559), which reaches `QRFactor.solve` in one edge
+  case. Through the untagged QR, τ = 0 with a NaN left in the column happens
+  only when every other entry of that column is exactly zero, e.g. column 0 =
+  [0, NaN, 0]. That pivot's unknown is still NaN, since R's diagonal there is
+  zero, but the other unknowns are no longer NaN with it: for that column and
+  b = [1, 2, 3], `solve` returned [NaN, NaN] under 5.14.0 and returns [NaN, 1]
+  now. Finite inputs give identical results. Full suite: 1408 passed,
+  4 skipped.
+
 - **MTL5 pinned to v5.14.0**, up from v5.13.2, and the package version set to
   5.14.0, since the minor tracks MTL5's. The `find_package` floor stays at
   5.13.1, since nothing here needs 5.14.0. One behaviour change reaches these
