@@ -15,6 +15,20 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.14.0**, up from v5.13.2, and the package version set to
+  5.14.0, since the minor tracks MTL5's. The `find_package` floor stays at
+  5.13.1, since nothing here needs 5.14.0. One behaviour change reaches these
+  bindings: `cholesky()` on a matrix containing NaN now raises
+  `RuntimeError("cholesky: matrix is not symmetric positive definite ...")`
+  instead of returning a factor full of NaNs, because MTL5's `cholesky_factor`
+  now tests its pivot with `!(diag > 0)` (MTL5 #556). Finite inputs factor
+  exactly as before. The rest of 5.14.0 makes the generic row-major GEMM an
+  i-k-j loop and adds a CRS × dense product (MTL5 #549, #550). Both keep each
+  element's summation order, so results match the old kernel bit for bit
+  unless the compiler contracts to FMA, and to rounding when it does. It also
+  adds an opt-in term-by-term Cholesky order that
+  these bindings don't expose. Full suite: 1408 passed, 4 skipped.
+
 - **MTL5 pinned to v5.13.2**, up from v5.13.1. The `find_package` floor stays at
   5.13.1, since nothing here needs 5.13.2. That release lets the scalar
   operators (`scalar * matrix`, `matrix / scalar` and the vector forms) accept
