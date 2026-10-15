@@ -15,6 +15,35 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.17.0**, up from v5.15.0, and the package version set to
+  5.17.0, since the minor tracks MTL5's. There was no mtl5-python 5.16.0, so
+  this skips that minor. The `find_package` floor stays at 5.13.1, since
+  nothing here needs 5.16.0 or 5.17.0, and no binding source changes.
+  Four changes reach the bindings, on builds without LAPACK:
+  - **`eigh` and `eigvalsh`** use 5.16.0's stricter deflation test for the
+    symmetric tridiagonal QR (MTL5 #565). An off-diagonal entry is now dropped
+    relative to the smaller of its two diagonal neighbours, not the larger.
+    These bindings pass `tol=1e-10` explicitly, so 5.16.0's new default
+    tolerance doesn't reach them. Small eigenvalues and their eigenvectors can
+    come out more accurate.
+  - **`inertia` and `is_indefinite`** call MTL5's `eigenvalue_symmetric` with
+    its default tolerance. Their own `tol` only classifies eigenvalues as
+    positive, negative or zero. So they get both halves of MTL5 #565: the default
+    falls from 1e-10 to machine epsilon, and the new deflation test applies.
+    An eigenvalue within about 1e-10 of zero is now computed accurately, so
+    which side of the `tol` line it falls on can change.
+  - **`svd`, and everything built on it** (`condition_number`,
+    `numerical_rank`, `nullity`), go through 5.17.0's faster one-sided Jacobi
+    core (MTL5 #574). Its inner products are summed raw inside an overflow-safe
+    window instead of being rescaled every time. Singular values agree with
+    5.15.0 to about 1e-15 relative.
+  - **The sparse direct solves** gain an optional solve-phase accumulator in
+    MTL5 (#535/#576). These bindings don't select one, so with the default
+    their results are bit-identical to 5.15.0.
+
+  A LAPACK build takes `gesdd`/`syev` and sees none of the first three. Full
+  suite against the fetched v5.17.0 tag: 1408 passed, 4 skipped.
+
 - **MTL5 pinned to v5.15.0**, up from v5.14.0, and the package version set to
   5.15.0, since the minor tracks MTL5's. The `find_package` floor stays at
   5.13.1, since nothing here needs 5.15.0. Nothing these bindings compute
