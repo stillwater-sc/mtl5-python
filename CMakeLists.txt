@@ -152,7 +152,12 @@ endif()
 # Pinned for the same reason as MTL5 above: this is fetched at `pip install`
 # time, and the quire sizing it supplies backs the mixed-precision norms.
 # Version-floored for the same reason too -- see the find_package note above.
-find_package(universal 4.7.9 QUIET)
+# Universal also ships SameMajorVersion, so the floor has to name a 5.x for an
+# installed Universal 5 to be accepted at all: with a 4.x floor every 5.x
+# install is rejected and the pin below is always fetched. 5.6.2 is the floor
+# because it is the only 5.x this has been built and tested against, not
+# because an older 5.x is known to fail.
+find_package(universal 5.6.2 QUIET)
 if(NOT universal_FOUND)
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
@@ -171,7 +176,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        v4.7.9
+        GIT_TAG        v5.6.2
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
