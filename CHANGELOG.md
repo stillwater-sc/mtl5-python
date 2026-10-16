@@ -15,6 +15,18 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **Universal pinned to v5.6.2**, up from v4.7.9, a major version. The
+  `find_package` floor moves to 5.6.2 as well. Universal's package config uses
+  `SameMajorVersion`, so under the old 4.7.9 floor an installed Universal 5.x
+  was always rejected and the pin fetched instead. 5.6.2 is the floor because it
+  is the only 5.x this has been tested against, not because an older 5.x is
+  known to fail. The package version is unchanged, since its minor tracks MTL5.
+  No binding source changes, and no results change: the test suite gives the
+  same 1408 passed and 4 skipped, and `applications/ukf_mixed_precision` prints
+  output identical to its v4.7.9 build. `python/include/mtl/math/quire_accumulator.hpp`
+  stays for now: Universal's own quire accumulator functions (universal#1699) are
+  not in a release yet (stillwater-sc/mtl5#582).
+
 - **MTL5 pinned to v5.17.0**, up from v5.15.0, and the package version set to
   5.17.0, since the minor tracks MTL5's. There was no mtl5-python 5.16.0, so
   this skips that minor. The `find_package` floor stays at 5.13.1, since
