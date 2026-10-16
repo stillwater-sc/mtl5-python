@@ -154,10 +154,12 @@ endif()
 # Version-floored for the same reason too -- see the find_package note above.
 # Universal also ships SameMajorVersion, so the floor has to name a 5.x for an
 # installed Universal 5 to be accepted at all: with a 4.x floor every 5.x
-# install is rejected and the pin below is always fetched. 5.6.2 is the floor
-# because it is the only 5.x this has been built and tested against, not
-# because an older 5.x is known to fail.
-find_package(universal 5.6.2 QUIET)
+# install is rejected and the pin below is always fetched.
+#   v5.7.0 -- the quire's accumulator_* functions (universal#1699). Without them
+#             quire<T> is not an MTL5 accumulator, and mtl5_mixed_precision.cpp's
+#             accumulator='quire' paths fail to compile: the bridge header that
+#             used to supply them is gone (mtl5#582).
+find_package(universal 5.7.0 QUIET)
 if(NOT universal_FOUND)
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
@@ -176,7 +178,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        v5.6.2
+        GIT_TAG        v5.7.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
