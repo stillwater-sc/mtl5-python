@@ -108,9 +108,11 @@ posit16 data:
 `mtl5.mixed.accumulators(dtype)` lists what a given element type supports. The
 quire is available for the posit, cfloat, lns and fixpnt families; `f32`/`f64`
 have none (Universal defines no quire for the native types). Exactness varies by
-family — it is genuinely exact for posit and fixpnt, while the cfloat and lns
-quires have known upstream limitations documented in
-`python/include/mtl/math/quire_accumulator.hpp`.
+family. It is exact for posit, cfloat and fixpnt. The lns quire's `quire_mul`
+forms each product through `double` and rounds it, so it is not exact and can do
+worse than the `"f64"` accumulator (universal#1203; see Universal's
+`lns/fdp.hpp`). Universal supplies the quire's accumulator functions itself;
+there is no bridge header in this package.
 
 `accumulator=` is available on `dot`, `norm` (ord=2), `frobenius_norm`,
 `matvec` and `matmul`.

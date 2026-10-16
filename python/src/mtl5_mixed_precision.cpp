@@ -33,11 +33,10 @@
 #include <mtl/itl/pc/ilu_0.hpp>
 #include <mtl/itl/pc/ic_0.hpp>
 
+// A Universal quire<T> is an MTL5 accumulator as it stands: Universal defines
+// the quire's accumulator_* functions next to quire (universal#1699), and
+// accumulator_traits finds them by argument-dependent lookup (mtl5#581).
 #include <mtl/math/accumulator_traits.hpp>
-// The MTL5 + Universal bridge. MTL5 deliberately ships only the contract
-// (accumulator_traits) and leaves the quire specializations to the composition
-// layer; this header is that specialization, mirrored across the mp-* repos.
-#include <mtl/math/quire_accumulator.hpp>
 
 #include <cmath>
 #include <map>
@@ -53,8 +52,10 @@ namespace {
 // ===========================================================================
 // Which element types have a Universal quire
 //
-// Mirrors the four families the quire_accumulator bridge specializes. Native
-// float/double/int have no quire (Universal ships no fdp.hpp for them), so
+// The four families exposed with accumulator='quire'. Universal's quire also
+// accumulates bposit and dbns, which these bindings don't bind. Native
+// float/double/int have no quire here (the native quire_mul is outside the
+// accumulator protocol), so
 // accumulator="quire" is rejected for those with an explanatory error rather
 // than failing to compile or silently falling back.
 // ===========================================================================

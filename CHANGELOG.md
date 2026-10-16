@@ -15,6 +15,28 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.18.0** and **Universal to v5.7.0**, and the package
+  version set to 5.18.0, since the minor tracks MTL5's. Both `find_package`
+  floors move to the new versions, because the bindings now need both.
+  - **The quire bridge header is gone.** `python/include/mtl/math/quire_accumulator.hpp`
+    specialized MTL5's `accumulator_traits` for Universal's quire, a copy of
+    the header the mp-* repos also carried. Universal 5.7.0 defines the
+    quire's `accumulator_*` functions itself (universal#1699), and MTL5
+    5.18.0's `accumulator_traits` finds them by argument-dependent lookup
+    (MTL5 #581), so `quire<T>` is an accumulator without it (MTL5 #582).
+    Against MTL5 5.17.0 the `accumulator="quire"` paths no longer compile,
+    hence the floor. Which dtypes accept `accumulator="quire"` is unchanged:
+    posit, cfloat, lns and fixpnt.
+  - **`accumulator="quire"` results delivered as `double` can change in the
+    last bit.** That covers `dot` when the result isn't the element type,
+    `norm` (ord=2) and `frobenius_norm`. The bridge rounded the quire to
+    `double` by truncating to 53 bits; Universal's functions round to nearest,
+    ties to even. Against the 5.17.0 wheel, 74 of 560 quire `dot` and `norm`
+    results over random posit, cfloat, lns and fixpnt vectors differ, every
+    one by exactly 1 ulp of the `double`. Results delivered in the element
+    type are unchanged.
+  - No other binding changes.
+
 - **Universal pinned to v5.6.2**, up from v4.7.9, a major version. The
   `find_package` floor moves to 5.6.2 as well. Universal's package config uses
   `SameMajorVersion`, so under the old 4.7.9 floor an installed Universal 5.x

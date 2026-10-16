@@ -115,8 +115,9 @@ The differentiator. `mtl/math/accumulator_traits.hpp`, `operation/convert.hpp`,
 | `cg` accumulator policy — posit32+quire accuracy gain (#238) | ❌ still unbound — see §3.7 |
 
 The quire is composed at this layer rather than in MTL5: `accumulator_traits` ships the
-contract, and the specialization for Universal's quire lives in
-`python/include/mtl/math/quire_accumulator.hpp`.
+contract. The specialization for Universal's quire lived in
+`python/include/mtl/math/quire_accumulator.hpp` until Universal 5.7.0 supplied the quire's
+`accumulator_*` functions itself, found by argument-dependent lookup (mtl5#582).
 
 The norms went through local sum-of-squares loops until MTL5
 [#379](https://github.com/stillwater-sc/mtl5/issues/379) gave `two_norm`/`frobenius_norm`
