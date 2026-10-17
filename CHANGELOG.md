@@ -749,6 +749,26 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.18.1 (2026-10-17)
+
+### Chores
+
+- **deps**: Bump Universal to v5.8.0 ([#104](https://github.com/stillwater-sc/mtl5-python/pull/104),
+  [`aaa0f18`](https://github.com/stillwater-sc/mtl5-python/commit/aaa0f18ac387a9a64b57c7fdd464f7e9263378cd))
+
+### Features
+
+- **mixed**: Accumulator="quire" on float32 and float64
+  ([#105](https://github.com/stillwater-sc/mtl5-python/pull/105),
+  [`af4eea8`](https://github.com/stillwater-sc/mtl5-python/commit/af4eea899a5aa26ccd4437c0efe92c0ca5239ec6))
+
+### Testing
+
+- **bench**: Require the f64 quire row to succeed in the sweep test
+  ([#105](https://github.com/stillwater-sc/mtl5-python/pull/105),
+  [`af4eea8`](https://github.com/stillwater-sc/mtl5-python/commit/af4eea899a5aa26ccd4437c0efe92c0ca5239ec6))
+
+
 ## v5.10.3 (2026-08-28)
 
 ### Bug Fixes
