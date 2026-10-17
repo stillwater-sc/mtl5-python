@@ -15,6 +15,13 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **Universal pinned to v5.8.0**, and the `find_package` floor moved with it.
+  5.8.0 gives native `quire<float>` and `quire<double>` the `accumulator_*`
+  protocol (universal#1703). The bindings don't use it yet:
+  `accumulator="quire"` still accepts posit, cfloat, lns and fixpnt only. The
+  other 5.8.0 changes are in unum Type I and poxel, which aren't bound. No
+  binding source changes.
+
 - **MTL5 pinned to v5.18.0** and **Universal to v5.7.0**, and the package
   version set to 5.18.0, since the minor tracks MTL5's. Both `find_package`
   floors move to the new versions, because the bindings now need both.
