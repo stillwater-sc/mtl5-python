@@ -171,10 +171,10 @@ def test_accumulators_are_read_off_the_extension_not_hardcoded(bench):
     class Args:
         accumulators = ["quire"]
 
-    # posit32 has one; takum32 does not.
+    # posit32 and, since Universal 5.8.0, f64 have one; takum32 does not.
     assert "quire" in bench._accumulators_for("dot", "posit32", Args())
+    assert "quire" in bench._accumulators_for("dot", "f64", Args())
     assert "quire" not in bench._accumulators_for("dot", "takum32", Args())
-    assert "quire" not in bench._accumulators_for("dot", "f64", Args())
 
 
 def test_the_default_is_always_swept_and_always_first(bench):
@@ -220,9 +220,10 @@ def test_native_gemm_reports_an_accumulator_as_unavailable(bench):
 
 def test_accumulator_sweep_end_to_end(bench, tmp_path):
     # f64 is included because the harness refuses to report a sweep whose
-    # baseline produced nothing — a posit32-only run exits 1 by design. It also
-    # exercises the other half of the axis: f64 has no quire, so it must come
-    # back with the default row alone rather than an error row.
+    # baseline produced nothing — a posit32-only run exits 1 by design. f64 has
+    # a quire too since Universal 5.8.0, so both dtypes come back with a quire
+    # row; the dtype-without-one half of the axis is covered above with
+    # takum32.
     out = tmp_path / "acc.json"
     rc = bench.main(
         [
@@ -246,7 +247,7 @@ def test_accumulator_sweep_end_to_end(bench, tmp_path):
     assert rc == 0
 
     rows = json.loads(out.read_text())["results"]
-    assert {r["accumulator"] for r in rows if r["dtype"] == "f64"} == {"default"}
+    assert {r["accumulator"] for r in rows if r["dtype"] == "f64"} == {"default", "quire"}
 
     by_acc = {r["accumulator"]: r for r in rows if r["status"] == "ok" and r["dtype"] == "posit32"}
     assert set(by_acc) == {"default", "quire"}

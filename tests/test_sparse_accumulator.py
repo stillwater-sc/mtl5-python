@@ -190,8 +190,9 @@ class TestRejections:
 
     @pytest.mark.parametrize("name", FACTORIES)
     def test_quire_is_refused_with_a_reason(self, name):
-        """SparseMatrix is float32/float64 only, and Universal defines a quire
-        only for its own number systems."""
+        """Universal defines quire<float> and quire<double>, but the
+        factorizations hold one accumulator per row in their workspace, and a
+        4226-bit quire there needs its own design."""
         A32 = as_f32(spd_matrix())
         with pytest.raises(ValueError, match="quire.*not available"):
             factor(name, A32, accumulator="quire")

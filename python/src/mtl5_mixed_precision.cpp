@@ -52,17 +52,34 @@ namespace {
 // ===========================================================================
 // Which element types have a Universal quire
 //
-// The four families exposed with accumulator='quire'. Universal's quire also
-// accumulates bposit and dbns, which these bindings don't bind. Native
-// float/double/int have no quire here (the native quire_mul is outside the
-// accumulator protocol), so
-// accumulator="quire" is rejected for those with an explanatory error rather
-// than failing to compile or silently falling back.
+// The families exposed with accumulator='quire': native float and double, plus
+// posit, cfloat, lns and fixpnt. Universal's quire also accumulates bposit and
+// dbns, which these bindings don't bind. Every other bound type -- the narrow
+// integers, takum32 and the cascades -- has no quire, so accumulator="quire" is
+// rejected for those with an explanatory error rather than failing to compile
+// or silently falling back.
 // ===========================================================================
 template <typename T>
 struct quire_for {
     static constexpr bool ok = false;
     using type = void;
+};
+
+// Universal 5.8.0 gives the native quires the accumulator_* protocol
+// (universal#1703): every product is exact, and the value is rounded to
+// nearest, ties to even, once, when it is read out. quire<double> is 4226 bits
+// wide and costs thousands of times a float64 accumulate, the price of a
+// correctly rounded sum.
+template <>
+struct quire_for<float> {
+    static constexpr bool ok = true;
+    using type = sw::universal::quire<float>;
+};
+
+template <>
+struct quire_for<double> {
+    static constexpr bool ok = true;
+    using type = sw::universal::quire<double>;
 };
 
 template <unsigned nbits, unsigned es>
@@ -290,13 +307,14 @@ template <typename T>
 void register_mixed_native(nb::module_& mx) {
     using VV = VectorView<T>;
     using MV = MatrixView<T>;
+    constexpr bool quire_ok = quire_for<T>::ok;
     record_quire_support<T>();
 
     mx.def("dot", [](const VV& a, const VV& b,
                      std::optional<std::string> accumulator,
                      std::optional<std::string> result) {
         return mixed_dot<T>(a.vec, b.vec,
-                            parse_acc(accumulator, type_suffix<T>(), /*quire_ok=*/false),
+                            parse_acc(accumulator, type_suffix<T>(), quire_ok),
                             parse_result_is_element(result));
     }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none());
 
@@ -306,7 +324,7 @@ void register_mixed_native(nb::module_& mx) {
                      std::optional<std::string> result) {
         if (a.shape(0) != b.shape(0))
             throw std::invalid_argument("dot: vectors must have the same length");
-        const AccKind kind = parse_acc(accumulator, type_suffix<T>(), false);
+        const AccKind kind = parse_acc(accumulator, type_suffix<T>(), quire_ok);
         const bool elem = parse_result_is_element(result);
         const std::size_t n = a.shape(0);
         T* ap = const_cast<T*>(a.data());
@@ -321,11 +339,11 @@ void register_mixed_native(nb::module_& mx) {
             throw std::invalid_argument(
                 "mixed.norm: only ord=2 has an accumulator policy. Use mtl5.norm() "
                 "for the one- and infinity-norms.");
-        return mixed_two_norm<T>(v.vec, parse_acc(accumulator, type_suffix<T>(), false));
+        return mixed_two_norm<T>(v.vec, parse_acc(accumulator, type_suffix<T>(), quire_ok));
     }, "x"_a, "ord"_a = 2, "accumulator"_a = nb::none());
 
     mx.def("frobenius_norm", [](const MV& m, std::optional<std::string> accumulator) {
-        return mixed_frobenius_norm<T>(m.mat, parse_acc(accumulator, type_suffix<T>(), false));
+        return mixed_frobenius_norm<T>(m.mat, parse_acc(accumulator, type_suffix<T>(), quire_ok));
     }, "A"_a, "accumulator"_a = nb::none());
 }
 
@@ -690,10 +708,9 @@ void register_mixed_precision(nb::module_& m) {
     register_mixed_universal<lns32>(mx);
 
     // Emulated IEEE binary32, takum, and the float cascades (#69). Only
-    // cfloat32 gets a quire: quire_for<> specializes on the four families
-    // Universal ships an fdp.hpp for, so accumulator='quire' on takum32 or a
-    // cascade is rejected at runtime with the same message native float gets,
-    // rather than failing to compile.
+    // cfloat32 gets a quire: quire_for<> specializes on the families Universal
+    // ships an fdp.hpp for, so accumulator='quire' on takum32 or a cascade is
+    // rejected at runtime with a clean message rather than failing to compile.
     register_mixed_universal<cfloat32>(mx);
     register_mixed_universal<takum32>(mx);
     register_mixed_universal<dd_cascade>(mx);

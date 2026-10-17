@@ -64,9 +64,9 @@ format", and measuring it against float64 would bury the answer under the
 format's own slowness.
 
 Which accumulators exist is read off the extension via
-`mtl5.mixed.accumulators()`, never hardcoded — a quire exists only for the four
-families Universal ships an `fdp.hpp` for (posit, cfloat, lns, fixpnt), so
-`takum32` and the cascades are skipped rather than filled with rejection rows.
+`mtl5.mixed.accumulators()`, never hardcoded — a quire exists only for the
+families Universal ships an `fdp.hpp` for (native `f32`/`f64`, posit, cfloat,
+lns, fixpnt), so `takum32` and the cascades are skipped rather than filled with rejection rows.
 `lu` and `qr` take no accumulator and are not swept. Native `f32`/`f64`
 `gemv`/`gemm` report `not instantiated` for a non-default accumulator, because
 the top-level `mtl5.matvec`/`matmul` have no such parameter — only the

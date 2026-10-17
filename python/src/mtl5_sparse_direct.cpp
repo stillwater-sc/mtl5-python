@@ -101,11 +101,19 @@ fact::lu_symbolic symbolic_for(const mtl::mat::compressed2D<T>& A,
 // Because the result type does not depend on the accumulator, one wrapper class
 // per element type is still enough; only the construction call dispatches.
 //
-// The quire is deliberately absent: SparseMatrix is float32/float64 only, and
-// Universal defines a quire only for its own number systems. parse_acc already
-// says so when asked.
+// The quire is deliberately absent. Universal 5.8.0 does define quire<float>
+// and quire<double>, but the factorizations type a dense workspace of n
+// accumulators, and at 4226 bits each a quire<double> workspace costs roughly
+// 530 bytes per row. That needs its own design, so it is refused by name here
+// rather than offered at that cost.
 template <typename T>
 AccKind parse_sparse_acc(const std::optional<std::string>& spec) {
+    if (spec && *spec == "quire")
+        throw std::invalid_argument(
+            "accumulator='quire' is not available for the sparse "
+            "factorizations: their numeric workspace holds one accumulator per "
+            "row, and a quire<double> is 4226 bits wide. Use 'f64' or 'fma64' "
+            "for a wider accumulator.");
     const AccKind kind = parse_acc(spec, type_suffix<T>(), /*quire_ok=*/false);
     if constexpr (std::is_same_v<T, double>) {
         if (kind == AccKind::F32 || kind == AccKind::FMA32)

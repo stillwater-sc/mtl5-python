@@ -409,8 +409,8 @@ def _accumulators_for(kernel: str, dtype: str, args) -> list[str]:
     """Which accumulators to sweep for one (kernel, dtype).
 
     Availability is read off the extension via mtl5.mixed.accumulators(), never
-    hardcoded: a quire exists only for the four families Universal ships an
-    fdp.hpp for, and that list is the extension's to state. Asking for one the
+    hardcoded: a quire exists only for the families Universal ships an fdp.hpp
+    for, and that list is the extension's to state. Asking for one the
     dtype lacks would otherwise fill the table with rows whose only content is
     the same rejection.
 

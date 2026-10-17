@@ -106,9 +106,14 @@ posit16 data:
 | `"quire"` | **0** — bit-exact |
 
 `mtl5.mixed.accumulators(dtype)` lists what a given element type supports. The
-quire is available for the posit, cfloat, lns and fixpnt families; `f32`/`f64`
-have none (Universal defines no quire for the native types). Exactness varies by
-family. It is exact for posit, cfloat and fixpnt. The lns quire's `quire_mul`
+quire is available for `f32`, `f64` and the posit, cfloat, lns and fixpnt
+families. Exactness varies by family. It is exact for `f32`, `f64`, posit,
+cfloat and fixpnt. On `f32`/`f64` the result is the exact dot product rounded
+once, to nearest with ties to even, so it is correctly rounded. It is also slow:
+every product goes into a 584-bit (`f32`) or 4226-bit (`f64`) fixed-point
+register, and in mp-blas's level-3 benchmark a `quire<double>` accumulate runs
+about 3900× slower than a float64 one. On `f32`/`f64`, `accumulator=` is
+available on `dot`, `norm` and `frobenius_norm`. The lns quire's `quire_mul`
 forms each product through `double` and rounds it, so it is not exact and can do
 worse than the `"f64"` accumulator (universal#1203; see Universal's
 `lns/fdp.hpp`). Universal supplies the quire's accumulator functions itself;
@@ -538,8 +543,9 @@ rather than accepted quietly:
 
 * **narrower than the element type** — `f32` on a float64 matrix loses precision
   rather than gaining it
-* **`quire`** — `SparseMatrix` is float32/float64 only, and Universal defines a
-  quire only for its own number systems
+* **`quire`** — Universal defines `quire<float>` and `quire<double>`, but the
+  factorizations keep one accumulator per row in their workspace, and a 4226-bit
+  quire there needs its own design
 
 One asymmetry worth knowing: `refactor()` replays the stored pivot sequence
 through an upstream entry point that takes no accumulator, so on `splu`, `klu`
