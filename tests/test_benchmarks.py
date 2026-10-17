@@ -247,7 +247,10 @@ def test_accumulator_sweep_end_to_end(bench, tmp_path):
     assert rc == 0
 
     rows = json.loads(out.read_text())["results"]
-    assert {r["accumulator"] for r in rows if r["dtype"] == "f64"} == {"default", "quire"}
+    # rc == 0 needs only the f64 baseline, so check the quire row ran too.
+    f64_rows = [r for r in rows if r["dtype"] == "f64"]
+    assert {r["accumulator"] for r in f64_rows} == {"default", "quire"}
+    assert {r["status"] for r in f64_rows} == {"ok"}
 
     by_acc = {r["accumulator"]: r for r in rows if r["status"] == "ok" and r["dtype"] == "posit32"}
     assert set(by_acc) == {"default", "quire"}
