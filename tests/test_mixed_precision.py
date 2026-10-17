@@ -7,6 +7,7 @@ accumulator measurably improves accuracy, and that the quire is exact.
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -107,9 +108,9 @@ class TestAccumulatorPolicy:
         return rng.standard_normal(4000)
 
     def test_accumulators_advertised(self):
-        for dt in QUIRE_DTYPES:
+        for dt in QUIRE_DTYPES + ["f32", "f64"]:
             assert "quire" in mtl5.mixed.accumulators(dt)
-        for dt in ("f32", "f64"):
+        for dt in ("takum32", "dd_cascade"):
             assert "quire" not in mtl5.mixed.accumulators(dt)
 
     def test_quire_is_exact_for_posit(self, data):
@@ -173,8 +174,8 @@ class TestAccumulatorPolicy:
         wide = mtl5.mixed.dot(v, v, accumulator="f64")
         assert abs(wide - exact) / abs(exact) < 1e-14
 
-    def test_quire_rejected_for_native(self):
-        v = mtl5.convert(np.ones(4), "f64")
+    def test_quire_rejected_where_unavailable(self):
+        v = mtl5.convert(np.ones(4), "takum32")
         with pytest.raises(ValueError, match="not available for dtype"):
             mtl5.mixed.dot(v, v, accumulator="quire")
 
@@ -188,6 +189,110 @@ class TestAccumulatorPolicy:
         b = mtl5.convert(np.ones(5), "posit16")
         with pytest.raises(ValueError, match="same length"):
             mtl5.mixed.dot(a, b, accumulator="f64")
+
+
+def exact_dot(a, b) -> Fraction:
+    """The exact value of ``sum(a[i] * b[i])`` over binary floating-point data.
+
+    ``math.fsum`` is not enough here: for float64 operands each product is
+    already rounded before fsum sees it. Fractions carry every product exactly.
+    """
+    return sum((Fraction(float(x)) * Fraction(float(y)) for x, y in zip(a, b)), Fraction(0))
+
+
+def round_to_float32(q: Fraction) -> float:
+    """Round an exact value to the nearest float32, ties to even.
+
+    ``np.float32(float(q))`` rounds twice, through float64 first, and can land
+    one ulp off on a tie. The correctly rounded float32 is within one ulp of
+    that double-rounded one, so pick it from the three candidates by exact
+    distance.
+    """
+    f = np.float32(float(q))
+    candidates = [np.nextafter(f, np.float32(-np.inf)), f, np.nextafter(f, np.float32(np.inf))]
+
+    def key(c):
+        return (abs(Fraction(float(c)) - q), int(np.array(c).view(np.uint32)) & 1)
+
+    return float(min(candidates, key=key))
+
+
+class TestNativeQuire:
+    """accumulator='quire' on float32 and float64 (Universal 5.8.0, universal#1703).
+
+    The claim is not "more accurate than float64" but "correctly rounded": the
+    exact dot product, rounded once to nearest, ties to even. Every assertion is
+    an equality against a Fraction-exact reference.
+    """
+
+    NP = {"f32": np.float32, "f64": np.float64}
+
+    def _operands(self, dtype, n=2000, seed=11):
+        rng = np.random.default_rng(seed)
+        a = rng.standard_normal(n).astype(self.NP[dtype])
+        b = rng.standard_normal(n).astype(self.NP[dtype])
+        return a, b
+
+    @pytest.mark.parametrize("dtype", ["f32", "f64"])
+    def test_advertised(self, dtype):
+        assert "quire" in mtl5.mixed.accumulators(dtype)
+
+    @pytest.mark.parametrize("dtype", ["f32", "f64"])
+    def test_dot_is_correctly_rounded(self, dtype):
+        a, b = self._operands(dtype)
+        va = mtl5.convert(a.astype(np.float64), dtype)
+        vb = mtl5.convert(b.astype(np.float64), dtype)
+        expected = float(exact_dot(a, b))
+        assert mtl5.mixed.dot(va, vb, accumulator="quire") == expected
+        # The ndarray overload takes the same path.
+        assert mtl5.mixed.dot(a, b, accumulator="quire") == expected
+
+    def test_float32_result_element_is_a_correctly_rounded_float32(self):
+        a, b = self._operands("f32")
+        got = mtl5.mixed.dot(a, b, accumulator="quire", result="element")
+        assert got == round_to_float32(exact_dot(a, b))
+
+    def test_float64_result_element_matches_f64(self):
+        a, b = self._operands("f64")
+        assert mtl5.mixed.dot(a, b, accumulator="quire", result="element") == mtl5.mixed.dot(
+            a, b, accumulator="quire"
+        )
+
+    def test_cancellation_is_exact(self):
+        """1e16 + 1 rounds to 1e16 in float64; the quire keeps the 1."""
+        a = np.array([1e16, 1.0, -1e16])
+        b = np.ones(3)
+        assert mtl5.mixed.dot(a, b, accumulator="quire") == 1.0
+
+    def test_intermediate_overflow_is_not_an_overflow(self):
+        """max * 2 overflows float64, but the quire holds it, so the exact sum
+        2 max - 2 max is 0 rather than inf - inf = nan."""
+        big = np.finfo(np.float64).max
+        a = np.array([big, big])
+        b = np.array([2.0, -2.0])
+        assert mtl5.mixed.dot(a, b, accumulator="quire") == 0.0
+
+    @pytest.mark.parametrize("dtype", ["f32", "f64"])
+    def test_zero_times_inf_is_nan(self, dtype):
+        a = np.array([0.0, 1.0], dtype=self.NP[dtype])
+        b = np.array([np.inf, 1.0], dtype=self.NP[dtype])
+        assert math.isnan(mtl5.mixed.dot(a, b, accumulator="quire"))
+
+    @pytest.mark.parametrize("dtype", ["f32", "f64"])
+    def test_norm_is_the_root_of_the_correctly_rounded_sum(self, dtype):
+        a, _ = self._operands(dtype)
+        v = mtl5.convert(a.astype(np.float64), dtype)
+        expected = math.sqrt(float(exact_dot(a, a)))
+        assert mtl5.mixed.norm(v, 2, accumulator="quire") == expected
+
+    @pytest.mark.parametrize("dtype", ["f32", "f64"])
+    def test_frobenius_norm(self, dtype):
+        rng = np.random.default_rng(12)
+        A = rng.standard_normal((30, 40)).astype(self.NP[dtype])
+        M = mtl5.convert(A.astype(np.float64), dtype)
+        flat = A.ravel()
+        expected = math.sqrt(float(exact_dot(flat, flat)))
+        assert mtl5.mixed.frobenius_norm(M, accumulator="quire") == expected
 
 
 class TestAccumulatedNorms:

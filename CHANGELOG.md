@@ -13,6 +13,22 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Added
+
+- **`accumulator="quire"` on float32 and float64.** `mtl5.mixed.dot`, `norm`
+  (ord=2) and `frobenius_norm` now accept the quire on the native dtypes, through
+  Universal 5.8.0's `quire<float>` and `quire<double>` (universal#1703). Every
+  product is exact and the sum is rounded once, to nearest with ties to even, so
+  the result is the correctly rounded dot product. `result="element"` rounds it
+  to the element type instead of to float64, which for float32 is a correctly
+  rounded float32 dot product. `0 * inf` gives NaN, as IEEE 754 requires.
+  `mtl5.mixed.accumulators("f32")` and `("f64")` now list `"quire"`.
+  - It is slow. A quire<double> is a 4226-bit fixed-point register, and in
+    mp-blas's level-3 benchmark it accumulates about 3900× slower than a
+    float64 accumulator.
+  - The sparse factorizations still refuse `accumulator="quire"`, now with the
+    actual reason: their workspace holds one accumulator per row.
+
 ### Changed
 
 - **Universal pinned to v5.8.0**, and the `find_package` floor moved with it.

@@ -259,8 +259,9 @@ inline AccKind parse_acc(const std::optional<std::string>& spec,
         if (!quire_ok)
             throw std::invalid_argument(
                 std::string("accumulator='quire' is not available for dtype '") + dtype +
-                "': Universal provides a quire only for the posit, cfloat, lns and "
-                "fixpnt families. Use 'f64' to accumulate in double instead.");
+                "': Universal provides a quire for float32, float64 and the posit, "
+                "cfloat, lns and fixpnt families. Use 'f64' to accumulate in "
+                "double instead.");
         return AccKind::Quire;
     }
     throw std::invalid_argument("unknown accumulator '" + a + "'; " + kAccumulatorHelp);
