@@ -165,7 +165,10 @@ endif()
 #             quire<T> is not an MTL5 accumulator, and mtl5_mixed_precision.cpp's
 #             accumulator='quire' paths fail to compile: the bridge header that
 #             used to supply them is gone (mtl5#582).
-find_package(universal 5.7.0 QUIET)
+#   v5.8.0 -- the floor tracks the pin, the only 5.x tested. 5.8.0 adds the
+#             protocol for native quire<float>/quire<double> (universal#1703);
+#             the bindings do not use it yet.
+find_package(universal 5.8.0 QUIET)
 if(NOT universal_FOUND)
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
@@ -184,7 +187,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        v5.7.0
+        GIT_TAG        v5.8.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
