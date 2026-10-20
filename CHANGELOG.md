@@ -31,6 +31,46 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.19.0** and **Universal to v5.10.0**, and the package
+  version set to 5.19.0, since the minor tracks MTL5's. Neither `find_package`
+  floor moves (they stay at 5.18.0 and 5.8.0), since no binding needs anything
+  new from either release. No binding source changes. The suite gives 1422
+  passed and 4 skipped against both pins.
+  - **`ILUT` is now a correct preconditioner** (MTL5 #599). Its back
+    substitution counted the diagonal twice, which was wrong for every input:
+    a no-drop ILUT, which is an exact LU, did not solve `A x = b`. Its
+    `adjoint_solve` also applied M⁻¹ instead of M⁻ᴴ. Solvers using `ILUT`
+    can converge in fewer iterations or to a different iterate. bicg and qmr
+    still refuse it as non-symmetric.
+  - **Accumulator `dot` and `norm` with more than one thread.** After
+    `set_num_threads(n)` with n > 1, `mtl5.mixed.dot`, `norm` (ord=2) and
+    `frobenius_norm` with an explicit accumulator now split across the pool
+    (MTL5 #584). With `accumulator="quire"` the result is the same at every
+    thread count. With a rounding accumulator such as `"f64"`, the last bits
+    depend on the thread count, as the default float/double reductions'
+    already do. With one thread, the default, nothing changes.
+  - **Other MTL5 5.19.0 changes don't reach the bindings.** They add
+    `Accumulator` parameters whose `void` default runs the 5.18.0 code, and the
+    bindings use that default everywhere else.
+  - **Universal 5.9.0 and 5.10.0 make `sqrt` correctly rounded for cfloat, lns
+    and fixpnt** (universal#1728–#1730). That reaches `norm` and QR. The table
+    compares 40 norms and 10 8×8 QR factorizations per type against
+    Universal 5.8.0, with the same MTL5:
+
+    | dtype | norms changed | QR entries changed | QR backward error, median |
+    |---|---|---|---|
+    | `lns32` | 5 / 40, ≤ 1.1e-5 relative | 288 / 1280 | 2.20e-5 → 2.11e-5 |
+    | `lns16` | 5 / 40, ≤ 2.7e-3 relative | 120 / 1280 | 5.58e-3 → 5.63e-3 |
+    | `fixpnt16` | 7 / 40, ≤ 6.8e-3 relative | 102 / 1280 | 0.24 → 0.24 |
+    | `fixpnt8` | 1 / 40 | 0 | unchanged |
+
+    - **Unchanged:** the other eleven bound types gave identical bits on the
+      same inputs. That includes `cfloat32`, whose 23 fraction bits are below
+      the misrounded range (25–52).
+    - **LU** uses no `sqrt`, so it is bit-identical for every type.
+    - **Universal's other changes** are mostly in types these bindings don't
+      bind: lindex, dfloat, edecimal, erational, efloat and integer.
+
 - **Universal pinned to v5.8.0**, and the `find_package` floor moved with it.
   5.8.0 gives native `quire<float>` and `quire<double>` the `accumulator_*`
   protocol (universal#1703). The bindings don't use it yet:
