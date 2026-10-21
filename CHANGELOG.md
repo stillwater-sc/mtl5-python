@@ -29,6 +29,32 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Integer GEMM** (#96, #88 phase 3). Two kernels, chosen by name:
+  - `mtl5.mixed.matmul(A, B, accumulator="i32")` on `i8`, `i16` and `u8`
+    operands, and on the mixed-signedness `u8 × i8` / `i8 × u8` pairs. It runs
+    MTL5's widen-on-load `mult<int32_t>`. As for `mixed.dot`, `accumulator` is
+    required on these dtypes.
+  - `mtl5.mixed.matmul_quad(A, B)`, which runs `mult_quad`, the VNNI / SDOT
+    micro-kernel. It takes `i8 × i8` and `u8 × i8`, which give int32, and
+    `u8 × u8`, which gives uint32. It refuses `i8 × u8` with a `ValueError`,
+    because a GEMM is not symmetric and cannot be reordered onto `u8 × i8`.
+  - An integer matmul returns a matrix of the **accumulator's** type: `i8 @ i8`
+    is a `DenseMatrix_i32`. The two kernels agree bit for bit and both equal the
+    naive triple loop, because integer addition mod 2³² is associative. The suite
+    asserts that exactly, on ragged shapes and across the int32 wrap.
+  - `matmul` never routes through the quad kernel, and `matmul_quad` takes no
+    `accumulator=`. Nothing in a result shows which kernel ran, so inferring it
+    from the element types would go unnoticed. MTL5 made the same choice for the
+    same reason.
+- **`DenseVector_u32` / `DenseMatrix_u32`**, storage only, for the `u8 × u8`
+  quad result. `mtl5.vector()` / `mtl5.matrix()` now accept `uint32` arrays,
+  which used to raise `TypeError`.
+- **Quad multiply-accumulate capability in `build_info()`** (#96, #88 phase 4).
+  `quad_dot` is `"none"`, `"partial"` or `"all"`. `quad_dot_native` gives the
+  per-pairing answer, keyed `u8xi8`, `i8xi8` and `u8xu8`. It has three states,
+  not a flag, because x86 and ARM implement opposite pairings first, so
+  `"partial"` is the common answer and a boolean would mislabel one pairing. A
+  released wheel reports `"none"`: it is built at the x86-64 baseline.
 - **`accumulator="quire"` on float32 and float64.** `mtl5.mixed.dot`, `norm`
   (ord=2) and `frobenius_norm` now accept the quire on the native dtypes, through
   Universal 5.8.0's `quire<float>` and `quire<double>` (universal#1703). Every

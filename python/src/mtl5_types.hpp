@@ -127,6 +127,8 @@ template <> constexpr const char* type_suffix<int64_t>() { return "i64"; }
 template <> constexpr const char* type_suffix<int8_t>()  { return "i8"; }
 template <> constexpr const char* type_suffix<int16_t>() { return "i16"; }
 template <> constexpr const char* type_suffix<uint8_t>() { return "u8"; }
+// The quad multiply-accumulate's result for u8 x u8 (mixed.matmul_quad).
+template <> constexpr const char* type_suffix<uint32_t>() { return "u32"; }
 template <> constexpr const char* type_suffix<fp8>()     { return "fp8"; }
 template <> constexpr const char* type_suffix<fp16>()    { return "fp16"; }
 template <> constexpr const char* type_suffix<posit8>()  { return "posit8"; }

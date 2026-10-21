@@ -256,8 +256,8 @@ class TestFactoryRejectsUnregisteredDtypes:
 
     @pytest.mark.parametrize(
         "dt",
-        [np.float16, np.uint16, np.uint32, np.uint64],
-        ids=["f16", "u16", "u32", "u64"],
+        [np.float16, np.uint16, np.uint64],
+        ids=["f16", "u16", "u64"],
     )
     def test_unregistered_dtype_raises(self, dt):
         with pytest.raises(TypeError):
@@ -273,6 +273,7 @@ class TestFactoryRejectsUnregisteredDtypes:
             np.int32,
             np.int64,
             np.uint8,
+            np.uint32,
             np.complex64,
             np.complex128,
         ],
