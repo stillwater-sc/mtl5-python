@@ -87,6 +87,7 @@ try:
         DenseMatrix_takum32,
         DenseMatrix_td_cascade,
         DenseMatrix_u8,
+        DenseMatrix_u32,
         DenseVector_c64,
         DenseVector_c128,
         DenseVector_cfloat32,
@@ -111,6 +112,7 @@ try:
         DenseVector_takum32,
         DenseVector_td_cascade,
         DenseVector_u8,
+        DenseVector_u32,
         # QR / LQ factorization objects — complex only; the real ones are reached
         # through mtl5.qr()/mtl5.lq(), which dispatch on dtype.
         LQFactor_c64,
@@ -597,6 +599,7 @@ __all__ = [
     "DenseVector_i32",
     "DenseVector_i64",
     "DenseVector_u8",
+    "DenseVector_u32",
     # Typed vector classes — Universal cfloat
     "DenseVector_fp8",
     "DenseVector_fp16",
@@ -627,6 +630,7 @@ __all__ = [
     "DenseMatrix_i32",
     "DenseMatrix_i64",
     "DenseMatrix_u8",
+    "DenseMatrix_u32",
     # Typed matrix classes — Universal cfloat
     "DenseMatrix_fp8",
     "DenseMatrix_fp16",

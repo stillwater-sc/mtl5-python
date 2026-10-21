@@ -42,6 +42,10 @@
 // is already in CMakeLists.txt. The one field of it worth having -- Release vs
 // Debug -- is in compiler_info::build_type below.
 #include <mtl/util/system_info.hpp>
+// quad_dot_native_support / has_native_quad_dot_v, for build_info() (#96).
+// Defined whether or not Highway is on: without it every pairing reads as
+// emulated, which is the truth for that build.
+#include <mtl/simd/batch.hpp>
 
 #include <cstddef>
 #include <cstdlib>
@@ -1583,10 +1587,34 @@ NB_MODULE(_core, m) {
         // to see the gap: same flag, different answer, and only this one
         // explains the throughput.
         d["build_isa"]        = mtl::util::build_isa_list();
+        // The quad multiply-accumulate (VNNI / SDOT), which build_isa alone does
+        // not answer: AVXVNNI can be listed and still be unused (#96).
+        //
+        // THREE states, not a flag. "partial" is what every machine measured
+        // upstream reports, and the ISAs implement OPPOSITE pairings first --
+        // x86 has u8 x i8 at AVX3_DL and the symmetric ones only at AVX10.2,
+        // ARM has i8 x i8 / u8 x u8 with DotProd and u8 x i8 only with I8MM --
+        // so a single boolean mislabels at least one pairing on each of them.
+        // quad_dot_native says which, per pairing mixed.matmul_quad accepts.
+        // "Not native" means emulated: correct, just without the instruction.
+        switch (mtl::simd::quad_dot_native_support) {
+            case mtl::simd::quad_dot_support::all:     d["quad_dot"] = "all";     break;
+            case mtl::simd::quad_dot_support::partial: d["quad_dot"] = "partial"; break;
+            default:                                   d["quad_dot"] = "none";    break;
+        }
+        nb::dict per_pair;
+        per_pair["u8xi8"] = mtl::simd::has_native_quad_dot_v<std::uint8_t, std::int8_t>;
+        per_pair["i8xi8"] = mtl::simd::has_native_quad_dot_v<std::int8_t,  std::int8_t>;
+        per_pair["u8xu8"] = mtl::simd::has_native_quad_dot_v<std::uint8_t, std::uint8_t>;
+        d["quad_dot_native"]  = per_pair;
         return d;
     }, "Compile-time feature flags of this build, as a dict. 'build_isa' is the "
        "SIMD ISA the binary was compiled for; compare with "
-       "system_info()['cpu_simd'], which is what the machine supports.");
+       "system_info()['cpu_simd'], which is what the machine supports. "
+       "'quad_dot' is 'none', 'partial' or 'all': how many 8-bit pairings get "
+       "the native quad multiply-accumulate (VNNI / SDOT) rather than an "
+       "emulation, and 'quad_dot_native' says which, keyed 'u8xi8', 'i8xi8', "
+       "'u8xu8'.");
 
     m.def("system_info", []() {
         const mtl::util::system_info si = mtl::util::identify();
@@ -1700,11 +1728,14 @@ NB_MODULE(_core, m) {
     // of the converted temporary, so writes through the NumPy array were
     // invisible. An exact match now resolves in the FIRST pass, before
     // conversion is considered. Every dtype still unregistered (f16, uint16,
-    // uint32, uint64) keeps that behaviour -- see the note in mtl5_ndarray.cpp,
+    // uint64) keeps that behaviour -- see the note in mtl5_ndarray.cpp,
     // where .noconvert() was added for exactly this.
     register_native_storage<int8_t>(m);       // i8
     register_native_storage<int16_t>(m);      // i16
     register_native_storage<uint8_t>(m);      // u8
+    // u32 is storage for one result: mixed.matmul_quad on (u8, u8), which the
+    // hardware op accumulates in uint32 (#96). No arithmetic, like the others.
+    register_native_storage<uint32_t>(m);     // u32
 
     // ----- Sparse matrices (CSR via mtl::compressed2D) -----------------------
     register_sparse_matrix<float>(m);

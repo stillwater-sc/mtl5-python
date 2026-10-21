@@ -511,6 +511,154 @@ void register_mixed_narrow_int(nb::module_& mx) {
 }
 
 // ===========================================================================
+// Integer GEMM (#96): narrow operands, a 32-bit result
+//
+// The result-type rule: an integer matmul returns a matrix of its ACCUMULATOR's
+// type, not the element type. That is the one place mixed.matmul differs from
+// its float siblings, and it has to -- mult<Acc>(A, B, C) writes into C, and an
+// 8-bit C is exactly the wrap the accumulator exists to avoid. i8 @ i8 is
+// therefore a DenseMatrix_i32.
+//
+// Two entry points, and which kernel each runs is fixed by the NAME called, never
+// by the element types:
+//
+//     mixed.matmul(A, B, accumulator='i32')  ->  mtl::mult<int32_t>     (widen on load)
+//     mixed.matmul_quad(A, B)                ->  mtl::mult_quad<Acc>    (VNNI / SDOT)
+//
+// Both are correct for an (i8, i8) pair and agree bit for bit, so nothing in a
+// result can tell which ran. Upstream once inferred the kernel from the element
+// types and the reroute passed a fully green test suite; it was found only when
+// two benchmark arms reported the same number. Do not add that inference here:
+// matmul must not call mult_quad for "the pairs it can take", and matmul_quad
+// takes no accumulator= that could be read as a kernel choice.
+// ===========================================================================
+
+/// The widening GEMM. Every product is exact and the int32 sum wraps mod 2^32,
+/// which is associative, so the blocked nest equals the naive triple loop
+/// exactly -- the bit-identity a float GEMM cannot have.
+template <typename TA, typename TB>
+MatrixView<std::int32_t> int_matmul(const mtl::mat::dense2D<TA>& A,
+                                    const mtl::mat::dense2D<TB>& B) {
+    if (A.num_cols() != B.num_rows())
+        throw std::invalid_argument("matmul: A.num_cols must equal B.num_rows");
+    mtl::mat::dense2D<std::int32_t> C(A.num_rows(), B.num_cols());
+    {
+        nogil guard;
+        mtl::mult<std::int32_t>(A, B, C);
+    }
+    return MatrixView<std::int32_t>(std::move(C));
+}
+
+/// The quad multiply-accumulate GEMM. The accumulator is the one the hardware op
+/// produces for the pairing -- int32, or uint32 for u8 x u8 -- so it is implied,
+/// not chosen. C is row-major, so mult_quad keeps the (TA, TB) order and never
+/// takes the col-major fallback that swaps it.
+template <typename TA, typename TB>
+nb::object quad_matmul(const mtl::mat::dense2D<TA>& A, const mtl::mat::dense2D<TB>& B) {
+    using Acc = mtl::simd::quad_accumulator_t<TA, TB>;
+    if (A.num_cols() != B.num_rows())
+        throw std::invalid_argument("matmul_quad: A.num_cols must equal B.num_rows");
+    mtl::mat::dense2D<Acc> C(A.num_rows(), B.num_cols());
+    {
+        nogil guard;
+        mtl::mult_quad<Acc>(A, B, C);
+    }
+    return nb::cast(MatrixView<Acc>(std::move(C)));
+}
+
+/// (i8, u8) is not a pairing the quad op has. A dot can swap its operands onto
+/// (u8, i8); a GEMM cannot. A @ B is not B @ A, and transposing does not help:
+/// (A B)^T = B^T A^T puts the i8 operand first again. Refused here, with the
+/// kernel that does take it, rather than left to nanobind's "no overload" error.
+[[noreturn]] inline void refuse_quad_i8_u8() {
+    throw std::invalid_argument(
+        "matmul_quad does not take (i8, u8): the quad multiply-accumulate "
+        "(vpdpbusd / SDOT / USDOT) takes (u8, i8), (i8, i8) or (u8, u8), and "
+        "unlike a dot product a GEMM is not symmetric, so no reordering of the "
+        "operands turns (i8, u8) into (u8, i8) -- not even transposing, since "
+        "(A B)^T = B^T A^T leaves the i8 operand first. Use "
+        "mixed.matmul(A, B, accumulator='i32'), which takes every pairing.");
+}
+
+const char* const kIntMatmulDoc =
+    "Integer matrix product, accumulated in int32. Returns a DenseMatrix_i32.\n\n"
+    "accumulator='i32' is required, as for mixed.dot on these dtypes: the\n"
+    "default would be element precision, and an 8-bit result wraps almost at\n"
+    "once. The result type is the ACCUMULATOR's, which is the one way an\n"
+    "integer matmul differs from the float ones.\n\n"
+    "Every product is exact and the sum wraps mod 2^32 (two's complement), so\n"
+    "the result equals the naive triple loop bit for bit at any size, thread\n"
+    "count or blocking. Headroom is as for mixed.dot: about 131000 full-range\n"
+    "i8 x i8 terms per entry, but only one full-range i16 x i16 term.\n\n"
+    "This is the widen-on-load kernel (mtl::mult<int32_t>). The hardware quad\n"
+    "multiply-accumulate is mixed.matmul_quad, a separate function on purpose:\n"
+    "the two agree bit for bit, so which one ran cannot be read off a result.";
+
+const char* const kQuadMatmulDoc =
+    "Integer matrix product through the QUAD multiply-accumulate kernel --\n"
+    "VNNI vpdpbusd on x86, SDOT / UDOT / USDOT on ARM (mtl::mult_quad).\n\n"
+    "Pairings and results: (u8, i8) and (i8, i8) give a DenseMatrix_i32;\n"
+    "(u8, u8) gives a DenseMatrix_u32. (i8, u8) is refused: a GEMM is not\n"
+    "symmetric, so it cannot be swapped onto (u8, i8) the way a dot can.\n\n"
+    "Same result as mixed.matmul(A, B, accumulator='i32'), bit for bit; only\n"
+    "the speed differs. Whether the instruction is NATIVE in this build, or\n"
+    "emulated, is in mtl5.build_info()['quad_dot'] and ['quad_dot_native'].\n"
+    "A released wheel is built for the x86-64 baseline and emulates it.";
+
+/// Bind one (TA, TB) pairing of the widening matmul, for containers and arrays.
+template <typename TA, typename TB>
+void register_int_matmul(nb::module_& mx) {
+    auto require_i32 = [](const std::optional<std::string>& spec) {
+        if (!spec)
+            throw std::invalid_argument(
+                std::string("mixed.matmul on '") + type_suffix<TA>() + "' x '" +
+                type_suffix<TB>() + "' requires an explicit accumulator: pass "
+                "accumulator='i32'. The default is element precision, and an "
+                "8-bit result wraps almost immediately.");
+        parse_acc(spec, type_suffix<TA>(), /*quire_ok=*/false, /*i32_ok=*/true);
+    };
+    using NA = nb::ndarray<TA, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using NB = nb::ndarray<TB, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+
+    mx.def("matmul", [require_i32](const MatrixView<TA>& A, const MatrixView<TB>& B,
+                                   std::optional<std::string> accumulator) {
+        require_i32(accumulator);
+        return int_matmul<TA, TB>(A.mat, B.mat);
+    }, "A"_a, "B"_a, "accumulator"_a = nb::none(), kIntMatmulDoc);
+
+    mx.def("matmul", [require_i32](NA a, NB b, std::optional<std::string> accumulator) {
+        require_i32(accumulator);
+        const mtl::mat::dense2D<TA> A(a.shape(0), a.shape(1), const_cast<TA*>(a.data()));
+        const mtl::mat::dense2D<TB> B(b.shape(0), b.shape(1), const_cast<TB*>(b.data()));
+        return int_matmul<TA, TB>(A, B);
+    }, nb::arg("A").noconvert(), nb::arg("B").noconvert(),
+       "accumulator"_a = nb::none(), kIntMatmulDoc);
+}
+
+/// Bind one (TA, TB) pairing of matmul_quad; (i8, u8) binds to the refusal.
+template <typename TA, typename TB>
+void register_quad_matmul(nb::module_& mx) {
+    using NA = nb::ndarray<TA, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using NB = nb::ndarray<TB, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    constexpr bool ok = mtl::simd::QuadPair<TA, TB>;
+
+    mx.def("matmul_quad", [](const MatrixView<TA>& A, const MatrixView<TB>& B) -> nb::object {
+        if constexpr (ok) return quad_matmul<TA, TB>(A.mat, B.mat);
+        else              refuse_quad_i8_u8();
+    }, "A"_a, "B"_a, kQuadMatmulDoc);
+
+    mx.def("matmul_quad", [](NA a, NB b) -> nb::object {
+        if constexpr (ok) {
+            const mtl::mat::dense2D<TA> A(a.shape(0), a.shape(1), const_cast<TA*>(a.data()));
+            const mtl::mat::dense2D<TB> B(b.shape(0), b.shape(1), const_cast<TB*>(b.data()));
+            return quad_matmul<TA, TB>(A, B);
+        } else {
+            refuse_quad_i8_u8();
+        }
+    }, nb::arg("A").noconvert(), nb::arg("B").noconvert(), kQuadMatmulDoc);
+}
+
+// ===========================================================================
 // convert() — element-wise re-quantization into a target number system
 //
 // This is MTL5's NON-fused path: a separate pass over a stored tensor. The
@@ -695,6 +843,18 @@ void register_mixed_precision(nb::module_& m) {
     // implements natively on x86 and what quantized inference is written in.
     register_mixed_narrow_int_pair<std::uint8_t, std::int8_t>(mx);
     register_mixed_narrow_int_pair<std::int8_t, std::uint8_t>(mx);
+
+    // Integer GEMM (#96). The widening matmul takes the same pairings as dot,
+    // (i8, u8) included -- it is the quad kernel that cannot take that one.
+    register_int_matmul<std::int8_t,  std::int8_t>(mx);
+    register_int_matmul<std::int16_t, std::int16_t>(mx);
+    register_int_matmul<std::uint8_t, std::uint8_t>(mx);
+    register_int_matmul<std::uint8_t, std::int8_t>(mx);
+    register_int_matmul<std::int8_t,  std::uint8_t>(mx);
+    register_quad_matmul<std::int8_t,  std::int8_t>(mx);
+    register_quad_matmul<std::uint8_t, std::int8_t>(mx);
+    register_quad_matmul<std::uint8_t, std::uint8_t>(mx);
+    register_quad_matmul<std::int8_t,  std::uint8_t>(mx);   // the refusal
 
     register_mixed_universal<fp8>(mx);
     register_mixed_universal<fp16>(mx);

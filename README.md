@@ -150,10 +150,50 @@ precision, and an 8-bit accumulator overflows almost immediately. Build the
 arrays with NumPy: `convert()` does not target integers, because re-quantizing
 reals into 8 bits is a quantization scheme rather than a cast.
 
+**Matrix products** come in two kernels, chosen by name:
+
+```python
+A = np.random.randint(0, 256, (64, 512), dtype=np.uint8)  # activations
+W = np.random.randint(-128, 128, (512, 32), dtype=np.int8)  # weights
+mtl5.mixed.matmul(A, W, accumulator="i32")  # widen on load -> DenseMatrix_i32
+mtl5.mixed.matmul_quad(A, W)  # quad multiply-accumulate (VNNI / SDOT)
+```
+
+An integer `matmul` returns a matrix of the **accumulator's** type, not the
+element type: `i8 @ i8` is a `DenseMatrix_i32`. Both kernels give the same
+result bit for bit, equal to the naive triple loop at any size, because integer
+addition mod 2³² is associative. Only their speed differs. Upstream measures the
+quad kernel at 1.27×–3.64× over widen-on-load, against about 1.2× for the same
+instruction on a dot, because a GEMM is compute-bound.
+
+| pairing | `matmul(..., accumulator="i32")` | `matmul_quad` |
+|---|---|---|
+| `i8 × i8`, `u8 × i8` | `DenseMatrix_i32` | `DenseMatrix_i32` |
+| `u8 × u8` | `DenseMatrix_i32` | `DenseMatrix_u32` |
+| `i16 × i16` | `DenseMatrix_i32` | — |
+| `i8 × u8` | `DenseMatrix_i32` | **refused** |
+
+`matmul_quad` refuses `i8 × u8` rather than reordering it. The hardware op takes
+`u8 × i8`, and unlike a dot product a GEMM is not symmetric, so no swap of the
+operands fixes it for you. The quad kernel is never picked automatically, because
+nothing in a result shows which of the two kernels ran.
+
 A released wheel is built at the x86-64 baseline, so it gets int8's **bandwidth**
 win — one byte per element against float64's eight — but not the VNNI
-instruction. `mtl5.build_info()["build_isa"]` reports which you have; build with
-`-C cmake.define.MTL5_NATIVE_ARCH=ON` to reach it.
+instruction. `mtl5.build_info()` says which you have:
+
+```python
+info = mtl5.build_info()
+info["quad_dot"]  # 'none', 'partial' or 'all'
+info["quad_dot_native"]  # {'u8xi8': ..., 'i8xi8': ..., 'u8xu8': ...}
+```
+
+`"partial"` is the usual answer on hardware that has the instruction at all.
+x86 implements `u8 × i8` first (AVX3_DL) and the symmetric pairings only at
+AVX10.2. ARM is the other way round: `i8 × i8` and `u8 × u8` come with DotProd,
+and `u8 × i8` only with I8MM. Build with `-C cmake.define.MTL5_NATIVE_ARCH=ON` to
+reach the instruction, on CPUs Highway will target. Alder Lake has AVX-VNNI but
+no AVX-512, so it still reports `"none"`.
 
 ### Iterative refinement
 

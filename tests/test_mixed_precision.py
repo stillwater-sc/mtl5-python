@@ -652,3 +652,204 @@ class TestIntegerAccumulatorMixedSignedness:
         u, i, exact = self._operands()
         got = mtl5.mixed.dot(mtl5.vector(u), mtl5.vector(i), accumulator="i32")
         assert int(got) == _wrap32(exact)
+
+
+def _wrap(x: np.ndarray, dtype) -> np.ndarray:
+    """An exact int64 matrix reduced to what a 32-bit accumulator holds: two's
+    complement for int32, plain mod 2^32 for uint32."""
+    return (x.astype(np.int64) & 0xFFFFFFFF).astype(np.uint32).view(dtype)
+
+
+def _ref_matmul(a: np.ndarray, b: np.ndarray, dtype=np.int32) -> np.ndarray:
+    """The naive triple loop, exactly: int64 has room for every sum below."""
+    return _wrap(a.astype(np.int64) @ b.astype(np.int64), dtype)
+
+
+# Ragged in every dimension, including k not a multiple of the quad depth (4),
+# and large enough to cross the blocked nest's mc / kc / nc tiles.
+GEMM_SHAPES = [(1, 1, 1), (3, 5, 2), (37, 53, 29), (130, 67, 150), (260, 515, 140)]
+
+
+def _int_operands(dt_a, dt_b, m, k, n, seed=0):
+    rng = np.random.default_rng(seed)
+    ia, ib = np.iinfo(dt_a), np.iinfo(dt_b)
+    a = rng.integers(ia.min, ia.max + 1, size=(m, k), dtype=dt_a)
+    b = rng.integers(ib.min, ib.max + 1, size=(k, n), dtype=dt_b)
+    return a, b
+
+
+class TestIntegerMatmul:
+    """`mixed.matmul(A, B, accumulator='i32')` over 8- and 16-bit operands (#96).
+
+    The result-type rule: an integer matmul returns a matrix of the
+    ACCUMULATOR's type. i8 @ i8 is a DenseMatrix_i32.
+    """
+
+    PAIRS = [
+        (np.int8, np.int8),
+        (np.int16, np.int16),
+        (np.uint8, np.uint8),
+        (np.uint8, np.int8),
+        (np.int8, np.uint8),
+    ]
+    IDS = ["i8xi8", "i16xi16", "u8xu8", "u8xi8", "i8xu8"]
+
+    @pytest.mark.parametrize("dt_a,dt_b", PAIRS, ids=IDS)
+    @pytest.mark.parametrize("m,k,n", GEMM_SHAPES)
+    def test_bit_identical_to_the_naive_loop(self, dt_a, dt_b, m, k, n):
+        """Integer addition mod 2^32 is associative, so the blocked nest must
+        equal the naive triple loop EXACTLY -- the assertion a float GEMM cannot
+        make, and the one that pins every tile and tail of the nest."""
+        a, b = _int_operands(dt_a, dt_b, m, k, n)
+        got = mtl5.mixed.matmul(a, b, accumulator="i32")
+        assert isinstance(got, mtl5.DenseMatrix_i32)
+        np.testing.assert_array_equal(got.to_numpy(), _ref_matmul(a, b))
+
+    @pytest.mark.parametrize("dt_a,dt_b", PAIRS, ids=IDS)
+    def test_container_and_ndarray_forms_agree(self, dt_a, dt_b):
+        a, b = _int_operands(dt_a, dt_b, 17, 33, 9, seed=1)
+        via_np = mtl5.mixed.matmul(a, b, accumulator="i32").to_numpy()
+        via_mat = mtl5.mixed.matmul(mtl5.matrix(a), mtl5.matrix(b), accumulator="i32").to_numpy()
+        np.testing.assert_array_equal(via_np, via_mat)
+
+    def test_the_sum_wraps_as_twos_complement(self):
+        """Full-range i8: each -128 * -128 is 16384, so 131072 terms is the first
+        depth an int32 entry cannot hold. The wrap is the contract."""
+        for k in (131071, 131072, 131073):
+            a = np.full((2, k), -128, dtype=np.int8)
+            b = np.full((k, 3), -128, dtype=np.int8)
+            got = mtl5.mixed.matmul(a, b, accumulator="i32").to_numpy()
+            assert np.all(got == _wrap32(k * 16384))
+
+    @pytest.mark.parametrize("dt", [np.int8, np.int16, np.uint8])
+    def test_accumulator_is_required(self, dt):
+        a = np.full((2, 6), 100, dtype=dt)
+        with pytest.raises(ValueError, match="requires an explicit accumulator"):
+            mtl5.mixed.matmul(a, a.T.copy())
+
+    def test_only_i32_is_accepted(self):
+        a = np.ones((2, 2), dtype=np.int8)
+        with pytest.raises(ValueError, match="unknown accumulator"):
+            mtl5.mixed.matmul(a, a, accumulator="i64")
+
+    def test_shape_check(self):
+        with pytest.raises(ValueError, match="A.num_cols"):
+            mtl5.mixed.matmul(
+                np.ones((2, 3), dtype=np.int8), np.ones((2, 3), dtype=np.int8), accumulator="i32"
+            )
+
+    def test_non_integer_matmul_is_unchanged(self):
+        """The other overloads keep returning the element type."""
+        a = mtl5.convert(np.eye(3), "posit16")
+        got = mtl5.mixed.matmul(a, a, accumulator="f64")
+        assert isinstance(got, mtl5.DenseMatrix_posit16)
+
+
+class TestQuadMatmul:
+    """`mixed.matmul_quad` -- the VNNI / SDOT micro-kernel, by name only (#96)."""
+
+    QUAD = [
+        (np.int8, np.int8, np.int32, "DenseMatrix_i32"),
+        (np.uint8, np.int8, np.int32, "DenseMatrix_i32"),
+        (np.uint8, np.uint8, np.uint32, "DenseMatrix_u32"),
+    ]
+    IDS = ["i8xi8", "u8xi8", "u8xu8"]
+
+    @pytest.mark.parametrize("dt_a,dt_b,acc,cls", QUAD, ids=IDS)
+    @pytest.mark.parametrize("m,k,n", GEMM_SHAPES)
+    def test_bit_identical_to_the_naive_loop(self, dt_a, dt_b, acc, cls, m, k, n):
+        """Checked against an int64 reference computed here, outside any timing:
+        a kernel returning nonsense must fail, not produce a well-formed result."""
+        a, b = _int_operands(dt_a, dt_b, m, k, n, seed=2)
+        got = mtl5.mixed.matmul_quad(a, b)
+        assert isinstance(got, getattr(mtl5, cls))
+        np.testing.assert_array_equal(got.to_numpy(), _ref_matmul(a, b, acc))
+
+    @pytest.mark.parametrize("dt_a,dt_b,acc,cls", QUAD, ids=IDS)
+    def test_container_and_ndarray_forms_agree(self, dt_a, dt_b, acc, cls):
+        a, b = _int_operands(dt_a, dt_b, 19, 41, 7, seed=3)
+        via_np = mtl5.mixed.matmul_quad(a, b).to_numpy()
+        via_mat = mtl5.mixed.matmul_quad(mtl5.matrix(a), mtl5.matrix(b)).to_numpy()
+        np.testing.assert_array_equal(via_np, via_mat)
+
+    def test_u8xu8_uses_the_full_unsigned_range(self):
+        """255 * 255 * 33027 > 2^31: an int32 result would read negative here."""
+        k = 33027
+        a = np.full((1, k), 255, dtype=np.uint8)
+        got = mtl5.mixed.matmul_quad(a, a.T.copy()).to_numpy()
+        assert got.dtype == np.uint32
+        assert int(got[0, 0]) == 255 * 255 * k
+
+    @pytest.mark.parametrize("form", ["ndarray", "container"])
+    def test_i8xu8_is_refused_not_reordered(self, form):
+        """A GEMM is not symmetric, so (i8, u8) cannot be swapped onto (u8, i8)."""
+        a, b = _int_operands(np.int8, np.uint8, 4, 8, 4)
+        if form == "container":
+            a, b = mtl5.matrix(a), mtl5.matrix(b)
+        with pytest.raises(ValueError, match=r"does not take \(i8, u8\)"):
+            mtl5.mixed.matmul_quad(a, b)
+
+    def test_i16_is_not_a_quad_operand(self):
+        a = np.ones((2, 2), dtype=np.int16)
+        with pytest.raises(TypeError):
+            mtl5.mixed.matmul_quad(a, a)
+
+    def test_shape_check(self):
+        with pytest.raises(ValueError, match="A.num_cols"):
+            mtl5.mixed.matmul_quad(np.ones((2, 3), dtype=np.int8), np.ones((2, 3), dtype=np.int8))
+
+
+class TestTheKernelIsChosenByName:
+    """The two GEMM kernels agree bit for bit, so no result can show which one
+    ran -- upstream's inference bug passed a fully green suite for exactly that
+    reason. These tests use what DOES differ: the pairings and the signature.
+    """
+
+    def test_matmul_takes_the_pairing_matmul_quad_cannot(self):
+        """If matmul were routed through the quad kernel for 'the pairs it can
+        take', this pairing would be the one place the routing shows."""
+        a, b = _int_operands(np.int8, np.uint8, 5, 12, 6)
+        got = mtl5.mixed.matmul(a, b, accumulator="i32").to_numpy()
+        np.testing.assert_array_equal(got, _ref_matmul(a, b))
+        with pytest.raises(ValueError):
+            mtl5.mixed.matmul_quad(a, b)
+
+    def test_matmul_quad_has_no_accumulator_to_read_as_a_kernel_choice(self):
+        a = np.ones((2, 2), dtype=np.int8)
+        with pytest.raises(TypeError):
+            mtl5.mixed.matmul_quad(a, a, accumulator="i32")
+
+    def test_each_entry_point_names_its_kernel(self):
+        assert "mtl::mult<int32_t>" in mtl5.mixed.matmul.__doc__
+        assert "mtl::mult_quad" in mtl5.mixed.matmul_quad.__doc__
+
+
+class TestQuadCapability:
+    """`build_info()['quad_dot']` / `['quad_dot_native']` (#96 phase 4)."""
+
+    PAIRINGS = ("u8xi8", "i8xi8", "u8xu8")
+
+    def test_three_states(self):
+        assert mtl5.build_info()["quad_dot"] in ("none", "partial", "all")
+
+    def test_per_pairing_answers_cover_matmul_quad(self):
+        native = mtl5.build_info()["quad_dot_native"]
+        assert set(native) == set(self.PAIRINGS)
+        assert all(isinstance(v, bool) for v in native.values())
+
+    def test_summary_agrees_with_the_pairings(self):
+        info = mtl5.build_info()
+        n = sum(info["quad_dot_native"].values())
+        want = "none" if n == 0 else "all" if n == len(self.PAIRINGS) else "partial"
+        assert info["quad_dot"] == want
+
+    def test_no_quad_isa_means_none(self):
+        """The ISAs that carry a native quad op upstream: AVX3_DL / AVX10.2 on
+        x86, DOTPROD / I8MM on ARM. Without any of them, and without Highway,
+        every pairing is emulated."""
+        info = mtl5.build_info()
+        isa = info["build_isa"]
+        isa = " ".join(isa) if isinstance(isa, (list, tuple)) else str(isa)
+        quad_isa = any(t in isa for t in ("AVX3_DL", "AVX10", "DOTPROD", "I8MM"))
+        if not info["highway_simd"] or not quad_isa:
+            assert info["quad_dot"] == "none"
