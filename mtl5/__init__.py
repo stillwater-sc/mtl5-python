@@ -570,6 +570,17 @@ logspace = _range_fn(_logspace, "logspace")
 geomspace = _range_fn(_geomspace, "geomspace")
 
 
+# universal_dtypes arrays in and out, bit for bit (#14): mtl5.vector() and
+# mtl5.matrix() (and their _copy forms) take an ndarray[posit16] and friends,
+# and the containers of those types gain .to_universal().
+from mtl5 import _universal_interop  # noqa: E402
+
+vector = _universal_interop.wrap_factory(vector, "vector")
+vector_copy = _universal_interop.wrap_factory(vector_copy, "vector")
+matrix = _universal_interop.wrap_factory(matrix, "matrix")
+matrix_copy = _universal_interop.wrap_factory(matrix_copy, "matrix")
+_universal_interop.install()
+
 # `io` is a Python module wrapping _core.io — it adds NumPy coercion and
 # documents the two behaviours that differ from scipy.io. Importing it here
 # binds mtl5.io to the wrapper rather than the bare extension submodule.

@@ -47,7 +47,10 @@
 // emulated, which is the truth for that build.
 #include <mtl/simd/batch.hpp>
 
+#include <bit>
 #include <cstddef>
+#include <cstring>
+#include <type_traits>
 #include <cstdlib>
 #include <thread>
 #include <vector>
@@ -787,6 +790,59 @@ void register_native_dense_ops(nb::module_& m) {
 }
 
 // ===========================================================================
+// Bit-level transport for universal_dtypes interop (#14)
+//
+// universal_dtypes registers these number systems as real NumPy dtypes, but
+// nanobind cannot take a custom dtype, so an ndarray[posit16] crosses as its
+// raw bits: Python views it as uint16, and this side copies those bits into a
+// dense_vector<posit16>. The way back is the same copy in reverse.
+//
+// WHY A COPY OF THE BITS, and not a reinterpreting view of NumPy's buffer.
+// universal_dtypes 2.5.0 is built on Universal 4.7.9 and this module on 5.10.0.
+// What two Universal versions agree on is the ENCODING -- the posit standard,
+// the lns and takum formats -- not the C++ object layout, and the encoding is
+// what crosses here. The copy is one pass over the data, which is nothing next
+// to emulated arithmetic.
+//
+// The bits go in by memcpy into the object representation, which is only the
+// encoding if the type is trivially copyable, exactly as wide as its word(s),
+// and stored low limb first on a little-endian host. The first two are checked
+// at compile time; the test suite checks the rest exhaustively, every 8- and
+// 16-bit pattern decoded by universal_dtypes against the same pattern here.
+//
+// The cascades are not bit formats: dd/td/qd are 2/3/4 doubles, and their word
+// is double. universal_dtypes stores them the same way.
+// ===========================================================================
+template <typename T> struct bits_word {
+    using type = std::conditional_t<sizeof(T) == 1, std::uint8_t,
+                 std::conditional_t<sizeof(T) == 2, std::uint16_t,
+                 std::conditional_t<sizeof(T) == 4, std::uint32_t,
+                 std::conditional_t<sizeof(T) == 8, std::uint64_t, void>>>>;
+};
+template <> struct bits_word<dd_cascade> { using type = double; };
+template <> struct bits_word<td_cascade> { using type = double; };
+template <> struct bits_word<qd_cascade> { using type = double; };
+template <typename T> using bits_word_t = typename bits_word<T>::type;
+
+/// Words per element: 1 for a bit format, 2/3/4 doubles for a cascade.
+template <typename T>
+inline constexpr std::size_t bits_words_v = sizeof(T) / sizeof(bits_word_t<T>);
+
+template <typename T>
+void check_bit_transport() {
+    using W = bits_word_t<T>;
+    static_assert(!std::is_void_v<W>, "no storage word for this element width");
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "bit transport copies the object representation; the type must "
+                  "be trivially copyable for that to be its value");
+    static_assert(sizeof(T) == bits_words_v<T> * sizeof(W),
+                  "padding in the element would be copied as if it were bits");
+    if constexpr (std::endian::native != std::endian::little)
+        throw std::runtime_error(
+            "universal_dtypes bit transport assumes a little-endian host");
+}
+
+// ===========================================================================
 // Registration for Universal types (fp8, fp16, posit, etc.)
 // These always copy (no NumPy dtype), but get device stubs
 // ===========================================================================
@@ -821,6 +877,17 @@ void register_universal_vector(nb::module_& m) {
                 result[i] = static_cast<double>(v[i]);
             return result;
         }, "Return values as a Python list of floats")
+        .def("_to_bits", [](const Vec& v) {
+            // Raw encodings, for to_universal(): see "Bit-level transport".
+            using W = bits_word_t<T>;
+            check_bit_transport<T>();
+            std::size_t shape[1] = { v.size() * bits_words_v<T> };
+            W* buf = new W[shape[0]];
+            if (shape[0]) std::memcpy(buf, v.data(), shape[0] * sizeof(W));
+            nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<W*>(p); });
+            return nb::ndarray<nb::numpy, W, nb::ndim<1>>(buf, 1, shape, owner);
+        }, "The raw encodings as an unsigned-integer array (float64 limbs for a "
+           "cascade). Internal: use to_universal().")
         .def("__repr__", [](const Vec& v) {
             std::ostringstream os;
             os << "mtl5.DenseVector_" << type_suffix<T>() << "([";
@@ -871,6 +938,19 @@ void register_universal_matrix(nb::module_& m) {
             nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<double*>(p); });
             return nb::ndarray<nb::numpy, double, nb::ndim<2>>(buf, 2, shape, owner);
         }, "Return a NumPy float64 array (values converted from native precision)")
+        .def("_to_bits", [](const Mat& M) {
+            // Row-major storage, so the bits of row r are contiguous and the
+            // array is (rows, cols * words) -- a cascade's limbs sit side by side.
+            using W = bits_word_t<T>;
+            check_bit_transport<T>();
+            std::size_t shape[2] = { M.num_rows(), M.num_cols() * bits_words_v<T> };
+            const std::size_t nw = shape[0] * shape[1];
+            W* buf = new W[nw];
+            if (nw) std::memcpy(buf, M.data(), nw * sizeof(W));
+            nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<W*>(p); });
+            return nb::ndarray<nb::numpy, W, nb::ndim<2>>(buf, 2, shape, owner);
+        }, "The raw encodings as an unsigned-integer array (float64 limbs for a "
+           "cascade). Internal: use to_universal().")
         .def("__repr__", [](const Mat& M) {
             std::ostringstream os;
             os << "mtl5.DenseMatrix_" << type_suffix<T>()
@@ -908,6 +988,39 @@ void register_universal_matrix_factory(nb::module_& m, const char* func_name) {
         }
         return M;
     }, "a"_a);
+}
+
+/// `_vector_from_bits_<dtype>` / `_matrix_from_bits_<dtype>`: the way in for a
+/// universal_dtypes array, called from mtl5.vector() / mtl5.matrix() with the
+/// array viewed as its storage word. Named per dtype rather than overloaded,
+/// because posit16, fixpnt16, lns16 and fp16 all arrive as uint16.
+template <typename T>
+void register_universal_from_bits(nb::module_& m) {
+    using W = bits_word_t<T>;
+    constexpr std::size_t K = bits_words_v<T>;
+    const std::string sfx = type_suffix<T>();
+
+    m.def(("_vector_from_bits_" + sfx).c_str(),
+          [](nb::ndarray<W, nb::ndim<1>, nb::c_contig, nb::device::cpu> bits) {
+        check_bit_transport<T>();
+        const std::size_t nw = bits.shape(0);
+        if (nw % K != 0)
+            throw std::invalid_argument("bit array length is not a whole number of elements");
+        mtl::vec::dense_vector<T> v(nw / K);
+        if (nw) std::memcpy(v.data(), bits.data(), nw * sizeof(W));
+        return v;
+    }, nb::arg("bits").noconvert());
+
+    m.def(("_matrix_from_bits_" + sfx).c_str(),
+          [](nb::ndarray<W, nb::ndim<2>, nb::c_contig, nb::device::cpu> bits) {
+        check_bit_transport<T>();
+        const std::size_t rows = bits.shape(0), wcols = bits.shape(1);
+        if (wcols % K != 0)
+            throw std::invalid_argument("bit array width is not a whole number of elements");
+        mtl::mat::dense2D<T> M(rows, wcols / K);
+        if (rows * wcols) std::memcpy(M.data(), bits.data(), rows * wcols * sizeof(W));
+        return M;
+    }, nb::arg("bits").noconvert());
 }
 
 template <typename T>
@@ -1088,6 +1201,7 @@ void register_universal(nb::module_& m, const char* vec_factory, const char* mat
     register_universal_matrix<T>(m);
     register_universal_vector_factory<T>(m, vec_factory);
     register_universal_matrix_factory<T>(m, mat_factory);
+    register_universal_from_bits<T>(m);
     register_universal_norm<T>(m);
     register_universal_dot<T>(m);
     register_universal_matvec<T>(m);
