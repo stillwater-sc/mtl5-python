@@ -454,11 +454,11 @@ def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
     (
         """BiCG, for non-symmetric systems.
 
-    Needs a **symmetric** preconditioner. BiCG and QMR are the only solvers
-    here that apply M^T, and MTL5 implements a preconditioner's adjoint as its
-    forward solve — exact when M is symmetric, wrong otherwise. A non-symmetric
-    ILU(0) or SSOR is refused rather than allowed to break down; `identity`,
-    `diagonal`, `ic0` and `ildl` are always safe.
+    Needs a preconditioner with an **exact adjoint** (`M.has_exact_adjoint`).
+    BiCG and QMR are the only solvers here that apply M^-H. Every
+    preconditioner has an exact adjoint except `ssor` of a non-symmetric A,
+    whose adjoint is its forward solve; that pairing is refused rather than
+    allowed to break down.
     """
         + _SOLVER_DOC
     )
@@ -467,8 +467,8 @@ def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
 
 def qmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
     (
-        """QMR, for non-symmetric systems. Needs a symmetric preconditioner — see
-    `bicg` for why.
+        """QMR, for non-symmetric systems. Needs a preconditioner with an exact
+    adjoint — see `bicg` for why.
     """
         + _SOLVER_DOC
     )

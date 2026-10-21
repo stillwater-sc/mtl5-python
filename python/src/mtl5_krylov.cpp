@@ -17,15 +17,19 @@
 // templated on the *matrix* type while `ilu_0`, `ic_0`, `ilut` and `ildl` are
 // templated on the *value* type.
 //
-// **bicg and qmr need a symmetric preconditioner.** They are the only two that
-// call `M.adjoint_solve`, and every MTL5 preconditioner implements it as
-// `solve` -- commented "same as solve (approximate)". That is exact when the
-// preconditioner is symmetric and wrong when it is not, so with a non-symmetric
-// ILU(0) or SSOR they break down rather than converge. Measured on a
-// non-symmetric 144x144 system: bicg + ilu_0 reaches rel_err 2.9e+00, and on a
-// symmetric one the same pair converges in 20 iterations to 1.7e-12. So each
-// preconditioner records whether it is symmetric, and bicg/qmr refuse the ones
-// that are not rather than returning a plausible wrong answer.
+// **bicg and qmr need a preconditioner whose adjoint is exact.** They are the
+// only two that call `M.adjoint_solve`. Every kind bound here applies a real
+// M^-H -- ilu_0 and block_diagonal since MTL5 5.9.0 (mtl5#397, #399), ilut since
+// 5.19.0 (mtl5#599) -- except ssor, whose adjoint_solve delegates to solve. That
+// is exact when A is symmetric and wrong when it is not, and bicg/qmr then break
+// down rather than converge. So each preconditioner records whether its adjoint
+// is exact, and bicg/qmr refuse a non-symmetric SSOR rather than return a
+// plausible wrong answer.
+//
+// Before 5.19.0 the same held for every A-dependent kind, and the guard refused
+// all of them on a non-symmetric A. Measured then on a non-symmetric 144x144
+// system: bicg + ilu_0 reached rel_err 2.9e+00. The MTL5 floor in CMakeLists.txt
+// is 5.19.0, which is what lets ilut be trusted here.
 //
 // (Two separate upstream bugs in this area were found and fixed while building
 // this: stillwater-sc/mtl5#392 -- bicg computed rho from the wrong vectors and
@@ -86,9 +90,11 @@ struct PCBase {
     virtual ~PCBase() = default;
     virtual void apply(Vec<T>& x, const Vec<T>& b) const = 0;
     virtual void apply_adjoint(Vec<T>& x, const Vec<T>& b) const = 0;
-    /// Whether M == M^T. bicg and qmr are only correct when this holds, because
-    /// MTL5's adjoint_solve is an alias for solve.
+    /// Whether M == M^T. Informational: what bicg and qmr need is
+    /// has_exact_adjoint().
     virtual bool is_symmetric() const = 0;
+    /// Whether apply_adjoint applies M^-H. bicg and qmr require it.
+    virtual bool has_exact_adjoint() const = 0;
     virtual std::size_t size() const = 0;
     virtual const char* kind() const = 0;
 };
@@ -105,6 +111,12 @@ struct PCRef {
         p->apply_adjoint(x, b);
     }
 };
+
+/// Kinds whose adjoint_solve is their forward solve, and so is M^-H only when M
+/// is symmetric. Every other kind bound here applies a real M^-H.
+template <typename PCType> inline constexpr bool adjoint_is_solve = false;
+template <typename M, typename Acc>
+inline constexpr bool adjoint_is_solve<pc::ssor<M, Acc>> = true;
 
 template <typename PCType, typename T>
 struct PCImpl : PCBase<T> {
@@ -129,6 +141,9 @@ struct PCImpl : PCBase<T> {
         pc_.adjoint_solve(x, b);
     }
     bool is_symmetric() const override { return sym_; }
+    bool has_exact_adjoint() const override {
+        return !adjoint_is_solve<PCType> || sym_;
+    }
     std::size_t size() const override { return n; }
     const char* kind() const override { return kind_; }
 
@@ -161,23 +176,23 @@ Solver parse_solver(const std::string& s) {
 }
 
 /// bicg and qmr are the only solvers that use the adjoint of the
-/// preconditioner, and MTL5 supplies an approximation rather than the real
-/// thing. Refuse rather than return the plausible-looking wrong answer that
+/// preconditioner. Refuse one whose adjoint is not exact -- today only SSOR of a
+/// non-symmetric A -- rather than return the plausible-looking wrong answer that
 /// combination produces.
-void require_symmetric_pc(Solver s, const PCBase<double>* pcd,
-                          const PCBase<float>* pcf, const std::string& name) {
-    const bool sym = pcd ? pcd->is_symmetric() : pcf->is_symmetric();
+void require_exact_adjoint(Solver s, const PCBase<double>* pcd,
+                           const PCBase<float>* pcf, const std::string& name) {
+    const bool exact = pcd ? pcd->has_exact_adjoint() : pcf->has_exact_adjoint();
     const char* kind = pcd ? pcd->kind() : pcf->kind();
-    if (sym) return;
+    if (exact) return;
     if (s != Solver::bicg && s != Solver::qmr) return;
     throw std::invalid_argument(
-        name + " needs a symmetric preconditioner, and '" + kind + "' is not "
-        "symmetric for this matrix. It is the only kind of solver here that "
-        "applies M^T, and MTL5's preconditioners implement adjoint_solve as "
-        "solve -- exact when M is symmetric, wrong otherwise, and it breaks "
-        "down rather than converging. Use bicgstab, gmres, cgs, idr_s, "
-        "bicgstab_ell or tfqmr with this preconditioner, or pair bicg/qmr with "
-        "identity, diagonal, ic0 or ildl.");
+        name + " needs a preconditioner with an exact adjoint, and '" + kind +
+        "' does not have one for this matrix. bicg and qmr are the only solvers "
+        "here that apply M^-H. MTL5's SSOR implements adjoint_solve as solve, "
+        "which is exact only when A is symmetric; on a non-symmetric A the "
+        "solver breaks down rather than converging. Use bicgstab, gmres, cgs, "
+        "idr_s, bicgstab_ell or tfqmr with SSOR, or pair bicg/qmr with ilu0, "
+        "ilut, block_diagonal, diagonal or identity.");
 }
 
 template <typename T>
@@ -221,8 +236,12 @@ void register_preconditioners(nb::module_& m) {
         .def_prop_ro("n", [](const PCBase<T>& p) { return p.size(); })
         .def_prop_ro("kind", [](const PCBase<T>& p) { return p.kind(); })
         .def_prop_ro("is_symmetric", [](const PCBase<T>& p) { return p.is_symmetric(); },
-                     "Whether M == M^T. bicg and qmr require it, because MTL5 "
-                     "implements adjoint_solve as solve.")
+                     "Whether M == M^T.")
+        .def_prop_ro("has_exact_adjoint",
+                     [](const PCBase<T>& p) { return p.has_exact_adjoint(); },
+                     "Whether adjoint_solve applies M^-H exactly. bicg and qmr "
+                     "require it. True for every kind except SSOR of a "
+                     "non-symmetric matrix, whose adjoint is its forward solve.")
         .def("solve", [](const PCBase<T>& p, const VectorView<T>& b) {
             if (b.vec.size() != p.size())
                 throw std::invalid_argument("solve: dimension mismatch");
@@ -246,6 +265,19 @@ void register_preconditioners(nb::module_& m) {
             }
             return VectorView<T>(std::move(x));
         }, "b"_a)
+        .def("adjoint_solve", [](const PCBase<T>& p,
+                                 nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) {
+            if (b.shape(0) != p.size())
+                throw std::invalid_argument("adjoint_solve: dimension mismatch");
+            Vec<T> x(p.size()), bb(p.size());
+            for (std::size_t i = 0; i < p.size(); ++i) bb[i] = b.data()[i];
+            {
+                nogil guard;
+                p.apply_adjoint(x, bb);
+            }
+            return VectorView<T>(std::move(x));
+        }, "b"_a, "Apply the adjoint: solve M^H x = b. Exact only when "
+                  "has_exact_adjoint is true.")
         // Report the concrete class (ILU0_f64, SSOR_f64, ...) rather than the
         // erased base, which is what a caller sees and constructs.
         .def("__repr__", [](nb::handle self) {
@@ -305,9 +337,9 @@ void register_solvers(nb::module_& m) {
                 solver + ": preconditioner size " + std::to_string(M.size()) +
                 " does not match A (" + std::to_string(A.num_rows()) + ")");
         if constexpr (std::is_same_v<T, double>)
-            require_symmetric_pc(which, &M, nullptr, solver);
+            require_exact_adjoint(which, &M, nullptr, solver);
         else
-            require_symmetric_pc(which, nullptr, &M, solver);
+            require_exact_adjoint(which, nullptr, &M, solver);
 
         Vec<T> bb(b.vec.size());
         for (std::size_t i = 0; i < b.vec.size(); ++i) bb[i] = b.vec[i];

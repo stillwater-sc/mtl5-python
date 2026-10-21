@@ -10,9 +10,10 @@ Two classes here carry most of the weight:
   * `TestEveryPairingConverges` walks the grid against a known solution. A
     solver that returns `info = 0` and the wrong vector is the failure this
     whole file exists to catch, so every case checks the answer, not the status.
-  * `TestBicgQmrNeedSymmetricPreconditioners` pins the one guard. Those two are
-    the only solvers that apply Mᵀ, and MTL5 implements a preconditioner's
-    adjoint as its forward solve — exact when M is symmetric, wrong otherwise.
+  * `TestBicgQmrNeedAnExactAdjoint` pins the one guard. Those two are the only
+    solvers that apply M⁻ᴴ. Every preconditioner computes a real adjoint except
+    SSOR, whose adjoint is its forward solve — exact when A is symmetric, wrong
+    otherwise. `TestAdjointIdentity` checks the adjoints themselves.
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ GENERAL_SOLVERS = ["bicgstab", "bicgstab_ell", "cgs", "gmres", "idr_s", "tfqmr"]
 ADJOINT_SOLVERS = ["bicg", "qmr"]  # apply M^T
 ALWAYS_SYMMETRIC_PC = ["identity", "diagonal", "ic0", "ildl"]
 A_DEPENDENT_PC = ["ilu0", "ssor", "ilut"]
+# Non-symmetric for a non-symmetric A, but with a real M^-H (#107).
+EXACT_ADJOINT_PC = ["ilu0", "ilut", "block_diagonal"]
 
 
 def laplacian(k=10, nonsym=False):
@@ -139,10 +142,10 @@ class TestTfqmrStagnatesUnpreconditioned:
         np.testing.assert_allclose(x, x_true, rtol=1e-6, atol=1e-8)
 
 
-class TestBicgQmrNeedSymmetricPreconditioners:
-    """bicg and qmr apply M^T, and MTL5's adjoint_solve is an alias for solve.
-    That is exact for a symmetric M and wrong otherwise, so the non-symmetric
-    pairings are refused rather than allowed to break down."""
+class TestBicgQmrNeedAnExactAdjoint:
+    """bicg and qmr apply M^-H. Every preconditioner here has an exact adjoint
+    except SSOR of a non-symmetric A, whose adjoint_solve is its forward solve,
+    so that one pairing is refused rather than allowed to break down (#107)."""
 
     @pytest.mark.parametrize("solver", ADJOINT_SOLVERS)
     @pytest.mark.parametrize("pc", ALWAYS_SYMMETRIC_PC[:2])
@@ -153,20 +156,31 @@ class TestBicgQmrNeedSymmetricPreconditioners:
         np.testing.assert_allclose(x, x_true, rtol=1e-6, atol=1e-8)
 
     @pytest.mark.parametrize("solver", ADJOINT_SOLVERS)
-    @pytest.mark.parametrize("pc", A_DEPENDENT_PC)
-    def test_non_symmetric_preconditioners_are_refused(self, solver, pc):
-        A, _, b = system(nonsym=True)
-        with pytest.raises(ValueError, match="symmetric preconditioner"):
-            getattr(ms, solver)(A, b, M=make_pc(pc, A))
+    @pytest.mark.parametrize("pc", EXACT_ADJOINT_PC)
+    def test_non_symmetric_preconditioners_with_a_real_adjoint_converge(self, solver, pc):
+        """Refused before #107, although MTL5 computes their adjoints exactly."""
+        A, x_true, b = system(nonsym=True)
+        M = make_pc(pc, A)
+        assert not M.is_symmetric
+        assert M.has_exact_adjoint
+        x, info = getattr(ms, solver)(A, b, M=M, rtol=1e-12, maxiter=5000)
+        assert info == 0, f"{solver}+{pc} did not converge"
+        np.testing.assert_allclose(x, x_true, rtol=1e-6, atol=1e-8)
 
     @pytest.mark.parametrize("solver", ADJOINT_SOLVERS)
-    @pytest.mark.parametrize("pc", A_DEPENDENT_PC)
-    def test_the_same_pairing_is_allowed_when_a_is_symmetric(self, solver, pc):
-        """The guard is on the preconditioner's symmetry, not on its kind —
-        ILU(0) of a symmetric matrix is symmetric, and works."""
+    def test_ssor_is_refused_on_a_non_symmetric_matrix(self, solver):
+        A, _, b = system(nonsym=True)
+        with pytest.raises(ValueError, match="exact adjoint"):
+            getattr(ms, solver)(A, b, M=ms.ssor(A))
+
+    @pytest.mark.parametrize("solver", ADJOINT_SOLVERS)
+    @pytest.mark.parametrize("pc", A_DEPENDENT_PC + ["block_diagonal"])
+    def test_every_kind_is_allowed_when_a_is_symmetric(self, solver, pc):
+        """The guard is on the preconditioner built from this A, not on its
+        kind: SSOR of a symmetric matrix is symmetric, and works."""
         A, x_true, b = system(nonsym=False)
         M = make_pc(pc, A)
-        assert M.is_symmetric
+        assert M.has_exact_adjoint
         x, info = getattr(ms, solver)(A, b, M=M, rtol=1e-12, maxiter=5000)
         assert info == 0
         np.testing.assert_allclose(x, x_true, rtol=1e-6, atol=1e-8)
@@ -174,7 +188,46 @@ class TestBicgQmrNeedSymmetricPreconditioners:
     def test_the_message_names_a_way_forward(self):
         A, _, b = system(nonsym=True)
         with pytest.raises(ValueError, match="bicgstab"):
-            ms.bicg(A, b, M=ms.ilu0(A))
+            ms.bicg(A, b, M=ms.ssor(A))
+
+
+class TestAdjointIdentity:
+    """<M^-1 b, c> == <b, M^-H c>, through the bindings. A preconditioner whose
+    adjoint_solve were its forward solve fails this on a non-symmetric A — which
+    is what SSOR does, and what the others did before MTL5 fixed them."""
+
+    @staticmethod
+    def _gap(M, n, seed=1):
+        rng = np.random.default_rng(seed)
+        b, c = rng.standard_normal(n), rng.standard_normal(n)
+        lhs = np.dot(M.solve(b).to_numpy(), c)
+        rhs = np.dot(b, M.adjoint_solve(c).to_numpy())
+        return abs(lhs - rhs) / max(abs(lhs), abs(rhs))
+
+    @pytest.mark.parametrize("pc", ALWAYS_SYMMETRIC_PC + EXACT_ADJOINT_PC)
+    def test_exact_adjoints_satisfy_it_on_a_non_symmetric_matrix(self, pc):
+        A = laplacian(nonsym=True)
+        M = make_pc(pc, A)
+        assert M.has_exact_adjoint
+        assert self._gap(M, A.shape[0]) < 1e-12
+
+    def test_ssor_fails_it_on_a_non_symmetric_matrix(self):
+        """What has_exact_adjoint = False means, measured."""
+        A = laplacian(nonsym=True)
+        M = ms.ssor(A)
+        assert not M.has_exact_adjoint
+        assert self._gap(M, A.shape[0]) > 1e-3
+
+    def test_ssor_satisfies_it_on_a_symmetric_matrix(self):
+        A = laplacian(nonsym=False)
+        M = ms.ssor(A)
+        assert M.has_exact_adjoint
+        assert self._gap(M, A.shape[0]) < 1e-12
+
+    def test_adjoint_solve_checks_the_dimension(self):
+        M = ms.ilu0(laplacian(4))
+        with pytest.raises(ValueError, match="dimension"):
+            M.adjoint_solve(np.ones(3))
 
 
 class TestSymmetryDetection:
@@ -188,6 +241,14 @@ class TestSymmetryDetection:
     def test_a_dependent_kinds_follow_the_matrix(self, pc):
         assert make_pc(pc, laplacian(6, nonsym=False)).is_symmetric
         assert not make_pc(pc, laplacian(6, nonsym=True)).is_symmetric
+
+    @pytest.mark.parametrize("pc", ALWAYS_SYMMETRIC_PC + EXACT_ADJOINT_PC)
+    def test_exact_adjoint_whatever_the_matrix(self, pc):
+        assert make_pc(pc, laplacian(6, nonsym=True)).has_exact_adjoint
+
+    def test_ssor_adjoint_follows_the_matrix(self):
+        assert ms.ssor(laplacian(6, nonsym=False)).has_exact_adjoint
+        assert not ms.ssor(laplacian(6, nonsym=True)).has_exact_adjoint
 
     def test_kind_and_n_are_reported(self):
         A = laplacian(6)

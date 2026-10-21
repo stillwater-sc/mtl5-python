@@ -126,17 +126,21 @@ endif()
 #              now that python/include/mtl/math/quire_accumulator.hpp is gone.
 #              Against 5.17.0, mtl5_mixed_precision.cpp's accumulator='quire'
 #              paths fail to compile.
+#   v5.19.0 -- pc::ilut::adjoint_solve applies the real M^-H (MTL5 #599). Before
+#              it, ilut's adjoint was M^-1, and mtl5_krylov.cpp lets bicg/qmr use
+#              ilut on a non-symmetric A (#107). Against 5.18.x that compiles and
+#              returns a wrong answer, so only the floor stops it.
 #
 # The version argument to find_package is what applies that floor to the OTHER
 # build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
 # MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
 # installed would silently build against it and get ~140 template errors deep
 # inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
-# with COMPATIBILITY SameMajorVersion, under which 5.18.0 rejects an installed
-# 5.17.x or older and accepts 5.18.0 or any later 5.x -- exactly the floor we want. (It also
+# with COMPATIBILITY SameMajorVersion, under which 5.19.0 rejects an installed
+# 5.18.x or older and accepts 5.19.0 or any later 5.x -- exactly the floor we want. (It also
 # rejects a 6.x install, which is correct: an MTL5 major bump is the manual
 # intervention case in the version policy, not something to absorb silently.)
-find_package(MTL5 5.18.0 QUIET)
+find_package(MTL5 5.19.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
