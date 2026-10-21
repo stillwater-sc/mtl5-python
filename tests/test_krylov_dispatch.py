@@ -224,10 +224,33 @@ class TestAdjointIdentity:
         assert M.has_exact_adjoint
         assert self._gap(M, A.shape[0]) < 1e-12
 
+    def test_adjoint_solve_takes_a_vector_view(self):
+        """solve returns a VectorView, so its result must feed adjoint_solve."""
+        A = laplacian(nonsym=True)
+        M = ms.ilu0(A)
+        b = np.random.default_rng(2).standard_normal(A.shape[0])
+        y = M.solve(b)
+        np.testing.assert_array_equal(
+            M.adjoint_solve(y).to_numpy(), M.adjoint_solve(y.to_numpy()).to_numpy()
+        )
+
     def test_adjoint_solve_checks_the_dimension(self):
         M = ms.ilu0(laplacian(4))
         with pytest.raises(ValueError, match="dimension"):
             M.adjoint_solve(np.ones(3))
+
+
+class TestSolverDocstrings:
+    @pytest.mark.parametrize("solver", SYMMETRIC_SOLVERS + GENERAL_SOLVERS + ADJOINT_SOLVERS)
+    def test_help_shows_the_docstring(self, solver):
+        """Each solver's own text and the shared Parameters section reach
+        __doc__, which help() and inspect read."""
+        doc = getattr(ms, solver).__doc__
+        assert doc and "Parameters" in doc
+
+    @pytest.mark.parametrize("solver", ADJOINT_SOLVERS)
+    def test_adjoint_solvers_document_the_requirement(self, solver):
+        assert "exact adjoint" in " ".join(getattr(ms, solver).__doc__.split())
 
 
 class TestSymmetryDetection:

@@ -21,7 +21,7 @@ against, and semantic-release manages only the **patch** component.
   These three now apply a real M⁻ᴴ: `ilu0` and `block_diagonal` since MTL5 5.9.0,
   `ilut` since 5.19.0. The guard now checks the new `has_exact_adjoint` property,
   and only `ssor` on a non-symmetric A is still refused. Calls that raised
-  `ValueError` now converge; no call that worked before changes result.
+  `ValueError` are now accepted; no call that worked before changes result.
   - New on every preconditioner: `has_exact_adjoint`, and `adjoint_solve(b)`,
     which applies M⁻ᴴ.
   - The MTL5 floor rises from 5.18.0 to 5.19.0. An installed 5.18.x would

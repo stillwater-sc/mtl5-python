@@ -754,7 +754,8 @@ intermediate, which is exactly what you cannot afford in a hierarchy.
 
 ## Krylov solvers and preconditioners
 
-Ten solvers and eight preconditioners, in any combination:
+Ten solvers and eight preconditioners, in any combination except one, which is
+refused (see below):
 
 ```python
 import mtl5.sparse as ms

@@ -265,6 +265,18 @@ void register_preconditioners(nb::module_& m) {
             }
             return VectorView<T>(std::move(x));
         }, "b"_a)
+        .def("adjoint_solve", [](const PCBase<T>& p, const VectorView<T>& b) {
+            if (b.vec.size() != p.size())
+                throw std::invalid_argument("adjoint_solve: dimension mismatch");
+            Vec<T> x(p.size()), bb(p.size());
+            for (std::size_t i = 0; i < p.size(); ++i) bb[i] = b.vec[i];
+            {
+                nogil guard;
+                p.apply_adjoint(x, bb);
+            }
+            return VectorView<T>(std::move(x));
+        }, "b"_a, "Apply the adjoint: solve M^H x = b. Exact only when "
+                  "has_exact_adjoint is true.")
         .def("adjoint_solve", [](const PCBase<T>& p,
                                  nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) {
             if (b.shape(0) != p.size())
@@ -276,8 +288,7 @@ void register_preconditioners(nb::module_& m) {
                 p.apply_adjoint(x, bb);
             }
             return VectorView<T>(std::move(x));
-        }, "b"_a, "Apply the adjoint: solve M^H x = b. Exact only when "
-                  "has_exact_adjoint is true.")
+        }, "b"_a)
         // Report the concrete class (ILU0_f64, SSOR_f64, ...) rather than the
         // erased base, which is what a caller sees and constructs.
         .def("__repr__", [](nb::handle self) {
