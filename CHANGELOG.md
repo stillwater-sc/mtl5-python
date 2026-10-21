@@ -829,6 +829,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.19.2 (2026-10-21)
+
+### Features
+
+- **mixed**: Integer GEMM, the quad kernel by name, and quad capability
+  ([#109](https://github.com/stillwater-sc/mtl5-python/pull/109),
+  [`8c3a7d0`](https://github.com/stillwater-sc/mtl5-python/commit/8c3a7d0361ff3692f494255f6a27e07e59cf86e4))
+
+
 ## v5.19.1 (2026-10-21)
 
 ### Bug Fixes
