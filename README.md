@@ -754,7 +754,8 @@ intermediate, which is exactly what you cannot afford in a hierarchy.
 
 ## Krylov solvers and preconditioners
 
-Ten solvers and eight preconditioners, in any combination:
+Ten solvers and eight preconditioners, in any combination except one, which is
+refused (see below):
 
 ```python
 import mtl5.sparse as ms
@@ -780,17 +781,16 @@ solver, so the pairing is chosen at runtime. Binding the cross product directly
 would have meant 10 × 8 × 2 dtypes = **160** instantiations of a full iterative
 solver; this is 20.
 
-**`bicg` and `qmr` require a symmetric preconditioner.** They are the only two
-that apply Mᵀ, and MTL5 implements a preconditioner's adjoint as its forward
-solve — exact when M is symmetric, wrong otherwise. `identity`, `diagonal`,
-`ic0` and `ildl` are always symmetric; `ilu0`, `ssor`, `ilut` and
-`block_diagonal` are symmetric only when A is, which each one determines at
-construction and reports as `.is_symmetric`. A pairing that would break down is
-refused rather than run:
+**`bicg` and `qmr` require a preconditioner with an exact adjoint.** They are
+the only two that apply M⁻ᴴ. Every preconditioner here computes a real adjoint,
+except `ssor`: MTL5 implements its adjoint as its forward solve, which is exact
+only when A is symmetric. Each preconditioner reports this as
+`.has_exact_adjoint`, and `.adjoint_solve(b)` applies the adjoint directly. A
+pairing that would break down is refused rather than run:
 
 ```python
-ms.bicg(nonsymmetric_A, b, M=ms.ilu0(nonsymmetric_A))  # ValueError, by design
-ms.bicg(nonsymmetric_A, b, M=ms.diagonal(nonsymmetric_A))  # fine
+ms.bicg(nonsymmetric_A, b, M=ms.ssor(nonsymmetric_A))  # ValueError, by design
+ms.bicg(nonsymmetric_A, b, M=ms.ilu0(nonsymmetric_A))  # fine
 ```
 
 One behaviour worth knowing: **TFQMR can stagnate** unpreconditioned — it

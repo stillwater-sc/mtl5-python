@@ -13,6 +13,20 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Changed
+
+- **`bicg` and `qmr` accept `ilu0`, `ilut` and `block_diagonal` on a
+  non-symmetric matrix** (#107). The guard refused every preconditioner that was
+  not symmetric, because MTL5's `adjoint_solve` used to be the forward solve.
+  These three now apply a real M⁻ᴴ: `ilu0` and `block_diagonal` since MTL5 5.9.0,
+  `ilut` since 5.19.0. The guard now checks the new `has_exact_adjoint` property,
+  and only `ssor` on a non-symmetric A is still refused. Calls that raised
+  `ValueError` are now accepted; no call that worked before changes result.
+  - New on every preconditioner: `has_exact_adjoint`, and `adjoint_solve(b)`,
+    which applies M⁻ᴴ.
+  - The MTL5 floor rises from 5.18.0 to 5.19.0. An installed 5.18.x would
+    compile and give a wrong `bicg` + `ilut` result.
+
 ### Added
 
 - **`accumulator="quire"` on float32 and float64.** `mtl5.mixed.dot`, `norm`

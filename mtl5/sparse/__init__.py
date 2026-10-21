@@ -373,105 +373,92 @@ def iterative_solve(
     return _run(solver, A, b, rtol, maxiter, M, callback, device, restart, ell, s)
 
 
-def cg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """Conjugate Gradient, for symmetric positive definite systems.
+def _solver_doc(f):
+    """Append the shared Parameters/Returns section to a solver's docstring.
+
+    A string built with `+` in the docstring position is an expression, not a
+    docstring, so `help()` would show nothing; this sets `__doc__` instead.
     """
-        + _SOLVER_DOC
-    )
+    f.__doc__ = (f.__doc__ or "") + _SOLVER_DOC
+    return f
+
+
+@_solver_doc
+def cg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+    """Conjugate Gradient, for symmetric positive definite systems."""
     return _run("cg", A, b, rtol, maxiter, M, callback, device)
 
 
+@_solver_doc
 def minres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """MINRES, for symmetric systems that may be indefinite — where CG does not
+    """MINRES, for symmetric systems that may be indefinite — where CG does not
     apply.
     """
-        + _SOLVER_DOC
-    )
     return _run("minres", A, b, rtol, maxiter, M, callback, device)
 
 
+@_solver_doc
 def bicgstab(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """BiCGSTAB, for general non-symmetric systems. A good default.
-    """
-        + _SOLVER_DOC
-    )
+    """BiCGSTAB, for general non-symmetric systems. A good default."""
     return _run("bicgstab", A, b, rtol, maxiter, M, callback, device)
 
 
+@_solver_doc
 def bicgstab_ell(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, ell=2):
-    (
-        """BiCGSTAB(ell), which smooths BiCGSTAB's irregular convergence by taking
+    """BiCGSTAB(ell), which smooths BiCGSTAB's irregular convergence by taking
     `ell` minimal-residual steps at a time.
     """
-        + _SOLVER_DOC
-    )
     return _run("bicgstab_ell", A, b, rtol, maxiter, M, callback, device, ell=ell)
 
 
+@_solver_doc
 def cgs(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """Conjugate Gradient Squared, for non-symmetric systems. Avoids A^T but
+    """Conjugate Gradient Squared, for non-symmetric systems. Avoids A^T but
     converges more erratically than BiCGSTAB.
     """
-        + _SOLVER_DOC
-    )
     return _run("cgs", A, b, rtol, maxiter, M, callback, device)
 
 
+@_solver_doc
 def gmres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, restart=30):
-    (
-        """GMRES with restarts, for general non-symmetric systems. `restart` bounds
+    """GMRES with restarts, for general non-symmetric systems. `restart` bounds
     the Krylov subspace, trading memory against convergence.
     """
-        + _SOLVER_DOC
-    )
     return _run("gmres", A, b, rtol, maxiter, M, callback, device, restart=restart)
 
 
+@_solver_doc
 def idr_s(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, s=4):
-    (
-        """IDR(s), for non-symmetric systems. Larger `s` usually means fewer
+    """IDR(s), for non-symmetric systems. Larger `s` usually means fewer
     iterations and more memory.
     """
-        + _SOLVER_DOC
-    )
     return _run("idr_s", A, b, rtol, maxiter, M, callback, device, s=s)
 
 
+@_solver_doc
 def tfqmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """Transpose-free QMR, for non-symmetric systems.
-    """
-        + _SOLVER_DOC
-    )
+    """Transpose-free QMR, for non-symmetric systems."""
     return _run("tfqmr", A, b, rtol, maxiter, M, callback, device)
 
 
+@_solver_doc
 def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """BiCG, for non-symmetric systems.
+    """BiCG, for non-symmetric systems.
 
-    Needs a **symmetric** preconditioner. BiCG and QMR are the only solvers
-    here that apply M^T, and MTL5 implements a preconditioner's adjoint as its
-    forward solve — exact when M is symmetric, wrong otherwise. A non-symmetric
-    ILU(0) or SSOR is refused rather than allowed to break down; `identity`,
-    `diagonal`, `ic0` and `ildl` are always safe.
+    Needs a preconditioner with an **exact adjoint** (`M.has_exact_adjoint`).
+    BiCG and QMR are the only solvers here that apply M^-H. Every
+    preconditioner has an exact adjoint except `ssor` of a non-symmetric A,
+    whose adjoint is its forward solve; that pairing is refused rather than
+    allowed to break down.
     """
-        + _SOLVER_DOC
-    )
     return _run("bicg", A, b, rtol, maxiter, M, callback, device)
 
 
+@_solver_doc
 def qmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    (
-        """QMR, for non-symmetric systems. Needs a symmetric preconditioner — see
-    `bicg` for why.
+    """QMR, for non-symmetric systems. Needs a preconditioner with an exact
+    adjoint — see `bicg` for why.
     """
-        + _SOLVER_DOC
-    )
     return _run("qmr", A, b, rtol, maxiter, M, callback, device)
 
 
