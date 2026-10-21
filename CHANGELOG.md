@@ -803,6 +803,27 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.19.1 (2026-10-21)
+
+### Bug Fixes
+
+- **sparse**: Give the Krylov solvers real docstrings; adjoint_solve takes a VectorView
+  ([#108](https://github.com/stillwater-sc/mtl5-python/pull/108),
+  [`77ce6b7`](https://github.com/stillwater-sc/mtl5-python/commit/77ce6b7a41aa755feae7df683dd7bbe85573470c))
+
+### Code Style
+
+- **sparse**: Ruff format the solver docstrings
+  ([#108](https://github.com/stillwater-sc/mtl5-python/pull/108),
+  [`77ce6b7`](https://github.com/stillwater-sc/mtl5-python/commit/77ce6b7a41aa755feae7df683dd7bbe85573470c))
+
+### Features
+
+- **sparse**: Bicg/qmr accept preconditioners with an exact adjoint
+  ([#108](https://github.com/stillwater-sc/mtl5-python/pull/108),
+  [`77ce6b7`](https://github.com/stillwater-sc/mtl5-python/commit/77ce6b7a41aa755feae7df683dd7bbe85573470c))
+
+
 ## v5.18.1 (2026-10-17)
 
 ### Chores
