@@ -385,8 +385,7 @@ def _solver_doc(f):
 
 @_solver_doc
 def cg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    """Conjugate Gradient, for symmetric positive definite systems.
-    """
+    """Conjugate Gradient, for symmetric positive definite systems."""
     return _run("cg", A, b, rtol, maxiter, M, callback, device)
 
 
@@ -400,8 +399,7 @@ def minres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None
 
 @_solver_doc
 def bicgstab(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    """BiCGSTAB, for general non-symmetric systems. A good default.
-    """
+    """BiCGSTAB, for general non-symmetric systems. A good default."""
     return _run("bicgstab", A, b, rtol, maxiter, M, callback, device)
 
 
@@ -439,8 +437,7 @@ def idr_s(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None,
 
 @_solver_doc
 def tfqmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
-    """Transpose-free QMR, for non-symmetric systems.
-    """
+    """Transpose-free QMR, for non-symmetric systems."""
     return _run("tfqmr", A, b, rtol, maxiter, M, callback, device)
 
 
