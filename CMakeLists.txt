@@ -150,7 +150,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        v5.19.0
+        GIT_TAG        v5.20.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
