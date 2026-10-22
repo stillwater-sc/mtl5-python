@@ -15,6 +15,17 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **Universal pinned to v5.11.0** (was v5.10.0). The `find_package` floor stays
+  at 5.8.0. Every header that changes between the two tags is efloat or lindex,
+  neither of which this package binds, so nothing reaches the bindings: 750
+  results (conversion, `norm`, `dot`, `matmul` and `solve` across all 15
+  Universal dtypes) are bit-identical to a v5.10.0 build with gcc and clang. The
+  point of the bump is that `universal_dtypes` moved to the same release
+  (universal_dtypes#72), so a build that fetches Universal, as the wheels do,
+  puts the two packages exchanging bits in #14 on one Universal. A build that
+  finds an installed Universal (any 5.8.0 or newer) uses that one instead. That
+  is safe for the interop, which relies on the formats' encodings, not on
+  matching versions, and its tests check that the two sides decode alike.
 - **`bicg` and `qmr` accept `ilu0`, `ilut` and `block_diagonal` on a
   non-symmetric matrix** (#107). The guard refused every preconditioner that was
   not symmetric, because MTL5's `adjoint_solve` used to be the forward solve.
