@@ -2,7 +2,13 @@
 
 ## Status
 
-Analysis document. Phase 1 (named factories + pandas ExtensionDtype) implemented in resolution of issue #5. Phase 2 (NumPy dtype) and Phase 3 (PyTorch tensor wrappers) deferred.
+Analysis document, written 2026-04 and partly superseded. Where things stand on 2026-10-21:
+
+- **Phase 1** (named factories, pandas ExtensionDtype) shipped in #5.
+- **Phase 2** (NumPy dtype registration) shipped, but upstream rather than here. [`universal_dtypes`](https://github.com/stillwater-sc/universal_dtypes) registers about 30 dtypes on NumPy. What is left for this repo is the seam: moving those arrays into and out of MTL5 bit-exactly (#14).
+- **Phase 3** (PyTorch) is rescoped. The original plan was to run posit arithmetic per operation inside a wrapper with no autograd. It is replaced by posit as a weight *storage* format that dequantizes on use (#15). See [Phase 3](#phase-3--pytorch-posit-as-a-storage-format-rescoped).
+
+The framework analysis below is kept as written, except where a later note corrects it.
 
 ## The problem
 
@@ -74,6 +80,24 @@ There is no public API to register a new dtype. PyTorch's autograd, dispatcher, 
 
 **Pragmatic conclusion**: True PyTorch dtype integration is **not currently possible** without forking PyTorch. The best we can offer is a tensor wrapper (Phase 3, future) that converts at boundaries. Autograd through posit arithmetic is out of reach unless PyTorch upstream adds extension dtype support.
 
+> **Correction (2026-10).** Workaround 3 no longer needs waiting for. A
+> `__torch_dispatch__` *wrapper subclass* (`torch.Tensor._make_wrapper_subclass`)
+> is now how PyTorch's own ecosystem ships number formats that `torch.dtype`
+> does not have: torchao's NF4 and int4 / affine-quantized weight tensors, and
+> its MX formats. These tensors work with autograd and largely with
+> `torch.compile`.
+>
+> They manage that because the subclass is a **storage format**, not a new
+> arithmetic. It holds packed bits plus metadata and dequantizes to a native
+> float dtype when an op needs a value, so the arithmetic is IEEE and runs
+> wherever PyTorch runs.
+>
+> The first half of the conclusion stands: there is still no public way to
+> register a `torch.dtype`, so `torch.tensor(..., dtype=posit16)` is still
+> impossible. The second half needs qualifying. Autograd *through posit
+> arithmetic* remains out of reach, but autograd *through posit-stored weights*
+> does not. Phase 3 is rescoped around that distinction.
+
 ### pandas ExtensionDtype
 
 pandas provides a clean Python API for custom dtypes via `pandas.api.extensions.ExtensionDtype` and `pandas.api.extensions.ExtensionArray`. This is the **most feasible** integration of the three.
@@ -135,6 +159,12 @@ s.sum()
 
 ### Phase 2 — NumPy DType registration (future epic)
 
+> **Delivered upstream (2026-08).** `universal_dtypes` did this. It covers posit
+> 8/16/32/64, fixpnt, lns, bfloat16, takum, cfloat and the cascades, with casts,
+> ufuncs, reductions, sort and pickling. The plan below is historical. The one
+> item still owned here is the last bullet, `mtl5.vector(posit_array)`, which
+> is #14.
+
 **Scope**:
 - Implement the ml_dtypes pattern for posit16 first (proof of concept)
 - ~5000 lines of C++ per dtype
@@ -146,17 +176,21 @@ s.sum()
 
 **Should be its own epic** with sub-issues for each dtype family.
 
-### Phase 3 — PyTorch tensor wrappers (future, low priority)
+### Phase 3 — PyTorch: posit as a storage format (rescoped)
 
-**Scope**:
-- Tensor wrapper class storing posit bytes as `torch.uint16` / `torch.uint8`
-- Conversion methods at boundaries (numpy ↔ wrapper ↔ MTL5)
-- No autograd, no JIT, no distributed support
-- Document that this is a workaround, not a true integration
+**The original scope, superseded.** A wrapper storing posit bytes as `torch.uint16` / `torch.uint8` that unwrapped to MTL5 on every operation, with no autograd, JIT or distributed support. Nobody training or serving in PyTorch would use this. Every op would be software-emulated posit arithmetic on the CPU, and it would not work with anything else in their stack.
 
-**Estimated effort**: 1-2 weeks for the wrapper, ongoing maintenance burden because PyTorch internals shift across versions.
+**The rescoped design** follows the torchao NF4 pattern (see the correction above):
 
-**Recommended priority**: low, until PyTorch's `__torch_dispatch__` matures or upstream adds extension dtype support.
+1. **Storage.** A `__torch_dispatch__` wrapper subclass holds the posit bit patterns in an integer tensor of the same width. It reports a float `dtype` and `shape` to the rest of PyTorch.
+2. **Dequantize on use.** Ops that need values decode posit to float32 or bfloat16 and run natively. Decoding is a fixed function of the bit pattern, so it can be a lookup table for posit8 and posit16 (256 or 65 536 entries), and it runs on GPU. Autograd and `torch.compile` see ordinary float ops.
+3. **Opt-in posit arithmetic, in one place.** `F.linear` / `matmul` can be routed to `mtl5.mixed.matmul` with a quire accumulator, for the people studying the accuracy of posit arithmetic itself. It runs on the CPU, is forward-only and is labelled as such.
+
+What this buys: posit16 weights at half the memory of float32, in a model that otherwise runs unchanged, plus a measured comparison of posit and IEEE accuracy on real layers. What it does not buy: training *in* posit arithmetic.
+
+**Prerequisite: #14.** Both halves need posit bits to cross into and out of MTL5 exactly. Today the bindings move posits only by rounding through float64. `universal_dtypes` arrays are the natural carrier: `torch.from_numpy` on their raw `uint16` view gives the storage tensor with no copy.
+
+**Recommended priority**: after #14. The trigger the original text waited for, `__torch_dispatch__` maturing, has happened. The remaining trigger is demand, which the KPU section below speaks to.
 
 ## Key insight: KPU changes the calculus
 
