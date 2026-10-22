@@ -98,6 +98,20 @@ against, and semantic-release manages only the **patch** component.
   - The sparse factorizations still refuse `accumulator="quire"`, now with the
     actual reason: their workspace holds one accumulator per row.
 
+### Documentation
+
+- **The planned PyTorch phase is rescoped to posit as a weight storage format**
+  (#15). Nothing here implements it yet; this is a design-doc change.
+  `docs/designs/custom-dtype-feasibility.md` said to wait for PyTorch's
+  `__torch_dispatch__` to mature. In PyTorch it has, as a way to store weights
+  in a custom format and decode them to float32/bfloat16 when a layer uses them
+  (torchao's NF4, int4 and MX formats). PyTorch still has no way to register a
+  new dtype, so posit *arithmetic* in training remains out of reach. Phase 2 of
+  the doc, real NumPy dtypes, is marked as delivered by `universal_dtypes`.
+  Phase 3 is rewritten to match the rescoped #15, which was blocked on #14 and
+  is now unblocked, since #14 is done. The original analysis is kept, with the
+  corrections next to it.
+
 ### Changed
 
 - **MTL5 pinned to v5.19.0** and **Universal to v5.10.0**, and the package
