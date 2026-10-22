@@ -847,6 +847,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.19.3 (2026-10-22)
+
+### Documentation
+
+- Torch_dispatch has matured; rescope PyTorch phase to a storage format
+  ([#110](https://github.com/stillwater-sc/mtl5-python/pull/110),
+  [`f0d917c`](https://github.com/stillwater-sc/mtl5-python/commit/f0d917cf24308a0df4215aba6aeca23b1ac363f7))
+
+### Features
+
+- Universal_dtypes arrays in and out of MTL5, bit for bit
+  ([#111](https://github.com/stillwater-sc/mtl5-python/pull/111),
+  [`d6fcfc5`](https://github.com/stillwater-sc/mtl5-python/commit/d6fcfc517bafb3034cab4523b8ef02c30eedb27a))
+
+
 ## v5.19.2 (2026-10-21)
 
 ### Features
