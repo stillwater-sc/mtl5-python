@@ -15,6 +15,22 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.20.0** (was v5.19.0), and the package version set to
+  5.20.0, since its minor tracks MTL5's. The `find_package` floor stays at
+  5.19.0, since no binding needs anything new from 5.20.0. No binding source
+  changes, and nothing in the results changes. The suite gives 1608 passed and
+  3 skipped.
+  - **Threaded `matmul` is bit-identical.** MTL5 5.20.0's one change that
+    reaches these bindings is how the threaded GEMM sizes its row blocks
+    (MTL5 #458). That changes which thread computes which rows of C, but not
+    the order of any sum. Measured with the build these wheels use (native
+    GEMM, Highway): float and double, 32 shapes at 1, 2, 4, 6, 8 and 12
+    threads. The plan changed in 70 of those 192 runs, and every output bit
+    matched v5.19.0.
+  - **The rest of MTL5 5.20.0 is new C++ API that isn't bound yet:**
+    `block_matrix_view` over block-quantized storage, with the OCP MXINT8 and
+    MXFP4 schemes (MTL5 #629), and `simd::reduce_dot_block_scaled`
+    (MTL5 #628).
 - **Universal pinned to v5.11.0** (was v5.10.0). The `find_package` floor stays
   at 5.8.0. Every header that changes between the two tags is efloat or lindex,
   neither of which this package binds, so nothing reaches the bindings: 750
