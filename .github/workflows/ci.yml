@@ -112,7 +112,7 @@ jobs:
       - name: Install with all optional dependencies
         run: |
           pip install ".[dev,notebooks]" -v
-          pip install pandas scikit-learn
+          pip install pandas scikit-learn universal_dtypes
           # torch and jax are large; install CPU-only variants
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install "jax[cpu]"

@@ -29,6 +29,24 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **`universal_dtypes` arrays in and out of MTL5, bit for bit** (#14).
+  `mtl5.vector()`, `mtl5.matrix()` and their `_copy` forms accept an
+  `ndarray[posit16]` (and the other supported dtypes) and copy its encodings
+  into the MTL5 container of the same number system. The new `.to_universal()`
+  turns a container back into a `universal_dtypes` array. Neither direction
+  rounds through float64, which could not carry `posit64` or a cascade's low
+  limbs. `to_numpy()` still returns float64.
+  - Supported: posit8/16/32/64, fixpnt8/16, lns16/32, takum32, fp16 and the
+    dd/td/qd cascades. The suite checks that every 8- and 16-bit pattern, and a
+    sample of the wider ones, survives the round trip and decodes the same on
+    both sides. Both packages are built on Universal, but on different releases
+    (4.7.9 and 5.10.0), so the name-to-format mapping is tested, not assumed.
+  - Refused with `TypeError`: `fp8e5m2` (MTL5's `fp8` is a different format,
+    e2m5) and the dtypes MTL5 doesn't bind (`posit12`, `q15`, `bfloat16`, …).
+  - The data is copied. A view would rely on the two releases sharing a C++
+    object layout, and MTL5's Universal containers have no way to keep the
+    NumPy array alive.
+  - `universal_dtypes` stays optional: `pip install mtl5[universal]`.
 - **Integer GEMM** (#96, #88 phase 3). Two kernels, chosen by name:
   - `mtl5.mixed.matmul(A, B, accumulator="i32")` on `i8`, `i16` and `u8`
     operands, and on the mixed-signedness `u8 × i8` / `i8 × u8` pairs. It runs

@@ -222,6 +222,35 @@ degrades the answer.
 through any factorization exposing `solve()` — the sparse direct factorizations
 below, or the ILU(0)/IC(0) preconditioners.
 
+### Arrays from `universal_dtypes`
+
+[`universal_dtypes`](https://github.com/stillwater-sc/universal_dtypes) makes the
+same number systems real NumPy dtypes. Its arrays go into MTL5 and come back
+out **bit for bit**, without passing through float64:
+
+```python
+import numpy as np, universal_dtypes as ud, mtl5  # pip install mtl5[universal]
+
+a = np.array([1.0, 2.0, 3.0], dtype=ud.posit16)
+v = mtl5.vector(a)  # DenseVector_posit16, the same 16-bit encodings
+mtl5.norm(v)
+v.to_universal()  # ndarray[posit16] again; to_numpy() still gives float64
+```
+
+`mtl5.matrix()` and the `_copy` forms work the same way. Supported: `posit8`,
+`posit16`, `posit32`, `posit64`, `fixpnt8`, `fixpnt16`, `lns16`, `lns32`, `takum32`,
+`fp16` and the `dd`/`td`/`qd` cascades. These are the formats whose encoding
+matches this build. The test suite checks that every 8- and 16-bit pattern
+decodes the same in both libraries. Two dtypes are refused with a `TypeError`
+rather than misread:
+- `fp8e5m2`, because MTL5's `fp8` is e2m5;
+- the formats MTL5 doesn't bind.
+
+The data is **copied**, not viewed. The two packages are built on different
+Universal releases, and those releases share the encoding but not necessarily
+the C++ object layout. The named factories (`mtl5.vector_posit16(x)`) are
+unchanged: they *round* float64 values into a format, which is a different job.
+
 ## Matrix Market I/O and sparsity pictures
 
 ```python
