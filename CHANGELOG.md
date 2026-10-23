@@ -947,6 +947,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.20.2 (2026-10-23)
+
+### Bug Fixes
+
+- **bindings**: Accept read-only NumPy arrays wherever the input is only read or copied
+  ([#117](https://github.com/stillwater-sc/mtl5-python/pull/117),
+  [`750e2b5`](https://github.com/stillwater-sc/mtl5-python/commit/750e2b5dad7a112438fe11fa3e8a061d5cc8785a))
+
+### Code Style
+
+- **tests**: Format test_read_only.py with CI's pinned ruff 0.16.1
+  ([#117](https://github.com/stillwater-sc/mtl5-python/pull/117),
+  [`750e2b5`](https://github.com/stillwater-sc/mtl5-python/commit/750e2b5dad7a112438fe11fa3e8a061d5cc8785a))
+
+
 ## v5.20.1 (2026-10-23)
 
 ### Features
