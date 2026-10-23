@@ -23,7 +23,7 @@
 template <typename Wrap>
 std::pair<nb::ndarray<nb::numpy, double, nb::ndim<1>>, nb::dict>
 sparse_refine_through(const mtl::mat::compressed2D<double>& A, const Wrap& M,
-                      nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np,
+                      nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np,
                       int max_iter, double rel_tol, bool scaled, int patience) {
     const std::size_t n = A.num_rows();
     if (A.num_cols() != n)

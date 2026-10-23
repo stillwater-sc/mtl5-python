@@ -82,9 +82,9 @@ void register_coo(nb::module_& m) {
 
     nb::class_<COO>(m, name.c_str())
         .def("__init__", [](COO* self, std::size_t nrows, std::size_t ncols,
-                            nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> row,
-                            nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> col,
-                            nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> data) {
+                            nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> row,
+                            nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> col,
+                            nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> data) {
             const std::size_t nnz = data.shape(0);
             if (row.shape(0) != nnz || col.shape(0) != nnz)
                 throw std::invalid_argument(
@@ -171,7 +171,7 @@ void register_coo(nb::module_& m) {
             return VV(std::move(y));
         }, "x"_a, "Sparse matrix-vector product: y = A @ x")
         .def("matvec", [](const COO& A,
-                          nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
+                          nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
             if (A.num_cols() != x_np.shape(0))
                 throw std::invalid_argument("matvec: A.num_cols must equal len(x)");
             const std::size_t n = x_np.shape(0);
@@ -285,7 +285,7 @@ void register_ell(nb::module_& m) {
             return VV(std::move(y));
         }, "x"_a, "Sparse matrix-vector product: y = A @ x")
         .def("matvec", [](const ELL& A,
-                          nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
+                          nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
             if (A.num_cols() != x_np.shape(0))
                 throw std::invalid_argument("matvec: A.num_cols must equal len(x)");
             const std::size_t n = x_np.shape(0);

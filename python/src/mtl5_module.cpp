@@ -241,8 +241,12 @@ void register_native_vector_factory(nb::module_& m) {
        "come back as a float32 vector reporting is_view=True. Pass\n"
        "np.ascontiguousarray(a), or a.astype(...), to say so deliberately.");
 
+    m.def("vector", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu>) -> VectorView<T> {
+        refuse_read_only("vector", "vector_copy");
+    }, nb::arg("a").noconvert());
+
     // Explicit copy variant
-    m.def("vector_copy", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
+    m.def("vector_copy", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t n = a.shape(0);
         const T* src = a.data();
         auto v = mtl::vec::dense_vector<T>(n);
@@ -323,8 +327,12 @@ void register_native_matrix_factory(nb::module_& m) {
        "come back as a float32 matrix reporting is_view=True. Pass\n"
        "np.ascontiguousarray(a), or a.astype(...), to say so deliberately.");
 
+    m.def("matrix", [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu>) -> MatrixView<T> {
+        refuse_read_only("matrix", "matrix_copy");
+    }, nb::arg("a").noconvert());
+
     // Explicit copy variant
-    m.def("matrix_copy", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
+    m.def("matrix_copy", [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t rows = a.shape(0), cols = a.shape(1);
         const T* src = a.data();
         auto M = mtl::mat::dense2D<T>(rows, cols);
@@ -349,7 +357,7 @@ template <typename T>
     requires std::is_arithmetic_v<T>
 void register_native_norm_overload(nb::module_& m) {
     // Overload on ndarray (direct NumPy pass-through)
-    m.def("norm", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+    m.def("norm", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
                      int ord) -> double {
         if (ord != 1 && ord != 2 && ord != -1)
             throw std::invalid_argument("ord must be 1, 2, or -1 (infinity)");
@@ -377,8 +385,8 @@ template <typename T>
     requires std::is_arithmetic_v<T>
 void register_native_dot_overload(nb::module_& m) {
     // ndarray overload
-    m.def("dot", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
-                    nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) -> double {
+    m.def("dot", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                    nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) -> double {
         if (a.shape(0) != b.shape(0))
             throw std::invalid_argument("vectors must have the same length");
         const std::size_t n = a.shape(0);
@@ -406,8 +414,8 @@ template <typename T>
     requires std::is_floating_point_v<T>
 void register_native_solve(nb::module_& m) {
     // ndarray overload (existing behavior)
-    m.def("solve", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
-                      nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+    m.def("solve", [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
+                      nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
         std::size_t n = A_np.shape(0);
         if (A_np.shape(1) != n)
             throw std::invalid_argument("A must be square");
@@ -540,7 +548,7 @@ mtl::mat::dense2D<T> copy_to_dense(const MatrixView<T>& mv) {
 
 template <typename T>
 mtl::mat::dense2D<T> copy_ndarray_to_dense(
-    nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a)
+    nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a)
 {
     std::size_t r = a.shape(0), c = a.shape(1);
     mtl::mat::dense2D<T> out(r, c);
@@ -579,8 +587,8 @@ void register_native_dense_ops(nb::module_& m) {
 
     // matmul accepting ndarray inputs
     m.def("matmul",
-          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
-             nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> B_np) {
+          [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
+             nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> B_np) {
         if (A_np.shape(1) != B_np.shape(0))
             throw std::invalid_argument(
                 "matmul: A.num_cols must equal B.num_rows");
@@ -648,7 +656,7 @@ void register_native_dense_ops(nb::module_& m) {
     }, "A"_a, "Compute determinant via LU factorization");
 
     m.def("det",
-          [compute_det](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np)
+          [compute_det](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np)
           -> double {
         if (A_np.shape(0) != A_np.shape(1))
             throw std::invalid_argument("det: A must be square");
@@ -670,7 +678,7 @@ void register_native_dense_ops(nb::module_& m) {
     }, "A"_a, "Compute matrix inverse via LU factorization");
 
     m.def("inv",
-          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
+          [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
         if (A_np.shape(0) != A_np.shape(1))
             throw std::invalid_argument("inv: A must be square");
         Mat Ainv(A_np.shape(0), A_np.shape(1));
@@ -700,7 +708,7 @@ void register_native_dense_ops(nb::module_& m) {
         }, "b"_a, "Solve LUx = b for the previously factored A")
         .def("solve",
              [](const LUF& self,
-                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+                nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
             if (b_np.shape(0) != self.n)
                 throw std::invalid_argument("LU.solve: dimension mismatch");
             const T* bp = b_np.data();
@@ -727,7 +735,7 @@ void register_native_dense_ops(nb::module_& m) {
     }, "A"_a, "Return LU factorization of A");
 
     m.def("lu",
-          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
+          [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
         if (A_np.shape(0) != A_np.shape(1))
             throw std::invalid_argument("lu: A must be square");
         nogil guard;
@@ -753,7 +761,7 @@ void register_native_dense_ops(nb::module_& m) {
         }, "b"_a, "Solve A·x = b using the Cholesky factor")
         .def("solve",
              [](const CF& self,
-                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+                nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
             if (b_np.shape(0) != self.n)
                 throw std::invalid_argument("cholesky.solve: dimension mismatch");
             const T* bp = b_np.data();
@@ -780,7 +788,7 @@ void register_native_dense_ops(nb::module_& m) {
     }, "A"_a, "Return Cholesky factorization of an SPD matrix A");
 
     m.def("cholesky",
-          [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
+          [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np) {
         if (A_np.shape(0) != A_np.shape(1))
             throw std::invalid_argument("cholesky: A must be square");
         nogil guard;
@@ -963,7 +971,7 @@ void register_universal_matrix(nb::module_& m) {
 
 template <typename T>
 void register_universal_vector_factory(nb::module_& m, const char* func_name) {
-    m.def(func_name, [](nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
+    m.def(func_name, [](nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t n = a.shape(0);
         const double* src = a.data();
         auto v = mtl::vec::dense_vector<T>(n);
@@ -978,7 +986,7 @@ void register_universal_vector_factory(nb::module_& m, const char* func_name) {
 
 template <typename T>
 void register_universal_matrix_factory(nb::module_& m, const char* func_name) {
-    m.def(func_name, [](nb::ndarray<double, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
+    m.def(func_name, [](nb::ndarray<const double, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t rows = a.shape(0), cols = a.shape(1);
         const double* src = a.data();
         auto M = mtl::mat::dense2D<T>(rows, cols);
@@ -1003,7 +1011,7 @@ void register_universal_from_bits(nb::module_& m) {
     const std::string sfx = type_suffix<T>();
 
     m.def(("_vector_from_bits_" + sfx).c_str(),
-          [](nb::ndarray<W, nb::ndim<1>, nb::c_contig, nb::device::cpu> bits) {
+          [](nb::ndarray<const W, nb::ndim<1>, nb::c_contig, nb::device::cpu> bits) {
         check_bit_transport<T>();
         const std::size_t nw = bits.shape(0);
         if (nw % K != 0)
@@ -1014,7 +1022,7 @@ void register_universal_from_bits(nb::module_& m) {
     }, nb::arg("bits").noconvert());
 
     m.def(("_matrix_from_bits_" + sfx).c_str(),
-          [](nb::ndarray<W, nb::ndim<2>, nb::c_contig, nb::device::cpu> bits) {
+          [](nb::ndarray<const W, nb::ndim<2>, nb::c_contig, nb::device::cpu> bits) {
         check_bit_transport<T>();
         const std::size_t rows = bits.shape(0), wcols = bits.shape(1);
         if (wcols % K != 0)
@@ -1233,9 +1241,9 @@ void register_sparse_matrix(nb::module_& m) {
 
     nb::class_<SMat>(m, name.c_str())
         .def("__init__", [](SMat* self, std::size_t nrows, std::size_t ncols,
-                            nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> indptr,
-                            nb::ndarray<int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> indices,
-                            nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> data) {
+                            nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> indptr,
+                            nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig, nb::device::cpu> indices,
+                            nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> data) {
             // CSR layout: indptr.size() == nrows + 1, indices.size() == data.size() == nnz
             if (indptr.shape(0) != nrows + 1)
                 throw std::invalid_argument("indptr length must be nrows + 1");
@@ -1301,7 +1309,7 @@ void register_sparse_matrix(nb::module_& m) {
             return VV(std::move(y));
         }, "x"_a, "Sparse matrix-vector product: y = A @ x")
         .def("matvec", [](const SMat& A,
-                          nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
+                          nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
             if (A.num_cols() != x_np.shape(0))
                 throw std::invalid_argument("matvec: A.num_cols must equal len(x)");
             const std::size_t n = x_np.shape(0);
@@ -1331,7 +1339,7 @@ void register_sparse_matrix(nb::module_& m) {
             return VV(std::move(y));
         }, "x"_a, "Transpose product: y = A.T @ x")
         .def("rmatvec", [](const SMat& A,
-                           nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
+                           nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np) {
             if (A.num_rows() != x_np.shape(0))
                 throw std::invalid_argument("rmatvec: A.num_rows must equal len(x)");
             const std::size_t n = x_np.shape(0);
@@ -1512,7 +1520,7 @@ template <typename T>
         }, "b"_a, "Apply preconditioner: solve (LU)·x = b")
         .def("solve",
              [](const ILUWrap& self,
-                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+                nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
             if (b_np.shape(0) != self.n)
                 throw std::invalid_argument(
                     "ILU0.solve: RHS length " + std::to_string(b_np.shape(0)) +
@@ -1559,7 +1567,7 @@ template <typename T>
         }, "b"_a, "Apply preconditioner: solve (L·L^T)·x = b")
         .def("solve",
              [](const ICWrap& self,
-                nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+                nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
             if (b_np.shape(0) != self.n)
                 throw std::invalid_argument(
                     "IC0.solve: RHS length " + std::to_string(b_np.shape(0)) +

@@ -511,6 +511,10 @@ void register_ndarray(nb::module_& m) {
        "zero-copy nor the dtype you asked for.\n\n"
        "The array must also be writable: the view aliases it, so a read-only "
        "NumPy array raises TypeError. Pass a.copy() if that is what you have.");
+
+    m.def("asarray", [](nb::ndarray<const T, nb::ndim<N>, nb::device::cpu>) -> NDArrayView<T, N> {
+        refuse_read_only("array.asarray", nullptr);
+    }, nb::arg("a").noconvert());
 }
 
 // ---------------------------------------------------------------------------

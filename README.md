@@ -567,7 +567,10 @@ something else, all because the result aliases your buffer:
 * **negative strides** — MTL5's strides are unsigned
 * **any dtype but float32/float64** — converting would return a view of a
   temporary, which is neither zero-copy nor the dtype you asked for
-* **read-only arrays** — the view can write through
+* **read-only arrays** — the view can write through. The error names the
+  copying alternative; everything that only reads its input (`norm`, `solve`,
+  `convert`, the `*_copy` factories, ...) takes a read-only array, such as
+  a pandas 3 `to_numpy()`, as it is
 
 Two details worth knowing:
 

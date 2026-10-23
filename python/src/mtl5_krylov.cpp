@@ -254,7 +254,7 @@ void register_preconditioners(nb::module_& m) {
             return VectorView<T>(std::move(x));
         }, "b"_a, "Apply the preconditioner: solve M x = b")
         .def("solve", [](const PCBase<T>& p,
-                         nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) {
+                         nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) {
             if (b.shape(0) != p.size())
                 throw std::invalid_argument("solve: dimension mismatch");
             Vec<T> x(p.size()), bb(p.size());
@@ -278,7 +278,7 @@ void register_preconditioners(nb::module_& m) {
         }, "b"_a, "Apply the adjoint: solve M^H x = b. Exact only when "
                   "has_exact_adjoint is true.")
         .def("adjoint_solve", [](const PCBase<T>& p,
-                                 nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) {
+                                 nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) {
             if (b.shape(0) != p.size())
                 throw std::invalid_argument("adjoint_solve: dimension mismatch");
             Vec<T> x(p.size()), bb(p.size());

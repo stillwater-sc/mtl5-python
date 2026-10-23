@@ -363,7 +363,10 @@ def _as_mtl5_matrix(name: str, prefix: str, A):
                 f"{name}: NumPy arrays must be float32 or float64, got {A.dtype.name}.{hint}"
             )
         _reject_complex(name, prefix, suffix, A.dtype.name)
-        return matrix(_np.ascontiguousarray(A)), suffix
+        A = _np.ascontiguousarray(A)
+        # A read-only array (pandas 3's to_numpy()) cannot be viewed, and every
+        # factorization copies its input anyway (#116).
+        return (matrix(A) if A.flags.writeable else matrix_copy(A)), suffix
 
     dt = getattr(A, "dtype", None)
     if not isinstance(dt, str):

@@ -318,8 +318,8 @@ void register_mixed_native(nb::module_& mx) {
                             parse_result_is_element(result));
     }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none());
 
-    mx.def("dot", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
-                     nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
+    mx.def("dot", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                     nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
                      std::optional<std::string> accumulator,
                      std::optional<std::string> result) {
         if (a.shape(0) != b.shape(0))
@@ -421,8 +421,8 @@ void register_mixed_narrow_int_pair(nb::module_& mx) {
         return mixed_dot_pair<TA, TB>(a.vec, b.vec, acc_of(accumulator));
     }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none(), kPairDoc);
 
-    mx.def("dot", [acc_of](nb::ndarray<TA, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
-                           nb::ndarray<TB, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
+    mx.def("dot", [acc_of](nb::ndarray<const TA, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                           nb::ndarray<const TB, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
                            std::optional<std::string> accumulator,
                            std::optional<std::string> result) {
         if (result)
@@ -491,8 +491,8 @@ void register_mixed_narrow_int(nb::module_& mx) {
         return mixed_dot<T>(a.vec, b.vec, acc_of(accumulator), /*result_element=*/false);
     }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none(), kDoc);
 
-    mx.def("dot", [acc_of](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
-                           nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
+    mx.def("dot", [acc_of](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                           nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b,
                            std::optional<std::string> accumulator,
                            std::optional<std::string> result) {
         if (a.shape(0) != b.shape(0))
@@ -617,8 +617,8 @@ void register_int_matmul(nb::module_& mx) {
                 "8-bit result wraps almost immediately.");
         parse_acc(spec, type_suffix<TA>(), /*quire_ok=*/false, /*i32_ok=*/true);
     };
-    using NA = nb::ndarray<TA, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
-    using NB = nb::ndarray<TB, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using NA = nb::ndarray<const TA, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using NB = nb::ndarray<const TB, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 
     mx.def("matmul", [require_i32](const MatrixView<TA>& A, const MatrixView<TB>& B,
                                    std::optional<std::string> accumulator) {
@@ -638,8 +638,8 @@ void register_int_matmul(nb::module_& mx) {
 /// Bind one (TA, TB) pairing of matmul_quad; (i8, u8) binds to the refusal.
 template <typename TA, typename TB>
 void register_quad_matmul(nb::module_& mx) {
-    using NA = nb::ndarray<TA, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
-    using NB = nb::ndarray<TB, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using NA = nb::ndarray<const TA, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
+    using NB = nb::ndarray<const TB, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
     constexpr bool ok = mtl::simd::QuadPair<TA, TB>;
 
     mx.def("matmul_quad", [](const MatrixView<TA>& A, const MatrixView<TB>& B) -> nb::object {
@@ -906,13 +906,13 @@ void register_mixed_precision(nb::module_& m) {
        "means 'accumulate in the element precision')");
 
     // ----- convert() ---------------------------------------------------------
-    m.def("convert", [](nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+    m.def("convert", [](nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
                         const std::string& dtype) {
         return vec_ctor_for(dtype)(a.data(), a.shape(0));
     }, "a"_a, "dtype"_a,
        "Re-quantize a 1-D float64 array into another number system");
 
-    m.def("convert", [](nb::ndarray<double, nb::ndim<2>, nb::c_contig, nb::device::cpu> a,
+    m.def("convert", [](nb::ndarray<const double, nb::ndim<2>, nb::c_contig, nb::device::cpu> a,
                         const std::string& dtype) {
         return mat_ctor_for(dtype)(a.data(), a.shape(0), a.shape(1));
     }, "a"_a, "dtype"_a,
@@ -939,8 +939,8 @@ void register_mixed_precision(nb::module_& m) {
 
     // ----- Dense mixed-precision iterative refinement -------------------------
     mx.def("lu_iterative_refine",
-           [](nb::ndarray<double, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
-              nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np,
+           [](nb::ndarray<const double, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
+              nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np,
               const std::string& working, int max_iter, double rel_tol,
               bool scaled, int patience) {
         const std::size_t n = A_np.shape(0);
@@ -988,9 +988,9 @@ void register_mixed_precision(nb::module_& m) {
        "float64 residual. Returns (x, info).");
 
     mx.def("backward_error",
-           [](nb::ndarray<double, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
-              nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np,
-              nb::ndarray<double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
+           [](nb::ndarray<const double, nb::ndim<2>, nb::c_contig, nb::device::cpu> A_np,
+              nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu> x_np,
+              nb::ndarray<const double, nb::ndim<1>, nb::c_contig, nb::device::cpu> b_np) {
         const std::size_t n = A_np.shape(0);
         if (A_np.shape(1) != n)
             throw std::invalid_argument("backward_error: A must be square");
