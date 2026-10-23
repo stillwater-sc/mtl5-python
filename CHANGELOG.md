@@ -930,6 +930,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.20.1 (2026-10-23)
+
+### Features
+
+- **interop**: NumPy array protocol on dense containers, so scikit-learn takes them
+  ([#115](https://github.com/stillwater-sc/mtl5-python/pull/115),
+  [`1ef8461`](https://github.com/stillwater-sc/mtl5-python/commit/1ef84616170a4deb2346ca40eedbee784909139c))
+
+### Testing
+
+- **interop**: Call __array__ directly for copy=False, so the tests run on NumPy 1.x
+  ([#115](https://github.com/stillwater-sc/mtl5-python/pull/115),
+  [`1ef8461`](https://github.com/stillwater-sc/mtl5-python/commit/1ef84616170a4deb2346ca40eedbee784909139c))
+
+
 ## v5.19.3 (2026-10-22)
 
 ### Documentation
