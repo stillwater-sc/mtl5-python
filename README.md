@@ -71,6 +71,32 @@ x = mtl5.solve(A, b)
 print(x)  # [1.6, 1.8]
 ```
 
+### Passing containers to NumPy and scikit-learn
+
+The dense containers implement `__array__`, so anything that takes array-like
+input through `np.asarray` accepts them, scikit-learn included:
+
+```python
+from sklearn.linear_model import LinearRegression
+
+X, y = np.random.rand(100, 3), np.random.rand(100)
+model = LinearRegression().fit(mtl5.matrix(X), mtl5.vector(y))
+np.shares_memory(np.asarray(mtl5.matrix(X)), X)  # True: a view, not a copy
+```
+
+- **Universal containers** (posit16, fp16, ...) convert to float64 with a copy,
+  so `np.asarray(P, copy=False)` raises. (That is NumPy 2; NumPy 1.x's
+  `np.asarray` has no `copy=`.) scikit-learn then computes on the rounded
+  values in float64.
+- **Sparse matrices** have no `__array__`, so they aren't densified behind your
+  back. Pass `mtl5.sparse.to_scipy(S)`.
+- **A float32 container** is upcast to float64 by an estimator that takes
+  either float type, such as Ridge, because `.dtype` is the name `"f32"`, not a
+  NumPy dtype. `np.asarray(M)` first is zero-copy and keeps float32.
+
+`applications/sklearn_pipeline.py` compares the test error of f64, f32, posit16
+and fp16 feature storage.
+
 ## Mixed precision
 
 A mixed-precision operation has three independent precisions. MTL5 supplies the

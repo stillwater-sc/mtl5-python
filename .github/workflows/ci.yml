@@ -118,6 +118,19 @@ jobs:
           pip install "jax[cpu]"
       - name: Run all tests
         run: pytest -v
+      # The Python applications are user-facing examples that no test imports,
+      # so without this they break silently -- pandas_sensor_analysis.py did,
+      # on pandas 3, until #17. This is the lane that has every optional
+      # dependency they need. From a neutral directory, for the reason given in
+      # zlib-test below.
+      - name: Run the Python applications
+        working-directory: ${{ runner.temp }}
+        run: |
+          for app in "$GITHUB_WORKSPACE"/applications/*.py; do
+            echo "::group::$(basename "$app")"
+            python "$app"
+            echo "::endgroup::"
+          done
 
   # The .gz Matrix Market path is compiled in only with MTL5_WITH_ZLIB, which is
   # off by default for portability. Without this lane that code would ship with

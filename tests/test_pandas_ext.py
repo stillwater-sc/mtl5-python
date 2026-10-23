@@ -47,6 +47,17 @@ class TestPosit16Array:
         arr = Posit16Array(np.array([1.0, 2.0, 3.0]))
         assert len(arr) == 3
 
+    def test_create_from_read_only_numpy(self, Posit16Array):
+        """pandas 3's Series.to_numpy() is read-only (copy-on-write)."""
+        a = np.array([1.0, 2.0, 3.0])
+        a.flags.writeable = False
+        assert Posit16Array(a)[2] == pytest.approx(3.0, rel=1e-3)
+
+    def test_pd_array_from_a_dataframe_column(self, Posit16Dtype):
+        df = pd.DataFrame({"t": [20.5, 21.25], "h": [50.0, 55.0]})
+        col = pd.array(df["t"].to_numpy(), dtype=Posit16Dtype())
+        assert col[1] == pytest.approx(21.25, rel=1e-3)
+
     def test_dtype_property(self, Posit16Array, Posit16Dtype):
         arr = Posit16Array([1.0, 2.0])
         assert isinstance(arr.dtype, Posit16Dtype)
