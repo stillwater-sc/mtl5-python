@@ -83,6 +83,7 @@ from mtl5._core import (
     solvers,
 )
 from mtl5._core import vector as _vector
+from mtl5._core import vector_copy as _vector_copy
 
 try:
     import scipy.sparse as _sp
@@ -275,7 +276,9 @@ def _coerce_vector(b, expected_dtype: np.dtype):
         arr = np.ascontiguousarray(np.asarray(b.to_numpy()).ravel(), dtype=expected_dtype)
     else:
         arr = np.ascontiguousarray(np.asarray(b).ravel(), dtype=expected_dtype)
-    return _vector(arr)
+    # The solvers only read b, so a read-only array (pandas 3's to_numpy()) is
+    # copied rather than refused by the zero-copy view (#116).
+    return _vector(arr) if arr.flags.writeable else _vector_copy(arr)
 
 
 def _check_unsupported_kwargs(callback, device):

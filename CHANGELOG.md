@@ -47,13 +47,30 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **Read-only NumPy arrays are accepted wherever the input is only read or
+  copied** (#116), so a pandas 3 column goes straight in:
+  `mtl5.norm(df["x"].to_numpy())` used to raise `TypeError: incompatible
+  function arguments`. pandas 3's copy-on-write makes `Series.to_numpy()` and
+  `DataFrame.to_numpy()` read-only views, and so are `np.broadcast_to` results
+  and anything with `flags.writeable = False`. nanobind admits only writable
+  arrays for a non-const element type, so every array parameter refused them,
+  including the `*_copy` factories, `convert`, `vector_posit16`, `norm`, `dot`,
+  `solve`, `matmul`, `det`, `inv`, `lu`, `cholesky`, `mixed.*`, the sparse
+  constructors and `matvec`, the sparse direct solvers' `solve`, and the
+  preconditioners. They now take `const T`; the set of accepted inputs only
+  grows. The Python helpers that wrapped input in a view on the way through
+  (`qr`/`ldlt`/... on a NumPy array, the iterative solvers' `b`, `mtl5.io`)
+  copy a read-only array instead.
+- **The zero-copy views still refuse a read-only array, now with a reason.**
+  `mtl5.vector`, `mtl5.matrix` and `mtl5.array.asarray` alias the array and can
+  write through it, so accepting one would let MTL5 write to memory NumPy
+  promised was immutable. The `TypeError` now says that and names
+  `vector_copy`/`matrix_copy` or `np.array(a)`, instead of listing every
+  overload's signature.
 - **`Posit16Array` accepts a read-only array**, so
   `pd.array(df["col"].to_numpy(), dtype=mtl5.Posit16Dtype())` works on pandas 3.
-  pandas 3's copy-on-write makes `Series.to_numpy()` a read-only view, and the
-  `vector_posit16` binding takes only a writable array, so the constructor
-  raised `TypeError`. That broke `applications/pandas_sensor_analysis.py`. The
-  constructor now copies with `np.array`, which it was already doing in effect,
-  since the data goes through MTL5 anyway.
+  That broke `applications/pandas_sensor_analysis.py`. The fix is the one
+  above; #115's interim copy in the constructor is gone again.
 
 ### Changed
 

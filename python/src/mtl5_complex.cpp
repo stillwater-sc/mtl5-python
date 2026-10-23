@@ -326,7 +326,11 @@ void register_complex_factories(nb::module_& m) {
        "for, and a real array would silently acquire an imaginary part. Pass\n"
        "np.ascontiguousarray(a), or a.astype(...), to convert deliberately.");
 
-    m.def("vector_copy", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
+    m.def("vector", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu>) -> VectorView<T> {
+        refuse_read_only("vector", "vector_copy");
+    }, nb::arg("a").noconvert());
+
+    m.def("vector_copy", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t n = a.shape(0);
         const T* src = a.data();
         mtl::vec::dense_vector<T> v(n);
@@ -357,7 +361,11 @@ void register_complex_factories(nb::module_& m) {
        "for, and a real array would silently acquire an imaginary part. Pass\n"
        "np.ascontiguousarray(a), or a.astype(...), to convert deliberately.");
 
-    m.def("matrix_copy", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
+    m.def("matrix", [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu>) -> MatrixView<T> {
+        refuse_read_only("matrix", "matrix_copy");
+    }, nb::arg("a").noconvert());
+
+    m.def("matrix_copy", [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         const std::size_t r = a.shape(0), c = a.shape(1);
         const T* src = a.data();
         mtl::mat::dense2D<T> M(r, c);
@@ -393,7 +401,7 @@ void register_complex_norms(nb::module_& m) {
     // complex one registered, a complex array could reach those through
     // nanobind's second (converting) pass and quietly lose its imaginary part.
     // Registering these means complex matches in the first, no-convert pass.
-    m.def("norm", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+    m.def("norm", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
                      int ord) -> double {
         if (ord != 1 && ord != 2 && ord != -1)
             throw std::invalid_argument("ord must be 1, 2, or -1 (infinity)");
@@ -434,8 +442,8 @@ void register_complex_norms(nb::module_& m) {
 
 template <typename T>
 void register_complex_dot(nb::module_& m) {
-    m.def("dot", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
-                    nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) -> T {
+    m.def("dot", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                    nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) -> T {
         if (a.shape(0) != b.shape(0))
             throw std::invalid_argument("vectors must have the same length");
         const std::size_t n = a.shape(0);
@@ -446,8 +454,8 @@ void register_complex_dot(nb::module_& m) {
                         mtl::vec::dense_vector<T>(n, bp));
     }, "a"_a, "b"_a);
 
-    m.def("dot_real", [](nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
-                         nb::ndarray<T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) -> T {
+    m.def("dot_real", [](nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> a,
+                         nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu> b) -> T {
         if (a.shape(0) != b.shape(0))
             throw std::invalid_argument("vectors must have the same length");
         const std::size_t n = a.shape(0);
@@ -695,7 +703,7 @@ void register_complex_cholesky(nb::module_& m) {
        "matrix. Complex uses MTL5's cholesky_h; the plain L L^T form is not "
        "meaningful for complex elements.");
 
-    m.def("cholesky", [](nb::ndarray<T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
+    m.def("cholesky", [](nb::ndarray<const T, nb::ndim<2>, nb::c_contig, nb::device::cpu> a) {
         if (a.shape(0) != a.shape(1))
             throw std::invalid_argument("cholesky: A must be square");
         const std::size_t n = a.shape(0);

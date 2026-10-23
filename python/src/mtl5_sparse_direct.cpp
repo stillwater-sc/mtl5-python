@@ -261,7 +261,7 @@ void register_sparse_lu(nb::module_& m) {
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
         .def("solve", [](const Wrap& s,
-                         nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+                         nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {
             return solve_with<fact::lu_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b using the stored factors")
@@ -347,7 +347,7 @@ void register_klu(nb::module_& m) {
         .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; },
                      "Pivots replaced by perturbation across all blocks")
         .def("solve", [](const Wrap& s,
-                         nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+                         nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {
             return solve_with<fact::klu_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b by block back-substitution")
@@ -502,7 +502,7 @@ void register_cholesky(nb::module_& m) {
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factor().nnz(); },
                      "Nonzeros in the lower factor L")
-        .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+        .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::cholesky_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b via the Cholesky factor")
@@ -562,7 +562,7 @@ void register_ldlt(nb::module_& m) {
             return nb::ndarray<nb::numpy, double, nb::ndim<1>>(buf, 1, shape, owner);
         }, "The diagonal D. Its signs give the inertia: a negative entry means A "
            "is indefinite.")
-        .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+        .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::ldlt_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b via the LDL^T factor")
@@ -612,7 +612,7 @@ void register_qr(nb::module_& m) {
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.R.nnz(); },
                      "Nonzeros in the upper factor R")
-        .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+        .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             if (b.shape(0) != s.nrows)
                 throw std::invalid_argument(
@@ -690,7 +690,7 @@ void register_supernodal_lu(nb::module_& m) {
         .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; })
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
-        .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+        .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_lu_factor<T>, T>(
                 s.num, s.n, b.data(), b.shape(0));
@@ -749,7 +749,7 @@ void register_supernodal_ldlt(nb::module_& m) {
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); })
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
-        .def("solve", [](const Wrap& s, nb::ndarray<double, nb::ndim<1>, nb::c_contig,
+        .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_ldlt_factor<T>, T>(
                 s.num, s.n, b.data(), b.shape(0));

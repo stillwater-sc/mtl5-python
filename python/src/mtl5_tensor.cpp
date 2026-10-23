@@ -121,7 +121,7 @@ void register_tensor(nb::module_& m) {
         });
 
     // Build from a NumPy array whose shape is exactly (D,) * R.
-    m.def("_from_numpy", [](nb::ndarray<T, nb::ndim<R>, nb::c_contig,
+    m.def("_from_numpy", [](nb::ndarray<const T, nb::ndim<R>, nb::c_contig,
                             nb::device::cpu> a) {
         // Rank comes from ndim, but every (Rank, Dim) pair registers the same
         // ndarray signature, so nanobind cannot tell them apart by type. Fall

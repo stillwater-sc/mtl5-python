@@ -31,6 +31,7 @@ import numpy as np
 
 from mtl5._core import io as _io
 from mtl5._core import matrix as _matrix
+from mtl5._core import matrix_copy as _matrix_copy
 
 
 def mm_read(path):
@@ -58,7 +59,10 @@ def _coerce(A):
                 f"NumPy arrays must be float32 or float64, got {A.dtype.name}. "
                 "For another number system, convert first: mtl5.convert(a, 'posit32')."
             )
-        return _matrix(np.ascontiguousarray(A))
+        A = np.ascontiguousarray(A)
+        # Everything here only reads A, so a read-only array is copied rather
+        # than refused by the zero-copy view (#116).
+        return _matrix(A) if A.flags.writeable else _matrix_copy(A)
     return A
 
 

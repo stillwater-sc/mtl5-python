@@ -51,6 +51,30 @@ namespace nb = nanobind;
 // ===========================================================================
 using nogil = nb::gil_scoped_release;
 
+// ===========================================================================
+// Read-only input (#116)
+//
+// An entry point that only reads or copies its array takes
+// nb::ndarray<const T>: with a non-const T nanobind admits writable arrays
+// only, and pandas 3's copy-on-write hands out read-only ones from
+// Series.to_numpy(). The zero-copy views keep a non-const T, because they alias
+// the array and can write through it. Each registers a second overload on
+// const T, AFTER its own, that calls this, so a read-only array gets a reason
+// instead of nanobind's signature dump. That overload must be .noconvert() too,
+// or nanobind's second pass would convert an unrelated dtype into it and blame
+// read-only-ness for a dtype mismatch.
+// ===========================================================================
+[[noreturn]] inline void refuse_read_only(const char* fn, const char* copy_fn) {
+    std::string msg = std::string("mtl5.") + fn
+        + "() is a zero-copy view that can write through to the array, so it "
+          "needs a writable one, and this array is read-only (pandas 3 "
+          "returns these from to_numpy()). ";
+    if (copy_fn) msg += std::string("Use mtl5.") + copy_fn + "(a), or pass ";
+    else         msg += "Pass ";
+    msg += "np.array(a) to copy it first.";
+    throw nb::type_error(msg.c_str());
+}
+
 // ---------------------------------------------------------------------------
 // Universal type aliases
 // ---------------------------------------------------------------------------
