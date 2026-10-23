@@ -65,8 +65,10 @@ if HAS_PANDAS:
             if isinstance(values, Posit16Array):
                 self._data = values._data.copy() if copy else values._data
             else:
-                # Convert through mtl5 to enforce posit16 quantization
-                arr = np.asarray(values, dtype=np.float64)
+                # Convert through mtl5 to enforce posit16 quantization. np.array,
+                # not np.asarray: the binding takes only a writable array, and
+                # pandas 3's Series.to_numpy() is a read-only view (copy-on-write).
+                arr = np.array(values, dtype=np.float64)
                 if arr.ndim != 1:
                     raise ValueError("Posit16Array requires 1-D input")
                 vec = mtl5.vector_posit16(arr)

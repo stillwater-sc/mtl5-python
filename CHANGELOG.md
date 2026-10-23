@@ -13,6 +13,48 @@ against, and semantic-release manages only the **patch** component.
 
 ## [Unreleased]
 
+### Added
+
+- **The dense containers speak NumPy's array protocol, so scikit-learn takes
+  them** (#17). Every `DenseVector_*` and `DenseMatrix_*` has an `__array__`.
+  Before this, `np.asarray(mtl5.matrix(X))` was a 0-d object array, so every
+  scikit-learn estimator rejected the container ("Expected 2D array, got scalar
+  array"), and a vector converted only through `__getitem__`, one element at a
+  time. Now:
+  - **Native containers** (float, int, complex) hand NumPy a zero-copy view of
+    their storage, so `np.asarray(mtl5.matrix(X))` shares memory with `X`.
+  - **Universal containers** convert to float64, which is a copy, so
+    `copy=False` raises `ValueError`. `.to_universal()` stays the bit-exact way
+    out.
+  - **Sparse matrices** get no `__array__`, deliberately: it would densify them
+    silently. Pass `mtl5.sparse.to_scipy(S)` instead.
+- **`tests/test_sklearn_interop.py`** covers LinearRegression, Ridge, a
+  StandardScaler pipeline, `pairwise_distances`, PCA and SVC, each compared bit
+  for bit with the same estimator fitted on the NumPy array. The issue listed
+  PCA and SVC as expected failures because they call LAPACK. They work: LAPACK
+  only ever sees float64. Two real limits are pinned instead:
+  - MTL5 sparse input is rejected, as above.
+  - A float32 container is computed in float64 by an estimator that takes
+    either float type (Ridge). The container's `dtype` is a name (`"f32"`), not
+    a NumPy dtype, so scikit-learn cannot see the float32. `np.asarray(M)`
+    first is zero-copy and keeps float32.
+- **`applications/sklearn_pipeline.py`**: a Ridge pipeline on features stored as
+  f64, f32, posit16 and fp16, reporting what each storage format costs in test
+  MSE against the noise floor.
+- **CI runs the Python applications** in the `ecosystem-test` job, which has
+  every optional dependency they need. No test imported them before, so they
+  could break unnoticed, and one had (see Fixed).
+
+### Fixed
+
+- **`Posit16Array` accepts a read-only array**, so
+  `pd.array(df["col"].to_numpy(), dtype=mtl5.Posit16Dtype())` works on pandas 3.
+  pandas 3's copy-on-write makes `Series.to_numpy()` a read-only view, and the
+  `vector_posit16` binding takes only a writable array, so the constructor
+  raised `TypeError`. That broke `applications/pandas_sensor_analysis.py`. The
+  constructor now copies with `np.array`, which it was already doing in effect,
+  since the data goes through MTL5 anyway.
+
 ### Changed
 
 - **MTL5 pinned to v5.20.0** (was v5.19.0), and the package version set to

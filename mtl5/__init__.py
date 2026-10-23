@@ -581,6 +581,12 @@ matrix = _universal_interop.wrap_factory(matrix, "matrix")
 matrix_copy = _universal_interop.wrap_factory(matrix_copy, "matrix")
 _universal_interop.install()
 
+# np.asarray() on a dense container (#17), so scikit-learn and other libraries
+# that validate input through NumPy accept mtl5.matrix()/mtl5.vector().
+from mtl5 import _array_protocol  # noqa: E402
+
+_array_protocol.install()
+
 # `io` is a Python module wrapping _core.io — it adds NumPy coercion and
 # documents the two behaviours that differ from scipy.io. Importing it here
 # binds mtl5.io to the wrapper rather than the bare extension submodule.
