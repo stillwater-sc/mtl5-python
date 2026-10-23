@@ -39,6 +39,11 @@ def _sparse():
     )
 
 
+def _refine(A, b):
+    x, _info = mtl5.mixed.lu_iterative_refine(A, b, working="f32")
+    return x
+
+
 # Each case calls one entry point with read-only input only. A case that needs
 # another dtype wraps its astype() in ro() again, because astype() always copies.
 # The expected value is the same call on a writable copy, so what is tested is
@@ -66,18 +71,16 @@ CASES = {
     "mixed_matmul_i8": lambda A: mtl5.mixed.matmul(
         ro(A.astype(np.int8)), ro(A.astype(np.int8)), accumulator="i32"
     ).to_numpy(),
-    "mixed_lu_iterative_refine": lambda A, b: (
-        mtl5.mixed.lu_iterative_refine(A, b, working="f32")[0]
-    ),
+    "mixed_lu_iterative_refine": lambda A, b: _refine(A, b),
     "mixed_backward_error": lambda A, b: mtl5.mixed.backward_error(A, b, b),
     "complex_norm": lambda a: mtl5.norm(ro(a.astype(np.complex128))),
     "complex_dot": lambda a: mtl5.dot(ro(a.astype(np.complex128)), ro(a.astype(np.complex128))),
     "complex_vector_copy": lambda a: mtl5.vector_copy(ro(a.astype(np.complex128))).to_numpy(),
     "tensor": lambda A: mtl5.tensor.asarray(A).to_numpy(),
     "sparse_csr_matvec": lambda b: _sparse().matvec(b).to_numpy(),
-    "sparse_coo": lambda b: mtl5.sparse.coo_matrix(ro([0, 1, 2]), ro([0, 1, 2]), b, (3, 3))
-    .matvec(b)
-    .to_numpy(),
+    "sparse_coo": lambda b: (
+        mtl5.sparse.coo_matrix(ro([0, 1, 2]), ro([0, 1, 2]), b, (3, 3)).matvec(b).to_numpy()
+    ),
     "sparse_cg": lambda b: mtl5.sparse.cg(_sparse(), b)[0],
     "sparse_splu": lambda b: mtl5.sparse.splu(_sparse()).solve(b).to_numpy(),
 }
