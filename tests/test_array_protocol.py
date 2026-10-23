@@ -3,6 +3,9 @@
 What has to hold is the difference between the two kinds of container: a
 native one hands NumPy a view of its own storage, a Universal one a float64
 copy, and asking the second for no copy is an error rather than a silent copy.
+
+The ``copy=False`` tests call ``__array__`` directly: ``np.asarray`` gained
+``copy=`` only in NumPy 2.0, and the package supports NumPy 1.24.
 """
 
 from __future__ import annotations
@@ -49,7 +52,7 @@ class TestNative:
 
     def test_copy_false_is_honoured(self):
         X_ = X.copy()
-        assert np.shares_memory(np.asarray(mtl5.matrix(X_), copy=False), X_)
+        assert np.shares_memory(mtl5.matrix(X_).__array__(copy=False), X_)
 
     def test_dtype_request_converts(self):
         a = np.asarray(mtl5.matrix(X), dtype=np.float32)
@@ -58,7 +61,7 @@ class TestNative:
 
     def test_dtype_request_without_copy_raises(self):
         with pytest.raises(ValueError, match="needs a copy"):
-            np.asarray(mtl5.matrix(X), dtype=np.float32, copy=False)
+            mtl5.matrix(X).__array__(np.float32, copy=False)
 
 
 class TestUniversal:
@@ -75,7 +78,7 @@ class TestUniversal:
 
     def test_copy_false_raises(self):
         with pytest.raises(ValueError, match="to_universal"):
-            np.asarray(mtl5.convert(X, "posit16"), copy=False)
+            mtl5.convert(X, "posit16").__array__(copy=False)
 
     def test_dtype_request(self):
         assert np.asarray(mtl5.convert(X, "posit16"), dtype=np.float32).dtype == np.float32

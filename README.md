@@ -85,8 +85,9 @@ np.shares_memory(np.asarray(mtl5.matrix(X)), X)  # True: a view, not a copy
 ```
 
 - **Universal containers** (posit16, fp16, ...) convert to float64 with a copy,
-  so `np.asarray(P, copy=False)` raises. scikit-learn then computes on the
-  rounded values in float64.
+  so `np.asarray(P, copy=False)` raises. (That is NumPy 2; NumPy 1.x's
+  `np.asarray` has no `copy=`.) scikit-learn then computes on the rounded
+  values in float64.
 - **Sparse matrices** have no `__array__`, so they aren't densified behind your
   back. Pass `mtl5.sparse.to_scipy(S)`.
 - **A float32 container** is upcast to float64 by an estimator that takes
