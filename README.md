@@ -1018,6 +1018,29 @@ the pool has already been sized. The count is clamped to hardware concurrency.
 All non-trivial kernels release the GIL, so MTL5 work overlaps with other Python
 threads instead of blocking the interpreter.
 
+NumPy and SciPy link a BLAS of their own (OpenBLAS in the wheels), with a thread
+team of its own. With `set_num_threads(n > 1)`, a NumPy or SciPy call made from
+code that already runs MTL5's threads, such as a Python thread pool working
+next to MTL5 kernels, adds that team on top of MTL5's workers. The cores are
+then oversubscribed, and MTL5's kernels wait for their slowest thread. MTL5 caps
+its *own* vendor BLAS (MKL, BLIS) inside its parallel regions, but it cannot
+reach NumPy's copy. Cap that one with
+[`threadpoolctl`](https://github.com/joblib/threadpoolctl):
+
+```python
+from threadpoolctl import threadpool_limits
+import mtl5
+
+mtl5.set_num_threads(8)
+with threadpool_limits(limits=1, user_api="blas"):
+    run_the_threaded_part()   # NumPy/SciPy BLAS on one thread here
+```
+
+Or choose one owner for the cores: either MTL5 threaded with
+`OPENBLAS_NUM_THREADS=1` (`MKL_NUM_THREADS=1` for an MKL NumPy), or NumPy's BLAS
+threaded with MTL5 left at one thread. The measurements behind this are in
+MTL5's [on-node threading notes](https://stillwater-sc.github.io/mtl5/algorithms/on-node-threading/#vendor-libraries-inside-a-region).
+
 Double-precision `matmul`, 1000×1000, on a 20-core box:
 
 | threads | 1 | 2 | 4 | 8 |
