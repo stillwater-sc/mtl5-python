@@ -1024,8 +1024,9 @@ code that already runs MTL5's threads, such as a Python thread pool working
 next to MTL5 kernels, adds that team on top of MTL5's workers. The cores are
 then oversubscribed, and MTL5's kernels wait for their slowest thread. MTL5 caps
 its *own* vendor BLAS (MKL, BLIS) inside its parallel regions, but it cannot
-reach NumPy's copy. Cap that one with
-[`threadpoolctl`](https://github.com/joblib/threadpoolctl):
+reach NumPy's copy. Cap it with
+[`threadpoolctl`](https://github.com/joblib/threadpoolctl), which limits every
+BLAS loaded in the process, MTL5's own included:
 
 ```python
 from threadpoolctl import threadpool_limits
@@ -1033,7 +1034,7 @@ import mtl5
 
 mtl5.set_num_threads(8)
 with threadpool_limits(limits=1, user_api="blas"):
-    run_the_threaded_part()  # NumPy/SciPy BLAS on one thread here
+    run_the_threaded_part()  # every loaded BLAS on one thread here
 ```
 
 Or choose one owner for the cores: either MTL5 threaded with
