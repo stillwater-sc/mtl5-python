@@ -1033,7 +1033,7 @@ import mtl5
 
 mtl5.set_num_threads(8)
 with threadpool_limits(limits=1, user_api="blas"):
-    run_the_threaded_part()   # NumPy/SciPy BLAS on one thread here
+    run_the_threaded_part()  # NumPy/SciPy BLAS on one thread here
 ```
 
 Or choose one owner for the cores: either MTL5 threaded with
