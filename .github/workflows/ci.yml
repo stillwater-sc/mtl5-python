@@ -41,9 +41,10 @@ jobs:
             python: "3.12"
             compiler: clang
           # macOS
-          - os: macos-14
-            python: "3.10"
+          # macOS 14 images are retired on 2026-11-02 (actions/runner-images#13518).
           - os: macos-15
+            python: "3.10"
+          - os: macos-26
             python: "3.12"
           # Windows
           - os: windows-2022
