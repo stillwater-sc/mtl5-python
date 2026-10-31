@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-14, windows-2022]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -104,6 +104,8 @@ jobs:
           CIBW_ARCHS: "auto64"
           CIBW_BUILD: "cp312-*"
           CIBW_SKIP: "*-musllinux*"
+          # Pinned for the same reason as in build-wheels below.
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
           CIBW_TEST_REQUIRES: pytest numpy scipy
           CIBW_TEST_COMMAND: pytest {project}/tests -v
 
@@ -218,7 +220,7 @@ jobs:
         # is free here -- QEMU's usual 5-20x penalty would put the leg in the
         # tens of minutes, wasteful but nowhere near the 6h job limit. So
         # emulation stays a viable option for an arch with no native runner.
-        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-14, windows-2022]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -249,7 +251,7 @@ jobs:
           # 32-bit win32 target on Windows, and this C++20 / nanobind / Highway
           # extension has no 32-bit toolchain or deps, so that target fails the
           # build (observed: cp310-win32 exit code 1). auto64 selects just the
-          # native 64-bit arch per runner: AMD64 on Windows, arm64 on macos-14,
+          # native 64-bit arch per runner: AMD64 on Windows, arm64 on macos-15,
           # and on Linux whatever the runner itself is -- x86_64 on ubuntu-22.04,
           # aarch64 on ubuntu-22.04-arm. That is why the arm64 wheel needs no
           # CIBW_ARCHS_LINUX override: the runner, not the arch list, selects it.
@@ -258,6 +260,11 @@ jobs:
           CIBW_ARCHS: "auto64"
           CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_SKIP: "*-musllinux*"
+          # Pinned, so moving the runner image cannot raise the minimum macOS
+          # these wheels install on. 11.0 is cibuildwheel's arm64 default and
+          # what every published macOS wheel so far is tagged with
+          # (macosx_11_0_arm64).
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
           CIBW_TEST_REQUIRES: pytest numpy scipy
           CIBW_TEST_COMMAND: pytest {project}/tests -v
 
