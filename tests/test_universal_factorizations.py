@@ -7,20 +7,24 @@ but compiling is not the interesting claim. What matters for mixed-precision
 work is *where each format stops being usable*, and that is what this file
 pins.
 
-Three tiers, measured on an 8x8 in-range matrix (see TIERS below):
+Three tiers, measured on an 8x8 in-range matrix (see TIERS below), QR
+residual ||QR - A|| / ||A|| with MTL5 5.22.0:
 
-  32-bit and wider   usable: posit32 5.7e-8, takum32 7.9e-8, cascades ~1e-16
-  16-bit             coarse but honest: posit16 2.6e-3, fp16 1.0e-2
-  8-bit              not usable, and two of them fail SILENTLY
+  32-bit and wider   usable: posit32 1.3e-8, takum32 1.6e-8, cascades ~1e-16
+  16-bit             coarse but honest: posit16 8.7e-4, fp16 1.2e-3,
+                     fixpnt16 1.5e-2 (QR and LQ alike)
+  8-bit              not usable: posit8 4.4e-2, fp8 1.0e-1, fixpnt8 1.1e-1
 
-The silent failure is the reason this file exists. For fp8 and fixpnt8 every
-Householder reflector rounds to zero, so Q is returned as the exact identity
-and R as the upper triangle of A. The orthogonality check then reads a perfect
-0.0 while the product reconstructs only triu(A) — an error equal to the weight
-of the discarded subdiagonal, which is a property of the input rather than a
-fixed figure for the format (9% to 45% across the matrices tried, and the
-tests below assert only that it is large). Anyone benchmarking number systems
-will meet this, and it looks like a pass.
+Before MTL5 5.22.0 two of the 8-bit formats, and fixpnt16, failed SILENTLY,
+and that is why this file exists. MTL5's reflector took Parlett's sign, which
+for a small tail makes v(1) ~ -2 x0 / x(1) large. fp8 and fixpnt8 could not
+hold it, so MTL5 fell back to the identity: Q came back as the exact identity
+and R as the upper triangle of A. The orthogonality check then read a perfect
+0.0 while the product reconstructed only triu(A). MTL5 5.22.0 takes LAPACK
+dlarfg's sign, which keeps every |v(i)| <= 1 (MTL5 #672, #675). The narrow
+formats now get real reflectors: still inaccurate in 8 bits, but no longer
+the identity. The tests below pin both halves of that, so a regression to the
+silent identity fails loudly.
 """
 
 import numpy as np
@@ -53,9 +57,6 @@ TIERS = [
 ]
 
 UNUSABLE_8BIT = ["posit8", "fp8", "fixpnt8"]
-
-# These two do not merely lose accuracy — they return the identity for Q.
-DEGENERATE_QR = ["fp8", "fixpnt8"]
 
 ALL_UNIVERSAL = [
     "fp8",
@@ -168,40 +169,30 @@ class TestNarrowFormatsAreNotUsable:
         resid, _, _ = _qr_errors(dtype, A)
         assert resid > 1e-2, "an 8-bit QR that suddenly got accurate deserves a look"
 
-    @pytest.mark.parametrize("dtype", DEGENERATE_QR)
-    def test_reflectors_vanish_and_q_is_the_identity(self, dtype):
-        """The silent failure, pinned exactly.
+    @pytest.mark.parametrize("dtype", UNUSABLE_8BIT)
+    def test_degrades_without_degenerating(self, dtype):
+        """Inaccurate, not structurally broken: the reflectors do not vanish.
 
-        Not "inaccurate" — structurally degenerate. Every reflector rounds to
-        zero, so Q is bit-for-bit the identity. The orthogonality check reads
-        0.0, which is why this cannot be caught by asserting orthogonality.
+        Before MTL5 5.22.0, fp8 and fixpnt8 returned Q bit for bit the
+        identity, and the orthogonality check read a perfect 0.0. Now Q is a
+        real, if coarse, orthogonal factor. Measured: orthogonality 0.13
+        (posit8), 0.11 (fp8), 0.18 (fixpnt8).
         """
         A, _ = _problem()
         resid, orth, Q = _qr_errors(dtype, A)
+        assert not np.array_equal(Q, np.eye(N))
+        assert orth > 1e-2
+        assert resid > 1e-2
 
-        np.testing.assert_array_equal(Q, np.eye(N))
-        assert orth == 0.0  # a perfect score, from a useless factorization
-        assert resid > 1e-2  # while failing to reconstruct A at all
-
-    @pytest.mark.parametrize("dtype", DEGENERATE_QR)
-    def test_r_is_just_the_upper_triangle_of_a(self, dtype):
-        """Follows from Q == I, and is the part that explains the residual:
-        R is A with the subdiagonal dropped, not a factor of it."""
+    @pytest.mark.parametrize("dtype", ["fp8", "fixpnt8"])
+    def test_r_is_a_factor_not_the_upper_triangle_of_a(self, dtype):
+        """Before MTL5 5.22.0, R was A with the subdiagonal dropped, which is
+        what the residual measured. Now the reflectors act on A."""
         A, _ = _problem()
         q = mtl5.qr(mtl5.convert(A, dtype))
         R = np.asarray(q.R.to_numpy())
         A_rounded = np.asarray(mtl5.convert(A, dtype).to_numpy())
-        np.testing.assert_array_equal(R, np.triu(A_rounded))
-
-    def test_posit8_degrades_without_degenerating(self):
-        """posit8 is unusable too, but by a different mechanism — its
-        reflectors do not vanish, so it is inaccurate rather than structurally
-        broken. Distinguished so the two failure modes are not conflated."""
-        A, _ = _problem()
-        resid, orth, Q = _qr_errors("posit8", A)
-        assert not np.array_equal(Q, np.eye(N))
-        assert orth > 1e-2
-        assert resid > 1e-2
+        assert not np.array_equal(R, np.triu(A_rounded))
 
 
 class TestFactorizationObjectReuse:
@@ -372,45 +363,43 @@ class TestLQUsableTiers:
         assert np.linalg.norm(Q @ Q.T - np.eye(Q.shape[0])) < orth_tol
 
 
-class TestLQInheritsQRDegeneracy:
-    """LQ is QR's Householder machinery applied to rows, so the failure carries
-    over unchanged. Asserted rather than assumed, because 'it should behave the
+class TestLQNarrowFormats:
+    """LQ is QR's Householder machinery applied to rows, so it shares QR's
+    behaviour in the narrow formats: before MTL5 5.22.0 fp8 and fixpnt8 gave
+    Q = I in both. Asserted rather than assumed, because 'it should behave the
     same' is exactly the reasoning that hides a difference."""
 
-    @pytest.mark.parametrize("dtype", DEGENERATE_QR)
-    def test_reflectors_vanish_and_q_is_the_identity(self, dtype):
+    @pytest.mark.parametrize("dtype", UNUSABLE_8BIT)
+    def test_degrades_without_degenerating(self, dtype):
         A, _ = _problem()
         Q = np.asarray(mtl5.lq(mtl5.convert(A, dtype)).Q.to_numpy())
-        np.testing.assert_array_equal(Q, np.eye(N))
-
-    def test_posit8_degrades_without_degenerating(self):
-        A, _ = _problem()
-        Q = np.asarray(mtl5.lq(mtl5.convert(A, "posit8")).Q.to_numpy())
         assert not np.array_equal(Q, np.eye(N))
         assert np.linalg.norm(Q @ Q.T - np.eye(N)) > 1e-2
 
 
-class TestFixpnt16LQSaturates:
-    """fixpnt16 is usable for QR (residual ~0.35) and NOT for LQ (~1.6, with
-    orthogonality ~4.6) — the one place the two Householder paths diverge.
+class TestFixpnt16QRAndLQ:
+    """fixpnt16 is fixpnt<16,8>: it saturates at 128, with a resolution of
+    1/256. Before MTL5 5.22.0 its QR returned Q = I (residual 0.135), and its LQ
+    returned Q = I too (0.16). Earlier still, its LQ saturated (1.6). With
+    dlarfg's sign both are coarse but honest. Measured: QR residual 1.5e-2 and
+    orthogonality 4.7e-2; LQ 1.3e-2 and 3.4e-2. The bounds are about 3x those.
+    """
 
-    fixpnt16 is fixpnt<16,8>, so it saturates at 128 with a resolution of
-    1/256. LQ works on rows rather than columns, and on this fixture that order
-    drives an intermediate past the saturation point where QR's does not.
-    Recorded because a reader who knows QR works here would reasonably expect
-    LQ to."""
+    def test_qr_is_coarse_but_usable(self):
+        A, _ = _problem()
+        resid, orth, Q = _qr_errors("fixpnt16", A)
+        assert not np.array_equal(Q, np.eye(N))
+        assert resid < 5e-2
+        assert orth < 0.15
 
-    def test_lq_is_unusable(self):
+    def test_lq_is_coarse_but_usable(self):
         A, _ = _problem()
         f = mtl5.lq(mtl5.convert(A, "fixpnt16"))
         L = np.asarray(f.L.to_numpy())
         Q = np.asarray(f.Q.to_numpy())
-        assert np.linalg.norm(L @ Q - A) / np.linalg.norm(A) > 1.0
-
-    def test_but_qr_is_fine_at_the_same_width(self):
-        A, _ = _problem()
-        resid, _, _ = _qr_errors("fixpnt16", A)
-        assert resid < 1.0
+        assert not np.array_equal(Q, np.eye(N))
+        assert np.linalg.norm(L @ Q - A) / np.linalg.norm(A) < 5e-2
+        assert np.linalg.norm(Q @ Q.T - np.eye(N)) < 0.15
 
 
 @pytest.mark.parametrize("dtype, tol", SOLVE_TIERS)

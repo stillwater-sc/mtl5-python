@@ -230,3 +230,42 @@ class TestBuildInfo:
     def test_zlib_flag_is_reported(self):
         """`.gz` support depends on it, so it has to be queryable."""
         assert isinstance(mtl5.build_info()["zlib"], bool)
+
+
+class TestDuplicateEntries:
+    """Duplicate coordinates sum, in the dense reader as in the sparse one and SciPy.
+
+    mm_read_dense kept only the last value before MTL5 5.21.0 (mtl5#653).
+    """
+
+    CASES = {
+        "general": (
+            "%%MatrixMarket matrix coordinate real general\n"
+            "3 3 4\n1 1 2.0\n1 1 3.0\n3 2 1.5\n2 3 4.0\n",
+            [[5.0, 0.0, 0.0], [0.0, 0.0, 4.0], [0.0, 1.5, 0.0]],
+        ),
+        "symmetric": (
+            "%%MatrixMarket matrix coordinate real symmetric\n"
+            "3 3 4\n2 1 2.0\n2 1 3.0\n3 3 1.0\n3 3 6.0\n",
+            [[0.0, 5.0, 0.0], [5.0, 0.0, 0.0], [0.0, 0.0, 7.0]],
+        ),
+        "cancelling": (
+            "%%MatrixMarket matrix coordinate real symmetric\n3 3 3\n3 1 4.0\n3 1 -4.0\n2 2 1.0\n",
+            [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]],
+        ),
+    }
+
+    @pytest.mark.parametrize("name", sorted(CASES))
+    def test_dense_and_sparse_readers_sum_duplicates(self, tmp_path, name):
+        pytest.importorskip("scipy.sparse")
+        import scipy.io
+
+        import mtl5.sparse as ms
+
+        body, expected = self.CASES[name]
+        path = tmp_path / f"{name}.mtx"
+        path.write_text(body)
+        expected = np.array(expected)
+        np.testing.assert_array_equal(mtl5.io.mm_read_dense(path).to_numpy(), expected)
+        np.testing.assert_array_equal(ms.to_scipy(mtl5.io.mm_read(path)).toarray(), expected)
+        np.testing.assert_array_equal(scipy.io.mmread(path).toarray(), expected)
