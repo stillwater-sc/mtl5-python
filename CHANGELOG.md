@@ -91,9 +91,10 @@ against, and semantic-release manages only the **patch** component.
     −sign(x₀)·‖x‖ on the diagonal, as LAPACK and NumPy give, instead of a
     non-negative diagonal. Q·R = A is unchanged. Code that compared R with
     `np.linalg.qr`'s R up to sign is unaffected.
-  - **Givens rotations scale by an exact power of two** (MTL5 #673), so
-    `minres` and `gmres` no longer overflow on systems scaled beyond
-    sqrt(max). Results inside the old range are unchanged.
+  - **Givens rotations scale by an exact power of two** (MTL5 #673). The
+    rotation inside `gmres` and `minres` no longer squares its inputs, so it
+    stays finite for entries beyond sqrt(max), where it returned inf before.
+    Inside the old range the results are unchanged.
   - **`mm_read_dense` sums duplicate coordinates** (MTL5 5.21.0, #653), as
     `mm_read` and SciPy do. `tests/test_io.py` pins it.
 - **MTL5 pinned to v5.20.0** (was v5.19.0), and the package version set to
