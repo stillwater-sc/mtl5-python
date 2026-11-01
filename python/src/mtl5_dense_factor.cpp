@@ -484,19 +484,18 @@ void register_dense_factorizations(nb::module_& m) {
     // for posit32, 3.1e-8 for takum32, 2.3e-5 for lns32 and 1.1e-16 for the
     // cascades, against 3.3e-16 for double.
     //
-    // The narrow types are registered too — comparing number systems is the
-    // point of #69, and a format failing is a result — but two of them fail
-    // SILENTLY and that is worth knowing before trusting a number. For fp8 and
-    // fixpnt8 every Householder reflector rounds to zero (measured: sum|tau|
-    // == 0 exactly), so qr_extract_Q returns the exact identity and R is just
-    // the upper triangle of A. The factorization then reports a perfect
-    // ||Q^T Q - I|| == 0 while its product is only triu(A) — the residual is
-    // therefore the weight of the discarded subdiagonal, a property of the
-    // input rather than a fixed figure for the format. It looks flawless and
-    // is meaningless. posit8 does not degenerate but is not usable either
-    // (on the 8x8 fixture: residual 0.47, orthogonality 1.3). Covered in
-    // tests/test_universal_factorizations.py so the behaviour is pinned rather
-    // than rediscovered.
+    // The narrow types are registered too -- comparing number systems is the
+    // point of #69, and a format failing is a result. On the 8x8 fixture with
+    // MTL5 5.22.0, fixpnt16 is coarse but honest (residual 1.5e-2), and the
+    // 8-bit formats are not usable (posit8 0.044, fp8 0.10, fixpnt8 0.11).
+    // Before 5.22.0, fp8, fixpnt8 and fixpnt16 failed SILENTLY: MTL5's
+    // reflector used Parlett's sign, which these types cannot hold, so it fell
+    // back to the identity. qr_extract_Q then returned the exact identity and
+    // R the upper triangle of A, a perfect ||Q^T Q - I|| == 0 from a
+    // meaningless factorization. MTL5 5.22.0 takes dlarfg's sign (MTL5 #675),
+    // which keeps every |v(i)| <= 1. Covered in
+    // tests/test_universal_factorizations.py so a return to the silent
+    // identity fails loudly.
     for_each_universal<QRRegistrar>(m);
 
     // LQ and Bunch-Kaufman over the Universal types (#73). LQ is the row-space

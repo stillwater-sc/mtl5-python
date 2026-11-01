@@ -74,6 +74,29 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **MTL5 pinned to v5.22.0** (was v5.20.0), and the package version set to
+  5.22.0, since its minor tracks MTL5's. The `find_package` floor moves from
+  5.19.0 to 5.22.0, because the tests now pin two results that 5.21.0 and
+  5.22.0 change. No binding source changes. The suite gives 1633 passed.
+  - **QR and LQ in the narrow formats get real reflectors.** MTL5 5.22.0's
+    `householder()` takes LAPACK `dlarfg`'s sign, which keeps every |v(i)| ≤ 1
+    (MTL5 #672, #675). Before it, fp8, fixpnt8 and fixpnt16 fell back to
+    Q = I, and R to triu(A), which looked like a perfect orthogonality score.
+    On the 8×8 fixture in `tests/test_universal_factorizations.py`, the QR
+    residual ‖QR − A‖/‖A‖ goes from 0.135 to 0.015 for fixpnt16, which is now
+    usable for QR and LQ alike. posit8 goes from 0.21 to 0.044, and fp8 and
+    fixpnt8 are about 0.1 with real orthogonal factors. They are still not
+    usable in 8 bits. Wider formats change only by rounding.
+  - **The sign of R's diagonal changes.** `qr(A).R` and `lq(A).L` now have
+    −sign(x₀)·‖x‖ on the diagonal, as LAPACK and NumPy give, instead of a
+    non-negative diagonal. Q·R = A is unchanged. Code that compared R with
+    `np.linalg.qr`'s R up to sign is unaffected.
+  - **Givens rotations scale by an exact power of two** (MTL5 #673). The
+    rotation inside `gmres` and `minres` no longer squares its inputs, so it
+    stays finite for entries beyond sqrt(max), where it returned inf before.
+    Inside the old range the results are unchanged.
+  - **`mm_read_dense` sums duplicate coordinates** (MTL5 5.21.0, #653), as
+    `mm_read` and SciPy do. `tests/test_io.py` pins it.
 - **MTL5 pinned to v5.20.0** (was v5.19.0), and the package version set to
   5.20.0, since its minor tracks MTL5's. The `find_package` floor stays at
   5.19.0, since no binding needs anything new from 5.20.0. No binding source

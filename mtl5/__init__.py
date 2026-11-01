@@ -402,15 +402,16 @@ def qr(A):
     `mtl5.convert()`. Returns a factorization exposing `.solve(b)` (least
     squares), `.Q` and `.R`.
 
-    Above 16 bits the Universal types factorize usefully. Below that, read the
-    result before trusting it: for `fp8` and `fixpnt8` every Householder
-    reflector rounds to zero, so `.Q` comes back as the exact identity and `.R`
-    as the upper triangle of A. Such a factorization scores a perfect
-    orthogonality check while reconstructing nothing but `triu(A)` — its error
-    is exactly the weight of A's discarded subdiagonal, so how bad it looks
-    depends on the input rather than on the format. It does not raise, because
-    a genuinely upper-triangular input has zero reflectors too and that case is
-    correct.
+    From 16 bits up the Universal types factorize usefully; `fixpnt16` is
+    coarse (residual about 1.5e-2 on an 8x8 in-range matrix) but honest. The
+    8-bit formats are not usable: `posit8`, `fp8` and `fixpnt8` give residuals
+    of 0.04 to 0.11. Read the result before trusting a narrow format.
+
+    Before MTL5 5.22.0, `fp8`, `fixpnt8` and `fixpnt16` failed silently: every
+    reflector fell back to the identity, so `.Q` came back as the exact
+    identity and `.R` as the upper triangle of A, which scores a perfect
+    orthogonality check. MTL5 5.22.0's reflector takes LAPACK `dlarfg`'s sign,
+    which these formats can hold, so they now get real, if coarse, factors.
     """
     return _factor("qr", "QRFactor", A)
 
@@ -425,9 +426,10 @@ def lq(A):
 
     Accepts float32/float64 (and complex), plus every Universal dtype via
     `mtl5.convert()`. Being the row-space counterpart of `qr`, it shares that
-    machinery and its limits: `fp8` and `fixpnt8` degenerate to `Q == I` in the
-    same way, and `fixpnt16` saturates here even though `qr` tolerates it at
-    the same width. Read the result before trusting a narrow format.
+    machinery and its limits: `fixpnt16` is coarse but usable (residual about
+    1.3e-2), and the 8-bit formats are not usable. Before MTL5 5.22.0, `fp8`,
+    `fixpnt8` and `fixpnt16` degenerated to `Q == I` here as in `qr`. Read the
+    result before trusting a narrow format.
 
     Returns a factorization exposing `.L` and `.Q`.
     """

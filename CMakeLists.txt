@@ -130,17 +130,26 @@ endif()
 #              it, ilut's adjoint was M^-1, and mtl5_krylov.cpp lets bicg/qmr use
 #              ilut on a non-symmetric A (#107). Against 5.18.x that compiles and
 #              returns a wrong answer, so only the floor stops it.
+#   v5.21.0 -- mm_read_dense sums duplicate coordinates, as mm_read and SciPy
+#              do (MTL5 #653). Before it, the dense reader kept only the last
+#              entry, so mtl5.io.mm_read_dense and mtl5.io.mm_read disagreed on
+#              the same file; tests/test_io.py pins the sum.
+#   v5.22.0 -- householder() reflects onto LAPACK dlarfg's sign (MTL5 #675), so
+#              every |v(i)| <= 1 and the narrow formats' reflectors no longer
+#              vanish. tests/test_universal_factorizations.py pins the new
+#              tiers: against 5.21.x fp8, fixpnt8 and fixpnt16 return Q = I,
+#              which compiles and runs, so only the floor stops it.
 #
 # The version argument to find_package is what applies that floor to the OTHER
 # build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
 # MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
 # installed would silently build against it and get ~140 template errors deep
 # inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
-# with COMPATIBILITY SameMajorVersion, under which 5.19.0 rejects an installed
-# 5.18.x or older and accepts 5.19.0 or any later 5.x -- exactly the floor we want. (It also
+# with COMPATIBILITY SameMajorVersion, under which 5.22.0 rejects an installed
+# 5.21.x or older and accepts 5.22.0 or any later 5.x -- exactly the floor we want. (It also
 # rejects a 6.x install, which is correct: an MTL5 major bump is the manual
 # intervention case in the version policy, not something to absorb silently.)
-find_package(MTL5 5.19.0 QUIET)
+find_package(MTL5 5.22.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -150,7 +159,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        v5.20.0
+        GIT_TAG        v5.22.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
