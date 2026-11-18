@@ -85,10 +85,12 @@ class TestEveryPairingConverges:
         assert info == 0, f"{solver}+{pc} did not converge"
         np.testing.assert_allclose(x, x_true, rtol=1e-6, atol=1e-8)
 
-    @pytest.mark.parametrize("solver", [s for s in GENERAL_SOLVERS if s != "tfqmr"])
+    @pytest.mark.parametrize("solver", GENERAL_SOLVERS)
     @pytest.mark.parametrize("pc", ALWAYS_SYMMETRIC_PC[:2])
     def test_non_symmetric_system_weak_preconditioners(self, solver, pc):
-        """tfqmr is excluded — see TestTfqmrStagnatesUnpreconditioned."""
+        """tfqmr included: it stagnated here unpreconditioned and with a
+        diagonal preconditioner until MTL5 5.24.0 restored its u recurrence
+        (MTL5 #731)."""
         A, x_true, b = system(nonsym=True)
         x, info = getattr(ms, solver)(A, b, M=make_pc(pc, A), rtol=1e-12, maxiter=5000)
         assert info == 0, f"{solver}+{pc} did not converge"
@@ -117,29 +119,6 @@ def _vec(b):
     import mtl5
 
     return mtl5.vector(np.ascontiguousarray(b, dtype=np.float64))
-
-
-class TestTfqmrStagnatesUnpreconditioned:
-    """TFQMR can stagnate, and does on this system with identity or diagonal —
-    it plateaus rather than converging slowly, unchanged from 2 000 to 20 000
-    iterations. That is a known characteristic of the method rather than a
-    defect in the dispatch: the same solver converges in single-digit
-    iterations once given a real preconditioner. Recorded here so the exclusion
-    above is deliberate and visible rather than a quietly narrowed grid.
-    """
-
-    @pytest.mark.parametrize("pc", ["identity", "diagonal"])
-    def test_it_stagnates(self, pc):
-        A, _, b = system(nonsym=True)
-        _, info = ms.tfqmr(A, b, M=make_pc(pc, A), rtol=1e-12, maxiter=5000)
-        assert info != 0, "tfqmr unexpectedly converged — revisit the exclusion"
-
-    @pytest.mark.parametrize("pc", A_DEPENDENT_PC)
-    def test_a_preconditioner_rescues_it(self, pc):
-        A, x_true, b = system(nonsym=True)
-        x, info = ms.tfqmr(A, b, M=make_pc(pc, A), rtol=1e-12, maxiter=5000)
-        assert info == 0
-        np.testing.assert_allclose(x, x_true, rtol=1e-6, atol=1e-8)
 
 
 class TestBicgQmrNeedAnExactAdjoint:

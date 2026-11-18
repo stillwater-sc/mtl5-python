@@ -134,7 +134,9 @@ class TestErrors:
         """Complex Matrix Market files must be refused, not mis-parsed."""
         path = tmp_path / "cx.mtx"
         path.write_text("%%MatrixMarket matrix coordinate complex general\n1 1 1\n1 1 1.0 0.0\n")
-        with pytest.raises(RuntimeError, match="unsupported.*field|field"):
+        # MTL5 5.24.0 names the problem: "a 'complex' file needs a std::complex
+        # value type" (its Matrix Market header validation).
+        with pytest.raises(RuntimeError, match="complex"):
             mtl5.io.mm_read(path)
 
     def test_zero_max_pixels(self, tmp_path):
