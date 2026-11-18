@@ -891,10 +891,10 @@ ms.bicg(nonsymmetric_A, b, M=ms.ssor(nonsymmetric_A))  # ValueError, by design
 ms.bicg(nonsymmetric_A, b, M=ms.ilu0(nonsymmetric_A))  # fine
 ```
 
-One behaviour worth knowing: **TFQMR can stagnate** unpreconditioned — it
-plateaus rather than converging slowly, and more iterations do not help. Giving
-it any real preconditioner fixes it. That is a property of the method, not of
-this binding.
+TFQMR used to stagnate unpreconditioned, plateauing however many iterations it
+was given. That was a defect in MTL5's TFQMR, not a property of the method:
+since MTL5 5.24.0 (MTL5 #731) it converges unpreconditioned and with a diagonal
+preconditioner, and every solver reports convergence on the true residual.
 
 ## Sparse direct solvers
 
