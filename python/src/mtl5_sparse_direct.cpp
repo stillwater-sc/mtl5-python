@@ -71,6 +71,79 @@ std::vector<std::size_t> permutation_for(const mtl::mat::compressed2D<T>& A,
     throw std::invalid_argument("unknown ordering '" + name + "'; " + kOrderingHelp);
 }
 
+// ---------------------------------------------------------------------------
+// Exposing the factors
+//
+// Every factorization below keeps its factors in MTL5's internal CSC layout.
+// They are handed to Python as copies in the CRS SparseMatrix_* type the rest
+// of the module speaks, so the result works with mtl5.io.spy, to_scipy and
+// matvec like any other sparse matrix. The copy is O(nnz) on every access;
+// that is deliberate, since a view would tie a Python object's lifetime to a
+// factor that refactor() overwrites in place.
+//
+// Permutations follow MTL5's convention, p[new] = old, so a permutation
+// indexes the ORIGINAL matrix: for an LU, A[row_perm][:, col_perm] == L @ U.
+// That is the inverse of scipy's SuperLU.perm_r / perm_c, which is why the
+// scipy names are not reused here.
+// ---------------------------------------------------------------------------
+
+/// A permutation as a NumPy int64 array.
+inline nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>
+perm_array(const std::vector<std::size_t>& p) {
+    const std::size_t n = p.size();
+    int64_t* buf = new int64_t[n];
+    for (std::size_t i = 0; i < n; ++i) buf[i] = static_cast<int64_t>(p[i]);
+    std::size_t shape[1] = { n };
+    nb::capsule owner(buf, [](void* q) noexcept { delete[] static_cast<int64_t*>(q); });
+    return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(buf, 1, shape, owner);
+}
+
+/// A vector of factor values as a NumPy float64 array.
+template <typename T>
+nb::ndarray<nb::numpy, double, nb::ndim<1>> f64_array(const std::vector<T>& v) {
+    const std::size_t n = v.size();
+    double* buf = new double[n];
+    for (std::size_t i = 0; i < n; ++i) buf[i] = static_cast<double>(v[i]);
+    std::size_t shape[1] = { n };
+    nb::capsule owner(buf, [](void* q) noexcept { delete[] static_cast<double*>(q); });
+    return nb::ndarray<nb::numpy, double, nb::ndim<1>>(buf, 1, shape, owner);
+}
+
+/// Copy a CSC factor into a CRS SparseMatrix.
+///
+/// The LDL^T factors store L as unit lower triangular WITHOUT its diagonal --
+/// the 1s are implicit in the solves. `add_unit_diagonal` writes them back, so
+/// every L this module returns has its diagonal explicit and reconstructs with
+/// plain products (L @ D @ L.T), the same way the LU and Cholesky L do. Each
+/// column's stored rows are strictly below the diagonal and sorted, so the 1
+/// goes first.
+template <typename T, typename S>
+mtl::mat::compressed2D<T> factor_to_crs(const mtl::sparse::util::csc_matrix<T, S>& M,
+                                        bool add_unit_diagonal = false) {
+    if (!add_unit_diagonal) return mtl::sparse::util::csc_to_crs(M);
+    mtl::sparse::util::csc_matrix<T, S> W;
+    W.nrows = M.nrows;
+    W.ncols = M.ncols;
+    W.col_ptr.resize(M.ncols + 1);
+    W.row_ind.reserve(M.nnz() + M.ncols);
+    W.values.reserve(M.nnz() + M.ncols);
+    W.col_ptr[0] = 0;
+    for (S c = 0; c < M.ncols; ++c) {
+        W.row_ind.push_back(c);
+        W.values.push_back(T{1});
+        for (S k = M.col_ptr[c]; k < M.col_ptr[c + 1]; ++k) {
+            if (M.row_ind[k] <= c)
+                throw std::logic_error(
+                    "factor_to_crs: expected a strictly lower factor with an "
+                    "implicit unit diagonal");
+            W.row_ind.push_back(M.row_ind[k]);
+            W.values.push_back(M.values[k]);
+        }
+        W.col_ptr[c + 1] = static_cast<S>(W.row_ind.size());
+    }
+    return mtl::sparse::util::csc_to_crs(W);
+}
+
 /// Symbolic analysis under a named ordering.
 template <typename T>
 fact::lu_symbolic symbolic_for(const mtl::mat::compressed2D<T>& A,
@@ -260,6 +333,19 @@ void register_sparse_lu(nb::module_& m) {
                      "Pivots replaced by perturbation; 0 means a clean factor")
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
+        .def_prop_ro("L", [](const Wrap& s) { return factor_to_crs(s.num.factorL()); },
+                     "Unit lower triangular factor, diagonal stored, as a copy. "
+                     "A[row_perm][:, col_perm] == L @ U.")
+        .def_prop_ro("U", [](const Wrap& s) { return factor_to_crs(s.num.factorU()); },
+                     "Upper triangular factor, as a copy. "
+                     "A[row_perm][:, col_perm] == L @ U.")
+        .def_prop_ro("row_perm", [](const Wrap& s) { return perm_array(s.num.row_perm); },
+                     nb::rv_policy::move,
+                     "Row permutation from threshold pivoting, p[new] = old")
+        .def_prop_ro("col_perm", [](const Wrap& s) {
+            return perm_array(s.num.symbolic.col_perm);
+        }, nb::rv_policy::move,
+           "Column permutation from the fill-reducing ordering, q[new] = old")
         .def("solve", [](const Wrap& s,
                          nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {
@@ -296,6 +382,10 @@ void register_sparse_lu(nb::module_& m) {
         });
 }
 
+// KLU exposes no L / U. Its factorization is a block upper triangular form
+// with an independent LU per diagonal block, scaled and permuted per block;
+// there is no single pair of triangular factors to return, and inventing one
+// would misrepresent where BTF saves its fill. `nblocks` and `nnz` describe it.
 template <typename T>
 void register_klu(nb::module_& m) {
     using SMat = mtl::mat::compressed2D<T>;
@@ -502,6 +592,12 @@ void register_cholesky(nb::module_& m) {
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factor().nnz(); },
                      "Nonzeros in the lower factor L")
+        .def_prop_ro("L", [](const Wrap& s) { return factor_to_crs(s.num.factor()); },
+                     "Lower triangular Cholesky factor, as a copy. "
+                     "A[perm][:, perm] == L @ L.T.")
+        .def_prop_ro("perm", [](const Wrap& s) { return perm_array(s.num.symbolic.perm); },
+                     nb::rv_policy::move,
+                     "Symmetric fill-reducing permutation, p[new] = old")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::cholesky_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
@@ -552,16 +648,18 @@ void register_ldlt(nb::module_& m) {
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); },
-                     "Nonzeros in the unit lower factor L")
-        .def("diagonal", [](const Wrap& s) {
-            const auto& d = s.num.diagonal();
-            double* buf = new double[d.size()];
-            for (std::size_t i = 0; i < d.size(); ++i) buf[i] = static_cast<double>(d[i]);
-            std::size_t shape[1] = { d.size() };
-            nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<double*>(p); });
-            return nb::ndarray<nb::numpy, double, nb::ndim<1>>(buf, 1, shape, owner);
-        }, "The diagonal D. Its signs give the inertia: a negative entry means A "
-           "is indefinite.")
+                     "Nonzeros in the unit lower factor L, excluding its implicit "
+                     "unit diagonal (so L.nnz == nnz + n)")
+        .def_prop_ro("L", [](const Wrap& s) {
+            return factor_to_crs(s.num.factorL(), /*add_unit_diagonal=*/true);
+        }, "Unit lower triangular factor, as a copy, with its unit diagonal made "
+           "explicit. A[perm][:, perm] == L @ diag(diagonal()) @ L.T.")
+        .def_prop_ro("perm", [](const Wrap& s) { return perm_array(s.num.symbolic.perm); },
+                     nb::rv_policy::move,
+                     "Symmetric fill-reducing permutation, p[new] = old")
+        .def("diagonal", [](const Wrap& s) { return f64_array(s.num.diagonal()); },
+             "The diagonal D. Its signs give the inertia: a negative entry means A "
+             "is indefinite.")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::ldlt_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
@@ -612,6 +710,15 @@ void register_qr(nb::module_& m) {
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) { return s.num.R.nnz(); },
                      "Nonzeros in the upper factor R")
+        .def_prop_ro("R", [](const Wrap& s) { return factor_to_crs(s.num.R); },
+                     "Upper triangular factor R (ncols x ncols), as a copy. "
+                     "A[:, col_perm] == Q @ R; Q is held implicitly as Householder "
+                     "vectors and is not exposed, but R.T @ R == "
+                     "A[:, col_perm].T @ A[:, col_perm].")
+        .def_prop_ro("col_perm", [](const Wrap& s) {
+            return perm_array(s.num.symbolic.col_perm);
+        }, nb::rv_policy::move,
+           "Column permutation from the fill-reducing ordering, q[new] = old")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             if (b.shape(0) != s.nrows)
@@ -687,6 +794,27 @@ void register_supernodal_lu(nb::module_& m) {
         .def_prop_ro("nnz", [](const Wrap& s) {
             return s.num.factorL().nnz() + s.num.factorU().nnz();
         }, "Nonzeros in L plus U")
+        .def_prop_ro("L", [](const Wrap& s) { return factor_to_crs(s.num.factorL()); },
+                     "Unit lower triangular factor, diagonal stored, as a copy. "
+                     "(diag(r) @ A)[row_perm][:, col_perm] == L @ U, where r is "
+                     "row_scale (all ones when scale=False).")
+        .def_prop_ro("U", [](const Wrap& s) { return factor_to_crs(s.num.factorU()); },
+                     "Upper triangular factor, as a copy. See L for the identity.")
+        .def_prop_ro("row_perm", [](const Wrap& s) { return perm_array(s.num.row_perm); },
+                     nb::rv_policy::move,
+                     "Row permutation from threshold pivoting, p[new] = old")
+        .def_prop_ro("col_perm", [](const Wrap& s) {
+            return perm_array(s.num.symbolic.col_perm);
+        }, nb::rv_policy::move,
+           "Column permutation, q[new] = old: the fill-reducing ordering "
+           "followed by the column elimination tree postorder")
+        .def_prop_ro("row_scale", [](const Wrap& s)
+                         -> std::optional<nb::ndarray<nb::numpy, double, nb::ndim<1>>> {
+            if (s.num.row_scale.empty()) return std::nullopt;
+            return f64_array(s.num.row_scale);
+        }, nb::rv_policy::move,
+           "Row equilibration factors indexed by ORIGINAL row, or None when the "
+           "matrix was factored unscaled (scale=False)")
         .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; })
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
@@ -746,9 +874,22 @@ void register_supernodal_ldlt(nb::module_& m) {
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
-        .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); })
+        .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); },
+                     "Nonzeros in the unit lower factor L, excluding its implicit "
+                     "unit diagonal (so L.nnz == nnz + n)")
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
+        .def_prop_ro("L", [](const Wrap& s) {
+            return factor_to_crs(s.num.factorL(), /*add_unit_diagonal=*/true);
+        }, "Unit lower triangular factor, as a copy, with its unit diagonal made "
+           "explicit. A[perm][:, perm] == L @ diag(diagonal()) @ L.T.")
+        .def_prop_ro("perm", [](const Wrap& s) { return perm_array(s.num.symbolic.sperm); },
+                     nb::rv_policy::move,
+                     "Symmetric permutation, p[new] = old: the fill-reducing "
+                     "ordering followed by the elimination tree postorder")
+        .def("diagonal", [](const Wrap& s) { return f64_array(s.num.diagonal()); },
+             "The diagonal D. Its signs give the inertia: a negative entry means A "
+             "is indefinite.")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_ldlt_factor<T>, T>(
@@ -786,12 +927,7 @@ void register_orderings(nb::module_& m) {
             nogil guard;
             perm = permutation_for(A, name);
         }
-        const std::size_t n = perm.size();
-        int64_t* buf = new int64_t[n];
-        for (std::size_t i = 0; i < n; ++i) buf[i] = static_cast<int64_t>(perm[i]);
-        std::size_t shape[1] = { n };
-        nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<int64_t*>(p); });
-        return nb::ndarray<nb::numpy, int64_t, nb::ndim<1>>(buf, 1, shape, owner);
+        return perm_array(perm);
     }, "A"_a, "name"_a);
 }
 

@@ -15,6 +15,31 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **The sparse direct factorizations expose their factors** (part of #125).
+  Until now a factor object reported only `.nnz`, so the fill an ordering
+  produced could be counted but not seen. The factors come back as
+  `SparseMatrix_*` copies, so `mtl5.io.spy`, `to_scipy` and matvec work on
+  them. The permutations come back as int64 arrays.
+  - `splu`: `L`, `U`, `row_perm`, `col_perm`, with
+    `A[row_perm][:, col_perm] == L @ U`.
+  - `supernodal_lu`: the same, plus `row_scale` (None unless `scale=True`).
+    The identity is then `(diag(row_scale) @ A)[row_perm][:, col_perm]`.
+  - `cholesky`: `L`, `perm`, with `A[perm][:, perm] == L @ L.T`.
+  - `ldlt` and `supernodal_ldlt`: `L`, `perm` and `diagonal()`. MTL5 stores
+    these L without their unit diagonal; the returned L has it written out,
+    so `L @ diag(D) @ L.T` reconstructs directly and `L.nnz == nnz + n`.
+  - `qr`: `R`, `col_perm`. Q stays implicit as Householder vectors, so it is
+    not exposed.
+
+  Two deliberate choices:
+  - **Permutations use MTL5's convention, `p[new] = old`.** That is the
+    inverse of scipy's `SuperLU.perm_r`/`perm_c`, so the scipy names are not
+    reused for them.
+  - **KLU exposes no factors.** Its block triangular form factors each
+    diagonal block separately, so there is no single (L, U) pair to return.
+
+  Each access copies O(nnz). A view would tie the Python object to a factor
+  that `refactor()` overwrites in place.
 - **The dense containers speak NumPy's array protocol, so scikit-learn takes
   them** (#17). Every `DenseVector_*` and `DenseMatrix_*` has an `__array__`.
   Before this, `np.asarray(mtl5.matrix(X))` was a 0-d object array, so every
