@@ -286,11 +286,18 @@ class TestConcurrentRefactor:
     """
 
     @pytest.mark.parametrize("kind", ["cholesky", "ldlt", "splu", "supernodal_lu"])
-    def test_readers_never_see_a_torn_factor(self, kind):
+    def test_readers_never_see_a_torn_factor(self, kind, tmp_path):
         import subprocess
         import sys
 
+        # `python -c` puts the working directory first on sys.path. Run from
+        # the repo root, that is the source mtl5/ package, which has no
+        # compiled _core; an empty directory keeps the installed one visible.
         r = subprocess.run(
-            [sys.executable, "-c", _RACE, kind], capture_output=True, text=True, timeout=300
+            [sys.executable, "-c", _RACE, kind],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=tmp_path,
         )
         assert r.returncode == 0, r.stdout + r.stderr
