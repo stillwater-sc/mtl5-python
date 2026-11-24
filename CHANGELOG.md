@@ -116,6 +116,12 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Spy plots draw one image cell per matrix entry** (orderings notebook and
+  SPD page). They used matplotlib's `ax.spy` with markers sized in points,
+  and at these sizes each marker spanned 2–4 matrix rows, so neighbouring
+  nonzeros merged into blobs. The pattern is now an image with one cell per
+  entry, rendered at about two pixels per row. Nonzeros never overlap, and
+  dense blocks still read as solid.
 - **Guide page: "Mixed precision: a narrow factor, refined"** (section 7 of
   #125). A float32 Cholesky refined with `mtl5.mixed.iterative_refine`
   reaches float64 accuracy in 3 corrections on a 2-D Poisson problem, with
