@@ -9,11 +9,23 @@ kernelspec:
 
 The [orderings guide](../notebooks/sparse_direct_orderings) works through an
 unsymmetric matrix with LU. Many of the matrices people actually factor are
-symmetric positive definite (SPD): stiffness matrices, graph Laplacians, normal
-equations, covariance matrices. For those, `mtl5.sparse` has two factorizations
-that exploit the symmetry and need no pivoting:
+symmetric positive definite (SPD), provided they are nonsingular:
 
-- `ms.cholesky(A)`, $A = LL^T$, a left-looking column factorization;
+- stiffness matrices, once enough boundary conditions remove the rigid-body
+  modes;
+- graph Laplacians, once a node is grounded (a plain Laplacian is singular,
+  since the constant vector is in its nullspace);
+- normal equations $A^TA$, when $A$ has full column rank;
+- covariance matrices, when no variable is a linear combination of the
+  others.
+
+For SPD matrices, `mtl5.sparse` has two factorizations that exploit the
+symmetry and need no pivoting. `cholesky` raises `RuntimeError` on a matrix
+that turns out not to be positive definite. `supernodal_ldlt` also accepts a
+symmetric indefinite matrix, and raises only on a zero pivot.
+
+- `ms.cholesky(A)`, $A = LL^T$, an up-looking (column-at-a-time,
+  non-supernodal) factorization;
 - `ms.supernodal_ldlt(A)`, $A = LDL^T$, which groups columns with the same
   pattern into *supernodes* and updates them with dense block operations.
 
