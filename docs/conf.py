@@ -3,7 +3,10 @@
 Build locally (needs the compiled extension and the `docs` extra):
 
     pip install -e ".[docs]"
-    sphinx-build -W --keep-going -b html docs docs/_build/html
+    sphinx-build -E -W --keep-going -b html docs docs/_build/html
+
+-E discards the saved environment, so every page, including the executable
+getting-started page, is re-read and re-executed against the current package.
 
 The notebooks under notebooks/ are the single source of truth. They are
 committed with their outputs stripped (tests/test_notebooks.py enforces it),
@@ -82,8 +85,11 @@ def _copy_notebooks() -> None:
     if dst.exists():
         shutil.rmtree(dst)
     dst.mkdir()
+    # copy, not copy2: a fresh mtime makes Sphinx re-read, and so re-execute,
+    # every notebook on every build. Keeping the source mtime would let an
+    # incremental build reuse cached outputs after a change to the package.
     for nb in sorted(src.glob("*.ipynb")):
-        shutil.copy2(nb, dst / nb.name)
+        shutil.copy(nb, dst / nb.name)
     if (src / "data").is_dir():
         shutil.copytree(src / "data", dst / "data")
 

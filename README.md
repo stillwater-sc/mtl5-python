@@ -1144,5 +1144,5 @@ notebooks, so it needs the compiled module:
 
 ```bash
 pip install -e ".[docs]"
-sphinx-build -W --keep-going -b html docs docs/_build/html
+sphinx-build -E -W --keep-going -b html docs docs/_build/html
 ```

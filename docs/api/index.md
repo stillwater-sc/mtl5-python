@@ -16,9 +16,14 @@ overloaded once per element type; the signatures list every overload.
    matrix
    convert
    dtypes
-   DenseVector
-   DenseMatrix
+   DenseVector_f64
+   DenseMatrix_f64
 ```
+
+`mtl5.DenseVector` and `mtl5.DenseMatrix` are aliases of the `float64`
+classes above. Every other element type has the same pair of classes with a
+different suffix, such as `DenseMatrix_posit16`. `mtl5.dtypes()` lists the
+suffixes.
 
 ## Dense linear algebra
 
