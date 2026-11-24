@@ -219,3 +219,78 @@ def test_klu_exposes_no_factors():
     k = ms.klu(unsymmetric())
     assert not hasattr(k, "L")
     assert not hasattr(k, "U")
+
+
+# The stress program for TestConcurrentRefactor. It runs in a subprocess so
+# that a use-after-free -- the other way this race fails -- shows up as a
+# failing exit code rather than taking pytest down with it.
+_RACE = r"""
+import sys, threading
+import numpy as np
+import scipy.sparse as sp
+import mtl5.sparse as ms
+
+kind = sys.argv[1]
+k = 60
+eye = sp.eye(k, format="csr")
+tri = sp.diags([-1.0, 2.0, -1.0], [-1, 0, 1], shape=(k, k), format="csr")
+A1 = (sp.kron(eye, tri) + sp.kron(tri, eye)).tocsr()
+A2 = A1.copy()
+A2.data = A2.data * 4.0
+M1, M2 = ms.from_scipy(A1), ms.from_scipy(A2)
+make = {"cholesky": ms.cholesky, "ldlt": ms.ldlt, "splu": ms.splu,
+        "supernodal_lu": ms.supernodal_lu}[kind]
+attr = "U" if kind in ("splu", "supernodal_lu") else "L"
+
+def snap(f):
+    return ms.to_scipy(getattr(f, attr)).data.copy()
+
+ref = [snap(make(A1)), snap(make(A2))]
+b = A1 @ np.ones(A1.shape[0])
+xs = [np.ones(A1.shape[0]), np.full(A1.shape[0], 0.25)]   # A2 = 4 * A1
+f = make(A1)
+stop = threading.Event()
+torn = [0, 0]
+
+def writer():
+    for i in range(400):
+        f.refactor(M2 if i % 2 else M1)
+    stop.set()
+
+def reader():
+    while not stop.is_set():
+        d = snap(f)
+        if not any(d.shape == r.shape and np.allclose(d, r) for r in ref):
+            torn[0] += 1
+        x = f.solve(b).to_numpy()
+        if not any(np.allclose(x, xr) for xr in xs):
+            torn[1] += 1
+
+threads = [threading.Thread(target=writer)] + [threading.Thread(target=reader) for _ in range(3)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+print("torn factor reads:", torn[0], "torn solves:", torn[1])
+sys.exit(1 if any(torn) else 0)
+"""
+
+
+class TestConcurrentRefactor:
+    """refactor() replaces the factor with the GIL released (CodeRabbit on #126).
+
+    A getter, solve() or iterative_refine running in another thread must see
+    either the old factor or the new one, never a mix. Before the per-wrapper
+    lock, three reader threads against one refactoring writer saw torn factors
+    in every run, for every factorization here.
+    """
+
+    @pytest.mark.parametrize("kind", ["cholesky", "ldlt", "splu", "supernodal_lu"])
+    def test_readers_never_see_a_torn_factor(self, kind):
+        import subprocess
+        import sys
+
+        r = subprocess.run(
+            [sys.executable, "-c", _RACE, kind], capture_output=True, text=True, timeout=300
+        )
+        assert r.returncode == 0, r.stdout + r.stderr

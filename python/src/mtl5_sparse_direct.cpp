@@ -38,7 +38,9 @@
 #include <mtl/sparse/ordering/rcm.hpp>
 
 #include <cstddef>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -246,6 +248,26 @@ inline void require_default_acc_for_refactor(const std::string& acc, const char*
             "Construct a new factorization instead.");
 }
 
+// ---------------------------------------------------------------------------
+// FactorLock: every wrapper below carries a std::shared_mutex `mtx` guarding
+// `num`.
+//
+// refactor() replaces or rewrites `num` with the GIL released, so the GIL alone
+// cannot order it against anything: solve() and iterative_refine read `num`
+// with the GIL released too, and the L/U/perm getters read it with the GIL
+// held. Without the lock a getter could copy a factor halfway through a
+// refactor -- a torn mix of old and new values, or a read of storage the move
+// assignment just freed. The rule:
+//
+//   - refactor() takes `mtx` exclusive;
+//   - every read of `num` (getters, solve, iterative_refine) takes it shared.
+//
+// Lock order is always GIL-first: the paths that release the GIL release it
+// BEFORE taking `mtx` and retake it only after dropping `mtx` (the lock is
+// declared after the nogil guard, so it is destroyed first). A getter blocks on
+// `mtx` while holding the GIL, which is safe because no holder of `mtx` ever
+// waits for the GIL.
+// ---------------------------------------------------------------------------
 template <typename T>
 struct SparseLU {
     fact::lu_numeric<T> num;
@@ -254,6 +276,7 @@ struct SparseLU {
     std::string accumulator;
 
     const fact::lu_numeric<T>& factor() const { return num; }
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 // ===========================================================================
@@ -266,11 +289,12 @@ struct KLU {
     std::string accumulator;
 
     const fact::klu_numeric<T>& factor() const { return num; }
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 /// Shared solve body: run the factorization's triangular solves on a copy of b.
 template <typename Fac, typename T>
-VectorView<T> solve_with(const Fac& fac, std::size_t n,
+VectorView<T> solve_with(const Fac& fac, std::shared_mutex& mtx, std::size_t n,
                          const double* bp, std::size_t blen) {
     if (blen != n)
         throw std::invalid_argument(
@@ -279,6 +303,7 @@ VectorView<T> solve_with(const Fac& fac, std::size_t n,
     mtl::vec::dense_vector<T> x(n);
     {
         nogil guard;
+        std::shared_lock lock(mtx);   // after the GIL is released: see FactorLock
         mtl::vec::dense_vector<T> b(n);
         for (std::size_t i = 0; i < n; ++i) b[i] = static_cast<T>(bp[i]);
         fac.solve(x, b);
@@ -327,29 +352,40 @@ void register_sparse_lu(nb::module_& m) {
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
         .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return s.num.factorL().nnz() + s.num.factorU().nnz();
         }, "Nonzeros in L plus U — the fill the ordering produced")
-        .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; },
-                     "Pivots replaced by perturbation; 0 means a clean factor")
+        .def_prop_ro("num_perturbed", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.num_perturbed;
+        }, "Pivots replaced by perturbation; 0 means a clean factor")
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
-        .def_prop_ro("L", [](const Wrap& s) { return factor_to_crs(s.num.factorL()); },
-                     "Unit lower triangular factor, diagonal stored, as a copy. "
-                     "A[row_perm][:, col_perm] == L @ U.")
-        .def_prop_ro("U", [](const Wrap& s) { return factor_to_crs(s.num.factorU()); },
-                     "Upper triangular factor, as a copy. "
-                     "A[row_perm][:, col_perm] == L @ U.")
-        .def_prop_ro("row_perm", [](const Wrap& s) { return perm_array(s.num.row_perm); },
+        .def_prop_ro("L", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return factor_to_crs(s.num.factorL());
+        }, "Unit lower triangular factor, diagonal stored, as a copy. "
+           "A[row_perm][:, col_perm] == L @ U.")
+        .def_prop_ro("U", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return factor_to_crs(s.num.factorU());
+        }, "Upper triangular factor, as a copy. "
+           "A[row_perm][:, col_perm] == L @ U.")
+        .def_prop_ro("row_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.row_perm);
+        },
                      nb::rv_policy::move,
                      "Row permutation from threshold pivoting, p[new] = old")
         .def_prop_ro("col_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return perm_array(s.num.symbolic.col_perm);
         }, nb::rv_policy::move,
            "Column permutation from the fill-reducing ordering, q[new] = old")
         .def("solve", [](const Wrap& s,
                          nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {
-            return solve_with<fact::lu_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
+            return solve_with<fact::lu_numeric<T>, T>(s.num, s.mtx, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b using the stored factors")
         .def("refactor", [](Wrap& s, const SMat& A) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
@@ -357,6 +393,7 @@ void register_sparse_lu(nb::module_& m) {
                     "refactor: matrix dimensions do not match the factorization");
             require_default_acc_for_refactor(s.accumulator, "sparse_lu_refactor");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             // Numeric-only: reuses the ordering, symbolic structure and pivot
             // sequence. The IN-PLACE form (MTL5 #310) is the one to call: the
             // value-returning sparse_lu_refactor is now a wrapper that copies
@@ -376,6 +413,7 @@ void register_sparse_lu(nb::module_& m) {
            "Recompute the numeric factors for a matrix with the SAME sparsity "
            "pattern, reusing the ordering, symbolic analysis and pivot sequence")
         .def("__repr__", [name](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
                    ", ordering='" + s.ordering + "', nnz=" +
                    std::to_string(s.num.factorL().nnz() + s.num.factorU().nnz()) + ")";
@@ -421,12 +459,15 @@ void register_klu(nb::module_& m) {
             return std::pair<std::size_t, std::size_t>(s.n, s.n);
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
-        .def_prop_ro("nblocks", [](const Wrap& s) { return s.num.nblocks(); },
-                     "Diagonal blocks found by the block triangular form; more "
-                     "blocks means more reducible structure to exploit")
+        .def_prop_ro("nblocks", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.nblocks();
+        }, "Diagonal blocks found by the block triangular form; more "
+           "blocks means more reducible structure to exploit")
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
         .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             // Summed over the diagonal blocks: the off-diagonal blocks are not
             // factored, which is exactly where BTF saves work.
             std::size_t total = 0;
@@ -434,18 +475,21 @@ void register_klu(nb::module_& m) {
                 total += blk.factorL().nnz() + blk.factorU().nnz();
             return total;
         }, "Nonzeros in L plus U, summed over the diagonal blocks")
-        .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; },
-                     "Pivots replaced by perturbation across all blocks")
+        .def_prop_ro("num_perturbed", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.num_perturbed;
+        }, "Pivots replaced by perturbation across all blocks")
         .def("solve", [](const Wrap& s,
                          nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {
-            return solve_with<fact::klu_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
+            return solve_with<fact::klu_numeric<T>, T>(s.num, s.mtx, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b by block back-substitution")
         .def("refactor", [](Wrap& s, const SMat& A) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             require_default_acc_for_refactor(s.accumulator, "native_klu_refactor");
             auto fresh = fact::native_klu_refactor(A, s.num);
             s.num = std::move(fresh);
@@ -454,6 +498,7 @@ void register_klu(nb::module_& m) {
            "pattern, reusing the BTF permutation, per-block ordering and pivot "
            "sequence — the SPICE transient path")
         .def("__repr__", [name](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
                    ", nblocks=" + std::to_string(s.num.nblocks()) + ")";
         });
@@ -522,6 +567,7 @@ struct SparseCholesky {
     std::string ordering;
     std::size_t n;
     const fact::cholesky_numeric<T>& factor() const { return num; }
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 template <typename T>
@@ -531,6 +577,7 @@ struct SparseLDLT {
     std::string ordering;
     std::size_t n;
     const fact::ldlt_numeric<T>& factor() const { return num; }
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 template <typename T>
@@ -539,6 +586,7 @@ struct SparseQR {
     fact::qr_numeric<T> num;
     std::string ordering;
     std::size_t nrows, ncols;
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 template <typename T>
@@ -552,6 +600,7 @@ struct SupernodalLU {
     std::size_t n;
     std::string accumulator;
     const fact::supernodal_lu_factor<T>& factor() const { return num; }
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 template <typename T>
@@ -562,6 +611,7 @@ struct SupernodalLDLT {
     std::size_t n;
     std::string accumulator;
     const fact::supernodal_ldlt_factor<T>& factor() const { return num; }
+    mutable std::shared_mutex mtx;  // guards num; see FactorLock
 };
 
 template <typename T>
@@ -590,23 +640,31 @@ void register_cholesky(nb::module_& m) {
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
-        .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factor().nnz(); },
-                     "Nonzeros in the lower factor L")
-        .def_prop_ro("L", [](const Wrap& s) { return factor_to_crs(s.num.factor()); },
-                     "Lower triangular Cholesky factor, as a copy. "
-                     "A[perm][:, perm] == L @ L.T.")
-        .def_prop_ro("perm", [](const Wrap& s) { return perm_array(s.num.symbolic.perm); },
+        .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.factor().nnz();
+        }, "Nonzeros in the lower factor L")
+        .def_prop_ro("L", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return factor_to_crs(s.num.factor());
+        }, "Lower triangular Cholesky factor, as a copy. "
+           "A[perm][:, perm] == L @ L.T.")
+        .def_prop_ro("perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.symbolic.perm);
+        },
                      nb::rv_policy::move,
                      "Symmetric fill-reducing permutation, p[new] = old")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
-            return solve_with<fact::cholesky_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
+            return solve_with<fact::cholesky_numeric<T>, T>(s.num, s.mtx, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b via the Cholesky factor")
         .def("refactor", [](Wrap& s, const SMat& A) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             auto fresh = fact::sparse_cholesky_numeric(A, s.sym);
             s.num = std::move(fresh);
         }, "A"_a,
@@ -614,6 +672,7 @@ void register_cholesky(nb::module_& m) {
            "ordering and symbolic analysis (Cholesky does not pivot, so that is "
            "the entire analysis)")
         .def("__repr__", [name](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
                    ", ordering='" + s.ordering + "', nnz=" +
                    std::to_string(s.num.factor().nnz()) + ")";
@@ -647,34 +706,44 @@ void register_ldlt(nb::module_& m) {
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
-        .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); },
-                     "Nonzeros in the unit lower factor L, excluding its implicit "
-                     "unit diagonal (so L.nnz == nnz + n)")
+        .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.factorL().nnz();
+        }, "Nonzeros in the unit lower factor L, excluding its implicit "
+           "unit diagonal (so L.nnz == nnz + n)")
         .def_prop_ro("L", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return factor_to_crs(s.num.factorL(), /*add_unit_diagonal=*/true);
         }, "Unit lower triangular factor, as a copy, with its unit diagonal made "
            "explicit. A[perm][:, perm] == L @ diag(diagonal()) @ L.T.")
-        .def_prop_ro("perm", [](const Wrap& s) { return perm_array(s.num.symbolic.perm); },
+        .def_prop_ro("perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.symbolic.perm);
+        },
                      nb::rv_policy::move,
                      "Symmetric fill-reducing permutation, p[new] = old")
-        .def("diagonal", [](const Wrap& s) { return f64_array(s.num.diagonal()); },
-             "The diagonal D. Its signs give the inertia: a negative entry means A "
+        .def("diagonal", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return f64_array(s.num.diagonal());
+        }, "The diagonal D. Its signs give the inertia: a negative entry means A "
              "is indefinite.")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
-            return solve_with<fact::ldlt_numeric<T>, T>(s.num, s.n, b.data(), b.shape(0));
+            return solve_with<fact::ldlt_numeric<T>, T>(s.num, s.mtx, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b via the LDL^T factor")
         .def("refactor", [](Wrap& s, const SMat& A) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             auto fresh = fact::sparse_ldlt_numeric(A, s.sym);
             s.num = std::move(fresh);
         }, "A"_a,
            "Recompute L and D for a matrix with the SAME sparsity pattern, "
            "reusing the ordering and symbolic analysis")
         .def("__repr__", [name](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
                    ", ordering='" + s.ordering + "', nnz=" +
                    std::to_string(s.num.factorL().nnz()) + ")";
@@ -708,14 +777,19 @@ void register_qr(nb::module_& m) {
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
-        .def_prop_ro("nnz", [](const Wrap& s) { return s.num.R.nnz(); },
-                     "Nonzeros in the upper factor R")
-        .def_prop_ro("R", [](const Wrap& s) { return factor_to_crs(s.num.R); },
-                     "Upper triangular factor R (ncols x ncols), as a copy. "
-                     "A[:, col_perm] == Q @ R; Q is held implicitly as Householder "
-                     "vectors and is not exposed, but R.T @ R == "
-                     "A[:, col_perm].T @ A[:, col_perm].")
+        .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.R.nnz();
+        }, "Nonzeros in the upper factor R")
+        .def_prop_ro("R", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return factor_to_crs(s.num.R);
+        }, "Upper triangular factor R (ncols x ncols), as a copy. "
+           "A[:, col_perm] == Q @ R; Q is held implicitly as Householder "
+           "vectors and is not exposed, but R.T @ R == "
+           "A[:, col_perm].T @ A[:, col_perm].")
         .def_prop_ro("col_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return perm_array(s.num.symbolic.col_perm);
         }, nb::rv_policy::move,
            "Column permutation from the fill-reducing ordering, q[new] = old")
@@ -729,6 +803,7 @@ void register_qr(nb::module_& m) {
             mtl::vec::dense_vector<T> x(s.ncols);
             {
                 nogil guard;
+                std::shared_lock lock(s.mtx);
                 mtl::vec::dense_vector<T> rhs(s.nrows);
                 for (std::size_t i = 0; i < s.nrows; ++i) rhs[i] = static_cast<T>(bp[i]);
                 s.num.solve(x, rhs);
@@ -740,6 +815,7 @@ void register_qr(nb::module_& m) {
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             auto fresh = fact::sparse_qr_numeric(A, s.sym);
             s.num = std::move(fresh);
         }, "A"_a,
@@ -788,46 +864,64 @@ void register_supernodal_lu(nb::module_& m) {
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
-        .def_prop_ro("nsuper", [](const Wrap& s) { return s.num.nsuper(); },
-                     "Supernodes formed; fewer, larger supernodes mean more of "
-                     "the work runs as dense block updates")
+        .def_prop_ro("nsuper", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.nsuper();
+        }, "Supernodes formed; fewer, larger supernodes mean more of "
+           "the work runs as dense block updates")
         .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return s.num.factorL().nnz() + s.num.factorU().nnz();
         }, "Nonzeros in L plus U")
-        .def_prop_ro("L", [](const Wrap& s) { return factor_to_crs(s.num.factorL()); },
-                     "Unit lower triangular factor, diagonal stored, as a copy. "
-                     "(diag(r) @ A)[row_perm][:, col_perm] == L @ U, where r is "
-                     "row_scale (all ones when scale=False).")
-        .def_prop_ro("U", [](const Wrap& s) { return factor_to_crs(s.num.factorU()); },
-                     "Upper triangular factor, as a copy. See L for the identity.")
-        .def_prop_ro("row_perm", [](const Wrap& s) { return perm_array(s.num.row_perm); },
+        .def_prop_ro("L", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return factor_to_crs(s.num.factorL());
+        }, "Unit lower triangular factor, diagonal stored, as a copy. "
+           "With scale=True, (diag(row_scale) @ A)[row_perm][:, col_perm] "
+           "== L @ U. With scale=False, row_scale is None and the "
+           "identity is A[row_perm][:, col_perm] == L @ U.")
+        .def_prop_ro("U", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return factor_to_crs(s.num.factorU());
+        }, "Upper triangular factor, as a copy. See L for the identity.")
+        .def_prop_ro("row_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.row_perm);
+        },
                      nb::rv_policy::move,
                      "Row permutation from threshold pivoting, p[new] = old")
         .def_prop_ro("col_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return perm_array(s.num.symbolic.col_perm);
         }, nb::rv_policy::move,
            "Column permutation, q[new] = old: the fill-reducing ordering "
            "followed by the column elimination tree postorder")
         .def_prop_ro("row_scale", [](const Wrap& s)
                          -> std::optional<nb::ndarray<nb::numpy, double, nb::ndim<1>>> {
+            std::shared_lock lock(s.mtx);
             if (s.num.row_scale.empty()) return std::nullopt;
             return f64_array(s.num.row_scale);
         }, nb::rv_policy::move,
-           "Row equilibration factors indexed by ORIGINAL row, or None when the "
-           "matrix was factored unscaled (scale=False)")
-        .def_prop_ro("num_perturbed", [](const Wrap& s) { return s.num.num_perturbed; })
+           "Row equilibration factors indexed by ORIGINAL row. None when the "
+           "matrix was factored unscaled (scale=False): reconstruct from A "
+           "itself then, with no row scaling")
+        .def_prop_ro("num_perturbed", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.num_perturbed;
+        })
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_lu_factor<T>, T>(
-                s.num, s.n, b.data(), b.shape(0));
+                s.num, s.mtx, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b using the stored factors")
         .def("refactor", [](Wrap& s, const SMat& A) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             require_default_acc_for_refactor(s.accumulator,
                                              "supernodal_lu_refactor");
             // In-place for the same reason as sparse_lu above (MTL5 #310):
@@ -838,6 +932,7 @@ void register_supernodal_lu(nb::module_& m) {
            "Recompute the numeric factors for a matrix with the SAME sparsity "
            "pattern, reusing the ordering, supernode partition and pivot sequence")
         .def("__repr__", [name](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
                    ", nsuper=" + std::to_string(s.num.nsuper()) + ")";
         });
@@ -874,32 +969,41 @@ void register_supernodal_ldlt(nb::module_& m) {
         })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
         .def_prop_ro("ordering", [](const Wrap& s) { return s.ordering; })
-        .def_prop_ro("nnz", [](const Wrap& s) { return s.num.factorL().nnz(); },
-                     "Nonzeros in the unit lower factor L, excluding its implicit "
-                     "unit diagonal (so L.nnz == nnz + n)")
+        .def_prop_ro("nnz", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return s.num.factorL().nnz();
+        }, "Nonzeros in the unit lower factor L, excluding its implicit "
+           "unit diagonal (so L.nnz == nnz + n)")
         .def_prop_ro("accumulator", [](const Wrap& s) { return s.accumulator; },
                      "The accumulator policy this factor was built with")
         .def_prop_ro("L", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
             return factor_to_crs(s.num.factorL(), /*add_unit_diagonal=*/true);
         }, "Unit lower triangular factor, as a copy, with its unit diagonal made "
            "explicit. A[perm][:, perm] == L @ diag(diagonal()) @ L.T.")
-        .def_prop_ro("perm", [](const Wrap& s) { return perm_array(s.num.symbolic.sperm); },
+        .def_prop_ro("perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.symbolic.sperm);
+        },
                      nb::rv_policy::move,
                      "Symmetric permutation, p[new] = old: the fill-reducing "
                      "ordering followed by the elimination tree postorder")
-        .def("diagonal", [](const Wrap& s) { return f64_array(s.num.diagonal()); },
-             "The diagonal D. Its signs give the inertia: a negative entry means A "
+        .def("diagonal", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return f64_array(s.num.diagonal());
+        }, "The diagonal D. Its signs give the inertia: a negative entry means A "
              "is indefinite.")
         .def("solve", [](const Wrap& s, nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                                     nb::device::cpu> b) {
             return solve_with<fact::supernodal_ldlt_factor<T>, T>(
-                s.num, s.n, b.data(), b.shape(0));
+                s.num, s.mtx, s.n, b.data(), b.shape(0));
         }, "b"_a, "Solve A x = b via the supernodal LDL^T factor")
         .def("refactor", [](Wrap& s, const SMat& A) {
             if (A.num_rows() != s.n || A.num_cols() != s.n)
                 throw std::invalid_argument(
                     "refactor: matrix dimensions do not match the factorization");
             nogil guard;
+            std::unique_lock lock(s.mtx);  // exclusive: replaces s.num
             // Unlike the LU refactors, this one re-runs the full numeric
             // factorization, so the accumulator policy carries through.
             auto fresh = with_acc<T>(parse_sparse_acc<T>(

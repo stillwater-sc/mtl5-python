@@ -72,6 +72,19 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **`refactor()` no longer races with `solve()` on another thread** (#126).
+  Every sparse direct factorization releases the GIL in both `refactor()` and
+  `solve()`. A `solve()` running alongside a `refactor()` of the same object
+  could therefore read a factor that was halfway replaced, and return a wrong
+  answer or read freed memory. A stress test with three solving threads and
+  one refactoring thread saw this in every run. Each factorization now holds
+  a reader/writer lock:
+  - `refactor()` takes it exclusive;
+  - `solve()`, `mtl5.mixed.iterative_refine` and the new factor getters take
+    it shared.
+
+  So a reader sees either the old factor or the new one, never a mix.
+  Concurrent solves still run in parallel.
 - **Read-only NumPy arrays are accepted wherever the input is only read or
   copied** (#116), so a pandas 3 column goes straight in:
   `mtl5.norm(df["x"].to_numpy())` used to raise `TypeError: incompatible

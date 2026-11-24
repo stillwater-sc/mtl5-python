@@ -15,9 +15,22 @@
 #include <mtl/sparse/iterative_refine.hpp>
 
 #include <cstddef>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+/// Shared lock on a direct factorization's `mtx` (see FactorLock in
+/// mtl5_sparse_direct.cpp), so a concurrent refactor() cannot replace the
+/// factor mid-refinement. The preconditioners have no refactor and no mutex,
+/// so for them this is an empty lock.
+template <typename Wrap>
+std::shared_lock<std::shared_mutex> factor_read_lock(const Wrap& M) {
+    if constexpr (requires { M.mtx; })
+        return std::shared_lock<std::shared_mutex>(M.mtx);
+    else
+        return {};
+}
 
 /// Refine x for A x = b through `M`, returning (x, info).
 template <typename Wrap>
@@ -48,6 +61,7 @@ sparse_refine_through(const mtl::mat::compressed2D<double>& A, const Wrap& M,
     mtl::sparse::refine_result res;
     try {
         nogil guard;
+        auto lock = factor_read_lock(M);
         mtl::vec::dense_vector<double> b(n), x(n, 0.0);
         for (std::size_t i = 0; i < n; ++i) b[i] = bp[i];
         res = mtl::sparse::iterative_refine(A, M.factor(), b, x, opt);
