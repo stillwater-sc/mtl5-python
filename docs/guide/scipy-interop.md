@@ -154,3 +154,5 @@ assert info == 0
 
 `mtl5.mixed.iterative_refine` does the same job, refining a narrow factor
 against a float64 residual, without leaving MTL5.
+
+API reference: {py:func}`mtl5.sparse.from_scipy`, {py:func}`mtl5.sparse.to_scipy`, {py:func}`mtl5.sparse.splu`, {py:func}`mtl5.sparse.qr`, {py:func}`mtl5.mixed.iterative_refine`, {py:func}`mtl5.io.mm_read`.

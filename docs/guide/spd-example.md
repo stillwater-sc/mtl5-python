@@ -260,3 +260,5 @@ Symmetric indefinite matrices are outside `cholesky`'s reach, but
 `supernodal_ldlt` and `ldlt` factor them as long as no pivot is zero. For those,
 and for unsymmetric matrices, see
 [choosing a factorization](direct-solvers.md#choosing-a-factorization).
+
+API reference: {py:func}`mtl5.sparse.cholesky`, {py:func}`mtl5.sparse.supernodal_ldlt`, {py:func}`mtl5.sparse.ordering`, {py:func}`mtl5.sparse.orderings`, {py:func}`mtl5.sparse.to_scipy`.

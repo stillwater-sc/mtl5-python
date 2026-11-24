@@ -126,6 +126,23 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Guide page: "Diagnostics: reading a factorization"** (section 9 of #125,
+  which this completes).
+  - What each factor's `__repr__` shows, field by field, and what it leaves
+    out: `num_perturbed`, `accumulator` and `dtype` are properties only.
+  - A zero pivot raises. `pivot_perturb` lets the factorization finish and
+    counts the replacements in `num_perturbed`, but refinement still fails
+    when κ·u > 1, and `converged=False` is how you find out.
+  - A singular float64 matrix (the Neumann Laplacian) factors without
+    raising, with `num_perturbed=0`. The pivot ratio from `U.diagonal()`, or
+    a small `pivot_perturb` used as a detector, catches it.
+  - Threshold pivoting: from 1 to 0.001, fill falls about 3.5× while max |L|
+    follows its `1/threshold` bound and the residual grows about 100×.
+  - The accumulator: on a badly scaled matrix, a float64 accumulator improves
+    a float32 factor's refined error 6–300×; on a well-scaled one it does
+    nothing. Three combinations are refused, and the page says why.
+- **Every guide page and the orderings notebook link to the API reference**
+  for the functions they use, as #125's acceptance criteria ask.
 - **Spy plots draw one image cell per matrix entry** (orderings notebook and
   SPD page). They used matplotlib's `ax.spy` with markers sized in points,
   and at these sizes each marker spanned 2–4 matrix rows, so neighbouring
