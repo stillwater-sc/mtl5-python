@@ -139,6 +139,26 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Guide page: "How fill-reducing orderings work".** It explains why the
+  ordering decides the fill, and how each algorithm turns that into a rule:
+  - **The elimination game.** Eliminating a vertex makes its neighbours a
+    clique, and every new edge is fill. The page implements the game in a
+    few lines and asserts that its count equals mtl5's Cholesky `nnz` for
+    every ordering.
+  - **The arrow matrix.** Hub first gives a dense factor; hub last gives no
+    fill at all.
+  - **Values never matter.** The same pattern with random values gives the
+    same AMD ordering and the same fill.
+  - **Minimum degree and AMD.** A textbook minimum degree lands within 1% of
+    mtl5's AMD.
+  - **Nested dissection.** A geometric version is built by hand on grids.
+    Its work grows more slowly than AMD's (n^1.62 against n^1.70), but AMD
+    still wins at 2-D sizes up to 256×256, and the page says so. The upstream
+    ordering is in progress as stillwater-sc/mtl5#919.
+  - **RCM.** Its fill fills the envelope exactly on a grid.
+  - **COLAMD.** The George–Ng bound is checked on `west0479`: U's pattern
+    lies inside the Cholesky factor of (AQ)ᵀ(AQ) for every ordering, and the
+    bound ranks the orderings the same way the actual fill does.
 - **Guide page: "Diagnostics: reading a factorization"** (section 9 of #125,
   which this completes).
   - What each factor's `__repr__` shows, field by field, and what it leaves
