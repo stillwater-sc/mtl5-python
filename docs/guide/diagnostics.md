@@ -93,7 +93,7 @@ The fields mean the following:
 | `ordering` | `SparseLU`, `SparseCholesky`, `SparseLDLT`, `SparseQR` | the fill-reducing ordering used |
 | `nnz` | `SparseLU` | entries of L plus U, with L's unit diagonal stored |
 | `nnz` | `SparseCholesky` | entries of L, diagonal included |
-| `nnz` | `SparseLDLT` | entries of L **without** its unit diagonal, so it is n less than Cholesky's count on the same matrix |
+| `nnz` | `SparseLDLT` | entries of L **without** its unit diagonal, so it is n less than Cholesky's count on the same matrix with the same ordering |
 | `nblocks` | `KLU` | diagonal blocks in the block triangular form; many small blocks mean BTF found structure |
 | `nsuper` | `SupernodalLU` | supernodes formed; n of them would mean no dense blocks at all |
 
@@ -246,13 +246,15 @@ assert np.abs(x).max() > 1e12
 ```
 
 The factor reports `num_perturbed=0`, and `solve` returns a vector of size
-10¹⁶ for a right-hand side of ones. Two cheap checks catch it:
+10¹⁶ for a right-hand side of ones. Two cheap checks flag it:
 
-- **The pivot ratio.** `ms.to_scipy(F.U).diagonal()` holds the pivots. A smallest-to-largest
-  ratio near the unit roundoff means the matrix is singular to working
-  precision. The ratio is not a condition number: a small ratio always
-  deserves a look, but a large one does not prove the matrix well
-  conditioned.
+- **The pivot ratio.** `ms.to_scipy(F.U).diagonal()` holds the pivots. A
+  smallest-to-largest ratio near the unit roundoff is a warning, not a proof
+  of singularity. The ratio is not a condition number, and it can mislead in
+  both directions. Wilkinson's growth example, a 60×60 matrix that is well
+  conditioned, has pivots from 1 to 2⁵⁹ under partial pivoting. A large ratio
+  does not prove good conditioning either. When the ratio is small, estimate
+  the condition number before concluding anything.
 - **A small `pivot_perturb` as a detector.** With `pivot_perturb=1e-10`, the
   same factorization reports the tiny pivot:
 
@@ -513,10 +515,11 @@ After a factorization, and before trusting its solve:
 
 1. **`num_perturbed`** (LU family). If it is nonzero, the factor is of a
    perturbed matrix: check the refinement's `converged` and `rel_residual`.
-2. **The pivot ratio**, from `ms.to_scipy(F.U).diagonal()` or LDLᵀ's `diagonal()`. A ratio
-   near the unit roundoff means the matrix is singular to working precision,
-   whether or not anything raised. For a quick detector, pass a small
-   `pivot_perturb` and read `num_perturbed`.
+2. **The pivot ratio**, from `ms.to_scipy(F.U).diagonal()` or LDLᵀ's
+   `diagonal()`. A ratio near the unit roundoff is a warning, whether or not
+   anything raised. Follow it up with a condition estimate, because the
+   ratio alone does not establish singularity. For a quick detector, pass a
+   small `pivot_perturb` and read `num_perturbed`.
 3. **The residual** of the solve you care about, in float64. It is cheap,
    and it is what refinement minimizes. It bounds the forward error only
    through κ (error ≲ κ × residual), so weigh it against the conditioning and
