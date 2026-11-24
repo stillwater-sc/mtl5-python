@@ -76,6 +76,16 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **Threshold pivoting works under a fill-reducing ordering** (MTL5 pin
+  v5.24.0 → v5.24.1, MTL5 #917). `splu`, `supernodal_lu` and `klu` preferred
+  the wrong row when keeping a pivot on the diagonal. Column `k` of the
+  ordered matrix is `A(:, q[k])`, so its diagonal is row `q[k]`, but MTL5
+  checked row `k`. As a result `threshold` barely changed fill under amd,
+  colamd and rcm. On a 900-row weak-diagonal grid under AMD, `threshold=0.01`
+  gave 64,118 nonzeros in L+U; with the fix it gives 21,907, and KLU goes from
+  56,402 to 21,047. The default `threshold=1.0` is unchanged.
+  `tests/test_sparse_direct.py::TestThresholdPivoting` pins this behaviour.
+
 - **`refactor()` no longer races with `solve()` on another thread** (#126).
   Every sparse direct factorization releases the GIL in both `refactor()` and
   `solve()`. A `solve()` running alongside a `refactor()` of the same object

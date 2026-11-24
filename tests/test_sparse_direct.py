@@ -107,6 +107,60 @@ class TestSparseLU:
             lu.solve(np.ones(3))
 
 
+def weak_diagonal(k: int, seed: int = 0):
+    """A k x k 5-point grid, made unsymmetric and given a weak diagonal.
+
+    The off-diagonal entries are scaled by random factors in [0.5, 1.5] and
+    the diagonal by factors in [0.05, 1]. Full partial pivoting moves about
+    half the pivots off the diagonal, so this matrix is where the pivoting
+    threshold should make a difference to the fill.
+    """
+    rng = np.random.default_rng(seed)
+    A = laplacian_2d(k) / 4.0
+    A.data = A.data * rng.uniform(0.5, 1.5, A.nnz)
+    d = A.diagonal()
+    return (A - sp.diags(d) + sp.diags(d * rng.uniform(0.05, 1.0, k * k))).tocsr()
+
+
+class TestThresholdPivoting:
+    """A small `threshold` keeps the pivot on the diagonal whenever the
+    diagonal is within that factor of the column maximum, which preserves the
+    fill-reducing ordering.
+
+    Until MTL5 5.24.1 (MTL5 #917, issue 916), the preferred row was k instead
+    of the permuted column's diagonal q[k]. That made the threshold close to
+    inert under every ordering except natural.
+    """
+
+    @pytest.mark.parametrize("factor", [ms.splu, ms.supernodal_lu])
+    @pytest.mark.parametrize("ordering", ["amd", "colamd", "rcm"])
+    def test_matches_the_pre_permuted_natural_factor(self, factor, ordering):
+        """Factoring A with ordering q prefers the same diagonal as factoring
+        A[q][:, q] with the natural ordering, so the two fills agree."""
+        A = weak_diagonal(30)
+        q = np.asarray(ms.ordering(ms.from_scipy(A), ordering))
+        ordered = factor(A, ordering=ordering, threshold=0.01).nnz
+        reference = ms.splu(A[q][:, q], ordering="natural", threshold=0.01).nnz
+        assert abs(ordered - reference) <= 0.02 * reference, (ordered, reference)
+
+    @pytest.mark.parametrize("factor", [ms.splu, ms.supernodal_lu])
+    def test_small_threshold_cuts_fill_under_amd(self, factor):
+        A = weak_diagonal(30)
+        b = A @ np.ones(A.shape[0])
+        full = factor(A, ordering="amd")
+        relaxed = factor(A, ordering="amd", threshold=0.01)
+        # 63,839 -> 21,907 nonzeros on this matrix; 5.24.0 gave 64,118.
+        assert relaxed.nnz < 0.5 * full.nnz
+        x = relaxed.solve(b).to_numpy()
+        assert np.linalg.norm(A @ x - b) / np.linalg.norm(b) < 1e-12
+
+    def test_klu_small_threshold_cuts_fill(self):
+        """KLU orders each block with AMD and factors it with sparse LU, so it
+        gets the same fix."""
+        A = weak_diagonal(30)
+        assert ms.klu(A, threshold=0.01).nnz < 0.5 * ms.klu(A).nnz
+
+
 class TestRefactor:
     def test_refactor_matches_a_full_factor(self, system):
         """The whole premise: reusing the analysis must not change the answer."""
