@@ -15,6 +15,21 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **KLU exposes its block triangular form and factors.** KLU has no single
+  (L, U) pair: it factors only the diagonal blocks of B = P·(R·A)·Q and uses
+  the blocks above them as they are. `ms.klu` returns that structure:
+  - `row_perm`, `col_perm` and `row_scale`: P, Q and R, with
+    `B == (diag(row_scale) @ A)[row_perm][:, col_perm]`;
+  - `block_starts`: the block boundaries;
+  - `B`: the permuted, scaled matrix, as a copy;
+  - `block(i)`: diagonal block i's own `L`, `U`, `row_perm` and `col_perm`,
+    with `B[s:e, s:e][row_perm][:, col_perm] == L @ U`.
+
+  They are copies, taken under the factor's lock, so `refactor()` on another
+  thread never tears them; the concurrency test now covers KLU. The orderings
+  notebook shows `west0479`'s 166 blocks: 159 are 1×1, one is a 308-row core,
+  and KLU stores 4,762 entries, against 6,265 for `splu` with COLAMD.
+
 - **The pivoting factorizations' reprs show their diagnostics.**
   - `SparseLU`, `KLU` and `SupernodalLU` now print `num_perturbed` and
     `accumulator`, which were properties only. A perturbed factor is now
