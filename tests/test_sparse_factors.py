@@ -265,9 +265,11 @@ def writer():
 
 def reader():
     try:
+        # Before the loop, not in it: the writer may finish and set stop before
+        # a reader first checks it, and the injection must fire regardless.
+        if inject:
+            raise RuntimeError("injected reader failure")
         while not stop.is_set():
-            if inject:
-                raise RuntimeError("injected reader failure")
             d = snap(f)
             if not any(d.shape == r.shape and np.allclose(d, r) for r in ref):
                 torn[0] += 1
