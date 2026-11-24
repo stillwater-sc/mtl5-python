@@ -255,8 +255,13 @@ The factor reports `num_perturbed=0`, and `solve` returns a vector of size
   conditioned, has pivots from 1 to 2⁵⁹ under partial pivoting. A large ratio
   does not prove good conditioning either. When the ratio is small, estimate
   the condition number before concluding anything.
-- **A small `pivot_perturb` as a detector.** With `pivot_perturb=1e-10`, the
-  same factorization reports the tiny pivot:
+- **A small `pivot_perturb` as a detector.** It compares each pivot with
+  the largest entry of its own column, so it catches a pivot that has
+  cancelled. It does not catch a badly scaled matrix: in diag(1, 10⁻¹⁶)
+  each pivot is its column's maximum, so nothing is flagged, even though
+  the pivot ratio is 10⁻¹⁶. A zero count does not rule out poor
+  conditioning. Here it does catch the cancelled pivot: with
+  `pivot_perturb=1e-10`, the same factorization reports it:
 
 ```{code-cell} python
 detected = {
@@ -517,11 +522,14 @@ After a factorization, and before trusting its solve:
    perturbed matrix: check the refinement's `converged` and `rel_residual`.
 2. **The pivot ratio**, from `ms.to_scipy(F.U).diagonal()` for `splu` and
    `supernodal_lu`, and from `diagonal()` for `ldlt` and `supernodal_ldlt`.
-   KLU exposes no factors, so for KLU use the detector below. A ratio near
+   KLU exposes no factors, so for KLU use the detector below, together with
+   a condition estimate. A ratio near
    the unit roundoff is a warning, whether or not anything raised. Follow it
    up with a condition estimate, because the ratio alone does not establish
    singularity. On the LU factorizations (`splu`, `klu`, `supernodal_lu`),
    a quick detector is a small `pivot_perturb`, then reading `num_perturbed`.
+   It flags pivots that cancelled within their column; a count of zero does
+   not rule out a badly scaled or ill-conditioned matrix.
    The LDLᵀ factorizations have no `pivot_perturb`; read their diagonal.
 3. **The residual** of the solve you care about, in float64. It is cheap,
    and it is what refinement minimizes. It bounds the forward error only
