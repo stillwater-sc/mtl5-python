@@ -171,6 +171,16 @@ $\varepsilon I$ makes it SPD with smallest eigenvalue exactly $\varepsilon$.
 Its largest is below 8 (no row sum of absolute values exceeds 8), so
 $\kappa \approx 8/\varepsilon$, and $\varepsilon$ dials in the conditioning.
 
+The sweep also records whether the shift *survives the cast* to `float32`.
+The diagonal entries are 2, 3 and 4, and the spacing of `float32` numbers
+near 4 is $4.8 \times 10^{-7}$. A smaller $\varepsilon$ rounds away: the
+`float32` matrix is then the singular Laplacian itself, and its factor's last
+pivot is rounding noise rather than $\varepsilon$. That is the
+$\kappa\,u_{\text{factor}} < 1$ limit made concrete. Whether Cholesky even
+completes on such a matrix depends on the sign of that noise, so the sweep
+falls back to `supernodal_ldlt`, which accepts a pivot of either sign, when
+Cholesky raises.
+
 ```{code-cell} python
 T = sp.diags([-1.0, 2.0, -1.0], [-1, 0, 1], shape=(k, k)).tolil()
 T[0, 0] = T[-1, -1] = 1.0  # Neumann ends
@@ -184,67 +194,82 @@ def shifted(eps):
     return (neumann + eps * sp.identity(n, format="csr")).tocsr()
 
 
-print(f"{'kappa':>8} {'corrections':>11} {'converged':>9} {'fwd err, refined':>17} {'fwd err, f64 direct':>20}")
+def factor32(M):
+    M32 = ms.from_scipy(M.astype(np.float32))
+    try:
+        return ms.cholesky(M32)
+    except RuntimeError:  # a negative rounding-noise pivot
+        return ms.supernodal_ldlt(M32)
+
+
+print(f"{'kappa':>8} {'shift kept':>10} {'factor':>16} {'corrections':>11} {'converged':>9} "
+      f"{'fwd err, refined':>17} {'fwd err, f64 direct':>20}")
 sweep = {}
 for eps in [1e-1, 1e-3, 1e-5, 1e-6, 1e-7, 1e-8, 1e-10]:
     M = shifted(eps)
     rhs = M @ x_true
-    f32 = ms.cholesky(ms.from_scipy(M.astype(np.float32)))
+    kept = bool((M.astype(np.float32).diagonal() != neumann.diagonal().astype(np.float32)).all())
+    f32 = factor32(M)
     x, inf = iterative_refine(ms.from_scipy(M), f32, rhs, rel_tol=1e-14, max_iter=50)
     x_d = ms.cholesky(ms.from_scipy(M)).solve(rhs).to_numpy()
-    sweep[eps] = (inf, fwd_err(x, x_true), fwd_err(x_d, x_true))
-    print(f"{8 / eps:8.0e} {inf['iters']:11d} {str(inf['converged']):>9} "
-          f"{fwd_err(x, x_true):17.1e} {fwd_err(x_d, x_true):20.1e}")
+    sweep[eps] = (inf, fwd_err(x, x_true), fwd_err(x_d, x_true), f32, kept)
+    print(f"{8 / eps:8.0e} {str(kept):>10} {type(f32).__name__:>16} {inf['iters']:11d} "
+          f"{str(inf['converged']):>9} {fwd_err(x, x_true):17.1e} {fwd_err(x_d, x_true):20.1e}")
 
-assert all(sweep[e][0]["converged"] for e in (1e-1, 1e-3, 1e-5, 1e-6, 1e-7))
+# The shift survives the cast down to eps = 1e-6, and refinement converges on all of those.
+assert all(sweep[e][4] and sweep[e][0]["converged"] for e in (1e-1, 1e-3, 1e-5, 1e-6))
+assert not any(sweep[e][4] for e in (1e-7, 1e-8, 1e-10))
+# Well past the limit, it fails.
 assert not any(sweep[e][0]["converged"] for e in (1e-8, 1e-10))
 
 # Where it converges, the forward error is within the kappa * u64 bound
 # that any backward-stable float64 solve is held to (with a factor 10 of slack).
 u64 = np.finfo(np.float64).eps / 2
-for eps, (inf, err_refined, _) in sweep.items():
+for eps, (inf, err_refined, *_) in sweep.items():
     if inf["converged"]:
         assert err_refined < 10 * (8 / eps) * u64, (eps, err_refined)
 ```
 
-Two things to read off the table:
+Three things to read off the table:
 
-- **Up to $\kappa \approx 10^8$ here, refinement converges.** The rule of
-  thumb is conservative by an order of magnitude on this matrix. Refinement
-  needs more steps as $\kappa$ grows, because each step removes a smaller
-  fraction of the error. The forward error grows with $\kappa$ too, and
-  stays within the $\kappa\,u_{64}$ bound that any backward-stable `float64`
-  solve is held to. Within that bound it is not always as small as the
-  `float64` direct solve's: refinement drives the *residual* to the
-  `float64` level, and a small residual guarantees no more than the bound.
-- **Above it, refinement stalls.** The `float32` factor is no longer accurate
-  enough for the corrections to contract, `converged` stays false, and the
-  answer can be several orders of magnitude worse than the `float64` solve.
-  Always pass a `rel_tol` and check `info["converged"]`: a stalled refinement
-  raises no error.
+- **While the shift survives the cast, refinement converges.** It needs more
+  steps as $\kappa$ grows, because each step removes a smaller fraction of the
+  error. The forward error grows with $\kappa$ too, and stays within the
+  $\kappa\,u_{64}$ bound that any backward-stable `float64` solve is held to.
+  Within that bound it is not always as small as the `float64` direct
+  solve's: refinement drives the *residual* to the `float64` level, and a
+  small residual guarantees no more than the bound.
+- **Just past the limit, it may still converge, by luck.** At
+  $\kappa \approx 8 \times 10^7$ the `float32` factor is of the singular
+  matrix, and whether refinement converges depends on how the rounding noise
+  in its last pivot happens to fall. Do not rely on it.
+- **Well past it, refinement stalls.** The corrections no longer contract,
+  `converged` stays false, and the answer can be several orders of magnitude
+  worse than the `float64` solve. Always pass a `rel_tol` and check
+  `info["converged"]`: a stalled refinement raises no error.
 
 ### What to do instead: GMRES with the narrow factor
 
-The `float32` factor is still a very good *preconditioner* at those condition
-numbers, even when it is too poor to drive plain refinement. Carson and
-Higham's GMRES-based refinement uses it that way: GMRES, run in `float64`,
-preconditioned by the narrow factor. The same factor rescues both stalled
-cases:
+The `float32` factor is still a good *preconditioner* at those condition
+numbers, even when it is too poor to drive plain refinement: it is wrong only
+in the few directions that the shift was supposed to fix, and GMRES finds
+those in a few iterations. Carson and Higham's GMRES-based refinement uses it
+that way: GMRES, run in `float64`, preconditioned by the narrow factor. The
+same factor rescues both stalled cases:
 
 ```{code-cell} python
 for eps in (1e-8, 1e-10):
     M = shifted(eps)
     rhs = M @ x_true
-    f32 = ms.cholesky(ms.from_scipy(M.astype(np.float32)))
+    _, err_refined, err_direct, f32, _ = sweep[eps]
     P = spla.LinearOperator(
         (n, n), matvec=lambda r, f=f32: f.solve(np.ravel(r).astype(np.float32)).to_numpy().astype(np.float64)
     )
     x, gm_info = spla.gmres(M, rhs, M=P, rtol=1e-14, restart=50, maxiter=20)
-    x_d = sweep[eps][2]
     print(f"kappa {8 / eps:.0e}: GMRES info = {gm_info}, forward error {fwd_err(x, x_true):.1e} "
-          f"(refinement alone {sweep[eps][1]:.1e}, float64 direct {x_d:.1e})")
+          f"(refinement alone {err_refined:.1e}, float64 direct {err_direct:.1e})")
     assert gm_info == 0
-    assert fwd_err(x, x_true) < 10 * x_d
+    assert fwd_err(x, x_true) < 10 * err_direct
 ```
 
 GMRES costs more per iteration than a refinement step, so use plain refinement
@@ -284,7 +309,7 @@ number formats with a much narrower exponent range than `float32`, such as
 
 | Situation | What to use |
 |---|---|
-| $\kappa(A) \lesssim 10^7$ (often more), memory or bandwidth bound | `float32` factor + `iterative_refine(..., rel_tol=...)` |
+| $\kappa(A) \lesssim 10^7$, memory or bandwidth bound | `float32` factor + `iterative_refine(..., rel_tol=...)` |
 | $\kappa(A)$ larger, or refinement does not converge | `float32` factor as the preconditioner for `float64` GMRES |
 | data near the bottom of the narrow format's range | `iterative_refine(..., scaled=True)` |
 | none of the above, and time is the only concern on a CPU | a `float64` factor |
