@@ -11,6 +11,7 @@ from the repository's `notebooks/` directory. To run a notebook yourself,
 
 direct-solvers
 ../notebooks/sparse_direct_orderings
+how-orderings-work
 spd-example
 mixed-precision
 diagnostics
