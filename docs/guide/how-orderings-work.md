@@ -183,9 +183,13 @@ Eliminating vertex 0 joins its two neighbours, 1 and 4. Eliminating 1 then
 joins 2, 4 and 5, and so on. The fill builds a band that sweeps down the
 grid, one row wide.
 
-The game is exact, not a model. The strictly lower count it returns, plus
-the n diagonal entries, is precisely the `nnz` of mtl5's Cholesky factor,
-for any ordering:
+The game predicts the *symbolic* pattern of the factor exactly: every
+position that can become nonzero, assuming no two contributions ever cancel.
+That is the pattern a sparse factorization allocates and stores, so the
+strictly lower count the game returns, plus the n diagonal entries, is
+precisely the `nnz` of mtl5's Cholesky factor, for any ordering. An entry
+whose contributions happen to cancel is still stored, as a numerical zero.
+For three orderings of a 12×12 grid:
 
 ```{code-cell} python
 A12 = laplacian_2d(12)
@@ -258,7 +262,7 @@ assert np.array_equal(p_a, p_r) and cholesky_nnz(A12, p_a) == cholesky_nnz(R, p_
 That is what makes the problem tractable: the ordering is a pure graph
 problem, solved once, before the numeric factorization. It also means that
 values can only make things worse. With Cholesky, every pivot is on the
-diagonal and the game is exact. With LU and partial pivoting, the values
+diagonal and the game gives the stored pattern exactly. With LU and partial pivoting, the values
 decide the row interchanges, and the ordering can only bound the fill (see
 [unsymmetric matrices](#unsymmetric-orderings)
 below).
@@ -517,7 +521,9 @@ order Q, and has to cope with whatever rows pivoting picks later.
 
 George and Ng (1985) gave the bound that makes this possible. Whatever the
 row interchanges, the pattern of U is contained in that of $L_c^T$, where
-$L_c$ is the Cholesky factor of $(AQ)^T(AQ)$. So an ordering that keeps the
+$L_c$ is the Cholesky factor of the *structural* product $(AQ)^T(AQ)$: its
+pattern formed as if no entries cancelled, as the code below does by giving
+every entry of A the value 1. So an ordering that keeps the
 Cholesky factor of $A^TA$ small also keeps U's fill small, *for every pivot
 sequence*. The code below checks the containment of U, and the total of L
 and U against $2\,\mathrm{nnz}(L_c)$ as a measurement, not as a theorem.
