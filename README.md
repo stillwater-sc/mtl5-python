@@ -976,12 +976,13 @@ corrects.
 
 ### Orderings
 
-`ms.orderings()` lists `amd`, `colamd`, `rcm` and `natural`. Each is also
+`ms.orderings()` lists `amd`, `colamd`, `rcm`, `nd` (nested dissection, since
+MTL5 5.25.0) and `natural`. Each is also
 available standalone as a permutation, for inspection or for use on a scipy
 matrix directly:
 
 ```python
-p = ms.amd(A)  # or ms.colamd(A), ms.rcm(A), ms.ordering(A, name)
+p = ms.amd(A)  # or ms.colamd(A), ms.rcm(A), ms.nested_dissection(A), ms.ordering(A, name)
 A[p][:, p]
 ```
 

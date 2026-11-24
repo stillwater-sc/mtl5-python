@@ -15,6 +15,19 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Nested dissection ordering: `ordering="nd"`** (MTL5 5.25.0, MTL5 #920).
+  - It is accepted by every factorization that takes an ordering: `splu`,
+    `supernodal_lu`, `cholesky`, `ldlt`, `supernodal_ldlt` and `qr`. It is
+    listed in `orderings()`, and available standalone as
+    `ms.nested_dissection(A)`.
+  - **Measured Cholesky fill on 2-D grids, against AMD:** 1.14× at 16×16,
+    1.04× at 64×64, 0.92× at 128×128 and 0.84× at 256×256. MTL5 measures
+    0.64× on a 32³ grid, and its factorization work falls further.
+  - The SPD guide page adds it to the fill-growth sweep. The orderings
+    explainer compares it with a hand-built geometric version and with AMD.
+  - **Versioning:** the MTL5 pin moves to v5.25.0, and the package version to
+    5.25.0, since its MAJOR.MINOR tracks MTL5's.
+
 - **KLU exposes its block triangular form and factors.** KLU has no single
   (L, U) pair: it factors only the diagonal blocks of B = P·(R·A)·Q and uses
   the blocks above them as they are. `ms.klu` returns that structure:

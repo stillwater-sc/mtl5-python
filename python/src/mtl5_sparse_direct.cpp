@@ -35,6 +35,7 @@
 #include <mtl/sparse/factorization/supernodal_ldlt.hpp>
 #include <mtl/sparse/ordering/amd.hpp>
 #include <mtl/sparse/ordering/colamd.hpp>
+#include <mtl/sparse/ordering/nested_dissection.hpp>
 #include <mtl/sparse/ordering/rcm.hpp>
 
 #include <cstddef>
@@ -56,6 +57,7 @@ const char* const kOrderingHelp =
     "valid orderings: 'amd' (symmetric minimum degree on A+A^T), "
     "'colamd' (column minimum degree on A^T*A; for unsymmetric matrices), "
     "'rcm' (Reverse Cuthill-McKee, bandwidth reducing), "
+    "'nd' (nested dissection on A+A^T; large 2-D and 3-D meshes), "
     "'natural' (identity, no fill reduction)";
 
 /// Fill-reducing ordering as a standalone permutation.
@@ -65,6 +67,7 @@ std::vector<std::size_t> permutation_for(const mtl::mat::compressed2D<T>& A,
     if (name == "amd")     return ord::amd{}(A);
     if (name == "colamd")  return ord::colamd{}(A);
     if (name == "rcm")     return ord::rcm{}(A);
+    if (name == "nd")      return ord::nested_dissection{}(A);
     if (name == "natural") {
         std::vector<std::size_t> p(A.num_rows());
         for (std::size_t i = 0; i < p.size(); ++i) p[i] = i;
@@ -153,6 +156,7 @@ fact::lu_symbolic symbolic_for(const mtl::mat::compressed2D<T>& A,
     if (name == "amd")     return fact::sparse_lu_symbolic(A, ord::amd{});
     if (name == "colamd")  return fact::sparse_lu_symbolic(A, ord::colamd{});
     if (name == "rcm")     return fact::sparse_lu_symbolic(A, ord::rcm{});
+    if (name == "nd")      return fact::sparse_lu_symbolic(A, ord::nested_dissection{});
     if (name == "natural") return fact::sparse_lu_symbolic(A);
     throw std::invalid_argument("unknown ordering '" + name + "'; " + kOrderingHelp);
 }
@@ -593,6 +597,7 @@ void register_klu(nb::module_& m) {
     if (name == "amd")     return fact::fn(A, ord::amd{});                    \
     if (name == "colamd")  return fact::fn(A, ord::colamd{});                 \
     if (name == "rcm")     return fact::fn(A, ord::rcm{});                    \
+    if (name == "nd")      return fact::fn(A, ord::nested_dissection{});      \
     if (name == "natural") return fact::fn(A);                                \
     throw std::invalid_argument("unknown ordering '" + name + "'; " + kOrderingHelp)
 
@@ -622,8 +627,9 @@ fact::supernodal_lu_symbolic snlu_symbolic(const mtl::mat::compressed2D<T>& A,
     if (name == "amd")     return fact::supernodal_lu_symbolic_analyze(A, ord::amd{});
     if (name == "colamd")  return fact::supernodal_lu_symbolic_analyze(A, ord::colamd{});
     if (name == "rcm")     return fact::supernodal_lu_symbolic_analyze(A, ord::rcm{});
+    if (name == "nd")      return fact::supernodal_lu_symbolic_analyze(A, ord::nested_dissection{});
     throw std::invalid_argument(
-        "supernodal LU ordering must be 'amd', 'colamd' or 'rcm' (got '" + name + "')");
+        "supernodal LU ordering must be 'amd', 'colamd', 'rcm' or 'nd' (got '" + name + "')");
 }
 
 template <typename T>
@@ -1140,7 +1146,7 @@ void register_sparse_direct(nb::module_& m) {
     register_orderings<double>(m);
 
     m.def("orderings", []() {
-        return std::vector<std::string>{"amd", "colamd", "rcm", "natural"};
+        return std::vector<std::string>{"amd", "colamd", "rcm", "nd", "natural"};
     }, "Fill-reducing orderings accepted by the sparse factorizations");
 
     // Make the direct factorizations usable as the refinement factorization.

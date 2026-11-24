@@ -564,7 +564,8 @@ def splu(
 
     `ordering` is one of `orderings()`: "colamd" (default; column minimum
     degree, suits unsymmetric matrices), "amd" (symmetric minimum degree),
-    "rcm" (bandwidth reducing) or "natural" (no fill reduction).
+    "rcm" (bandwidth reducing), "nd" (nested dissection, for large meshes)
+    or "natural" (no fill reduction).
 
     `threshold` is the partial-pivoting threshold: 1.0 is classic partial
     pivoting, smaller values trade stability for less fill. `pivot_perturb`,
@@ -671,8 +672,8 @@ def supernodal_lu(
     were formed. `scale=True` row-equilibrates first, which matters most when
     the factor precision is narrow.
 
-    `ordering` must be "amd", "colamd" or "rcm" — the supernodal analysis has no
-    natural-ordering path upstream.
+    `ordering` must be "amd", "colamd", "rcm" or "nd" — the supernodal analysis
+    has no natural-ordering path upstream.
 
     The returned object exposes `.solve(b)` and `.refactor(A2)`.
 
@@ -720,6 +721,18 @@ def colamd(A):
 def rcm(A):
     """Reverse Cuthill-McKee (bandwidth-reducing) ordering."""
     return ordering(A, "rcm")
+
+
+def nested_dissection(A):
+    """Nested dissection ordering on the pattern of A + A^T.
+
+    Recursively splits the graph at small separators (breadth-first level
+    structures) and orders each part before its separator, with AMD on
+    pieces of fewer than 64 vertices. On large 2-D and 3-D meshes it gives
+    less fill and much less factorization work than AMD; on small or
+    irregular matrices AMD is usually as good or better.
+    """
+    return ordering(A, "nd")
 
 
 def as_preconditioner_lo(precond, n: int, dtype=None):
@@ -828,6 +841,7 @@ __all__ = [
     "ssor",
     "tfqmr",
     "qr",
+    "nested_dissection",
     "rcm",
     "splu",
     "supernodal_ldlt",
