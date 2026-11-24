@@ -248,6 +248,13 @@ inline void require_default_acc_for_refactor(const std::string& acc, const char*
             "Construct a new factorization instead.");
 }
 
+/// The diagnostics every pivoting factorization's repr ends with. A nonzero
+/// num_perturbed means the factor is of a perturbed matrix, and the
+/// accumulator is otherwise invisible; both belong where people look first.
+inline std::string repr_diagnostics(std::size_t num_perturbed, const std::string& acc) {
+    return ", num_perturbed=" + std::to_string(num_perturbed) + ", accumulator='" + acc + "'";
+}
+
 // ---------------------------------------------------------------------------
 // FactorLock: every wrapper below carries a std::shared_mutex `mtx` guarding
 // `num`.
@@ -420,7 +427,8 @@ void register_sparse_lu(nb::module_& m) {
             std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
                    ", ordering='" + s.ordering + "', nnz=" +
-                   std::to_string(s.num.factorL().nnz() + s.num.factorU().nnz()) + ")";
+                   std::to_string(s.num.factorL().nnz() + s.num.factorU().nnz()) +
+                   repr_diagnostics(s.num.num_perturbed, s.accumulator) + ")";
         });
 }
 
@@ -503,8 +511,13 @@ void register_klu(nb::module_& m) {
            "sequence — the SPICE transient path")
         .def("__repr__", [name](const Wrap& s) {
             std::shared_lock lock(s.mtx);
+            std::size_t nnz = 0;
+            for (const auto& blk : s.num.block_numeric)
+                nnz += blk.factorL().nnz() + blk.factorU().nnz();
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
-                   ", nblocks=" + std::to_string(s.num.nblocks()) + ")";
+                   ", nblocks=" + std::to_string(s.num.nblocks()) +
+                   ", nnz=" + std::to_string(nnz) +
+                   repr_diagnostics(s.num.num_perturbed, s.accumulator) + ")";
         });
 }
 
@@ -940,7 +953,10 @@ void register_supernodal_lu(nb::module_& m) {
         .def("__repr__", [name](const Wrap& s) {
             std::shared_lock lock(s.mtx);
             return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
-                   ", nsuper=" + std::to_string(s.num.nsuper()) + ")";
+                   ", ordering='" + s.ordering + "', nnz=" +
+                   std::to_string(s.num.factorL().nnz() + s.num.factorU().nnz()) +
+                   ", nsuper=" + std::to_string(s.num.nsuper()) +
+                   repr_diagnostics(s.num.num_perturbed, s.accumulator) + ")";
         });
 }
 
@@ -1023,7 +1039,11 @@ void register_supernodal_ldlt(nb::module_& m) {
            "Recompute the numeric factor for a matrix with the SAME sparsity "
            "pattern, reusing the ordering and supernodal symbolic analysis")
         .def("__repr__", [name](const Wrap& s) {
-            return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) + ")";
+            std::shared_lock lock(s.mtx);
+            return "mtl5.sparse." + name + "(n=" + std::to_string(s.n) +
+                   ", ordering='" + s.ordering + "', nnz=" +
+                   std::to_string(s.num.factorL().nnz()) +
+                   ", accumulator='" + s.accumulator + "')";
         });
 }
 

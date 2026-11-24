@@ -15,6 +15,19 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **The pivoting factorizations' reprs show their diagnostics.**
+  - `SparseLU`, `KLU` and `SupernodalLU` now print `num_perturbed` and
+    `accumulator`, which were properties only. A perturbed factor is now
+    visible at a glance.
+  - `KLU` and `SupernodalLU` also print `nnz`, and `SupernodalLU` its
+    `ordering`.
+  - `SupernodalLDLT`, which printed only `n`, now prints `ordering`, `nnz` and
+    `accumulator`.
+
+  For example: `SparseLU_f64(n=479, ordering='colamd', nnz=6744,
+  num_perturbed=0, accumulator='default')`. The diagnostics guide page
+  documents every field.
+
 - **The sparse direct factorizations expose their factors** (part of #125).
   Until now a factor object reported only `.nnz`, so the fill an ordering
   produced could be counted but not seen. The factors come back as

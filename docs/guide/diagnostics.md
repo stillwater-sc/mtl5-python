@@ -11,7 +11,7 @@ A factorization that returns without an exception has not necessarily
 succeeded. This page covers what a factor object can tell you, and which of
 its numbers to trust:
 
-- what `__repr__` shows, and what it leaves out;
+- what `__repr__` shows, field by field;
 - zero pivots, `pivot_perturb` and `num_perturbed`, and a singular matrix that
   factors without complaint;
 - threshold pivoting, which trades stability for fill;
@@ -90,15 +90,15 @@ The fields mean the following:
 |---|---|---|
 | `n` | all square factors | the order of the matrix |
 | `shape` | `SparseQR` | rows and columns; QR also takes tall matrices |
-| `ordering` | `SparseLU`, `SparseCholesky`, `SparseLDLT`, `SparseQR` | the fill-reducing ordering used |
-| `nnz` | `SparseLU` | entries of L plus U, with L's unit diagonal stored |
+| `ordering` | all but `KLU` | the fill-reducing ordering used; KLU orders each block with AMD |
+| `nnz` | `SparseLU`, `SupernodalLU` | entries of L plus U, with L's unit diagonal stored |
+| `nnz` | `KLU` | entries of L plus U summed over the diagonal blocks; the off-diagonal blocks are not factored |
 | `nnz` | `SparseCholesky` | entries of L, diagonal included |
-| `nnz` | `SparseLDLT` | entries of L **without** its unit diagonal, so it is n less than Cholesky's count on the same matrix with the same ordering |
+| `nnz` | `SparseLDLT`, `SupernodalLDLT` | entries of L **without** its unit diagonal, so it is n less than Cholesky's count on the same matrix with the same ordering |
 | `nblocks` | `KLU` | diagonal blocks in the block triangular form; many small blocks mean BTF found structure |
 | `nsuper` | `SupernodalLU` | supernodes formed; n of them would mean no dense blocks at all |
-
-`SupernodalLDLT` prints only `n`. Its fill is available as `.nnz`, and the
-other properties are listed below.
+| `num_perturbed` | `SparseLU`, `KLU`, `SupernodalLU` | pivots that `pivot_perturb` replaced; 0 for a clean factor, and anything else means the factor is of a perturbed matrix |
+| `accumulator` | `SparseLU`, `KLU`, `SupernodalLU`, `SupernodalLDLT` | the type of the numeric workspace: `'default'` (the element type), `'f64'`, `'fma32'`, ... |
 
 ```{code-cell} python
 r = {name: repr(F) for name, F in factors.items()}
@@ -106,23 +106,20 @@ n = P.shape[0]
 assert f"nnz={factors['splu'].nnz}" in r["splu"]
 assert f"nblocks={factors['klu'].nblocks}" in r["klu"]
 assert f"nsuper={factors['supernodal_lu'].nsuper}" in r["supernodal_lu"]
-assert r["supernodal_ldlt"].endswith(f"(n={n})")
+for name in ("splu", "klu", "supernodal_lu"):
+    assert "num_perturbed=0" in r[name] and "accumulator='default'" in r[name]
+assert f"nnz={factors['supernodal_ldlt'].nnz}" in r["supernodal_ldlt"]
 assert factors["ldlt"].nnz == factors["cholesky"].nnz - n
 assert factors["supernodal_ldlt"].nnz == factors["cholesky"].nnz - n
 ```
 
-### What the repr leaves out
+### Reading the diagnostics as properties
 
-Three diagnostics are properties only, and none of them appears in the repr:
-
-- `num_perturbed`, on `splu`, `klu` and `supernodal_lu`: how many pivots
-  `pivot_perturb` replaced. It is 0 for a clean factor.
-- `accumulator`, on the same three and on `supernodal_ldlt`: the
-  accumulator policy the factor was built with.
-- `dtype`: `"f32"` or `"f64"`, the precision of the stored factor. It follows
-  the dtype of the matrix you passed in.
-
-A short helper prints whichever of these a factor has:
+Every field in the repr is also a property, so code can check it without
+parsing a string. One more is a property only: `dtype`, `"f32"` or `"f64"`,
+the precision of the stored factor. The class name carries it as a suffix,
+and it follows the dtype of the matrix you passed in. A short helper prints
+whichever of these a factor has:
 
 ```{code-cell} python
 DIAGNOSTICS = ("dtype", "ordering", "nnz", "nblocks", "nsuper", "num_perturbed", "accumulator")
@@ -540,8 +537,9 @@ After a factorization, and before trusting its solve:
    block structure did what you expected. The
    [orderings guide](../notebooks/sparse_direct_orderings) shows what good
    and bad fill look like.
-5. **`dtype` and `accumulator`**, which the repr does not show, when the
-   factor came from code you did not write.
+5. **`dtype` and `accumulator`**, when the factor came from code you did
+   not write. The repr shows the accumulator, and the class name's suffix
+   shows the dtype.
 
 API reference: {py:func}`mtl5.sparse.splu`, {py:func}`mtl5.sparse.klu`,
 {py:func}`mtl5.sparse.supernodal_lu`, {py:func}`mtl5.sparse.cholesky`,
