@@ -1028,6 +1028,53 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.24.1 (2026-11-24)
+
+### Bug Fixes
+
+- **sparse**: Lock each factorization against concurrent refactor()
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+### Documentation
+
+- List every bound element type in CLAUDE.md
+  ([#123](https://github.com/stillwater-sc/mtl5-python/pull/123),
+  [`0a9846b`](https://github.com/stillwater-sc/mtl5-python/commit/0a9846bd55e3e0f5c2de341c0e41a36e274a1195))
+
+- Session log and changelog entry for 2026-11-23
+  ([#124](https://github.com/stillwater-sc/mtl5-python/pull/124),
+  [`18345a1`](https://github.com/stillwater-sc/mtl5-python/commit/18345a15644b342e0e7ccfac105e0887f714653d))
+
+- **sparse**: The LU reconstruction identities need num_perturbed == 0
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+### Features
+
+- **sparse**: Expose the factors of the sparse direct solvers
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+### Testing
+
+- **sparse**: Fail the refactor stress run when a worker thread raises
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+- **sparse**: Inject the reader failure before the stop-controlled loop
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+- **sparse**: Make every reader of the refactor stress test participate
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+- **sparse**: Run the refactor stress subprocess outside the repo root
+  ([#126](https://github.com/stillwater-sc/mtl5-python/pull/126),
+  [`4b0817f`](https://github.com/stillwater-sc/mtl5-python/commit/4b0817faafbd998026de5657950fc3f06f75cc2b))
+
+
 ## v5.20.2 (2026-10-23)
 
 ### Bug Fixes
