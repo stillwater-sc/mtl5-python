@@ -147,8 +147,9 @@ against, and semantic-release manages only the **patch** component.
     every ordering.
   - **The arrow matrix.** Hub first gives a dense factor; hub last gives no
     fill at all.
-  - **Values never matter.** The same pattern with random values gives the
-    same AMD ordering and the same fill.
+  - **Values never enter the ordering.** The same pattern with random values
+    gives the same AMD ordering and the same Cholesky fill. With partial
+    pivoting, values can change LU fill, and the page says so.
   - **Minimum degree and AMD.** A textbook minimum degree lands within 1% of
     mtl5's AMD.
   - **Nested dissection.** A geometric version is built by hand on grids.

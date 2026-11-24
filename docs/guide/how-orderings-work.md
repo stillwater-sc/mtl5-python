@@ -307,8 +307,11 @@ assert abs(md - amd) < 0.1 * amd
 The signal is local: the current degree of each vertex in the *evolving*
 graph, which changes after every step as fill appears. The textbook version
 above is far too slow for real matrices, because it forms every clique
-explicitly. Forty years of work went into making it fast without changing
-what it computes:
+explicitly. Forty years of work went into making it fast. The quotient
+graph and indistinguishable vertices change only how the work is done.
+Multiple elimination and AMD's approximate degrees can also change which
+vertex is picked, so AMD's ordering is close in quality to exact minimum
+degree but not identical, as the 1% difference above shows:
 
 - **The quotient graph** (George and Liu). An eliminated vertex is kept as an
   *element* that stands for its clique, instead of adding the clique's
