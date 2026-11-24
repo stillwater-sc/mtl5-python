@@ -260,12 +260,12 @@ assert np.array_equal(p_a, p_r) and cholesky_nnz(A12, p_a) == cholesky_nnz(R, p_
 ```
 
 That is what makes the problem tractable: the ordering is a pure graph
-problem, solved once, before the numeric factorization. It also means that
-values can only make things worse. With Cholesky, every pivot is on the
-diagonal and the game gives the stored pattern exactly. With LU and partial pivoting, the values
-decide the row interchanges, and the ordering can only bound the fill (see
-[unsymmetric matrices](#unsymmetric-orderings)
-below).
+problem, solved once, before the numeric factorization. With Cholesky,
+every pivot is on the diagonal, and the game gives the stored pattern
+exactly. With LU and partial pivoting, the values decide the row
+interchanges. Different values with the same pattern can then give more
+fill or less, and the ordering can only bound it (see
+[unsymmetric matrices](#unsymmetric-orderings) below).
 
 Finding the order that minimizes fill is NP-hard (Yannakakis, 1981). The
 practical algorithms are heuristics, and the interesting question about
@@ -333,10 +333,12 @@ graph into two parts A and B with no edge between them. Order A first, then
 B, then S last.
 
 Eliminating a vertex of A creates fill only among its neighbours, and those
-lie in A or S, never in B. So fill can never cross the separator: the
-factor's off-diagonal blocks between A and B stay empty, and only S's own
-block becomes dense. Apply the same idea to A and B recursively, and you
-have nested dissection (George, 1973).
+lie in A or S, never in B. So fill can appear within A, within B, and
+between either of them and S, but never across the separator: the factor's
+blocks between A and B stay empty. S is eliminated last, after all that
+fill has reached it, and its own block typically becomes dense. Apply the
+same idea to A and B recursively, and you have nested dissection (George,
+1973).
 
 On a grid, the middle row or column is a separator. Here is the recursion on
 a 15×15 grid, coloured by depth: the first separator is the darkest, and
