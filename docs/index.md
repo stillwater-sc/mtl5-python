@@ -1,8 +1,8 @@
 # mtl5-python
 
-Python bindings for [MTL5](https://github.com/stillwater-sc/mtl5), the
-Mathematics Template Library, with zero-copy interop with NumPy, SciPy, JAX and
-PyTorch, and dispatch to hardware accelerators.
+Python bindings for [MTL5](https://github.com/stillwater-sc/mtl5), version 5
+of the Matrix Template Library, with zero-copy interop with NumPy, SciPy, JAX
+and PyTorch, and dispatch to hardware accelerators.
 
 - **Zero-copy containers.** `mtl5.vector()` and `mtl5.matrix()` wrap NumPy
   memory without copying it, and NumPy and scikit-learn accept the containers
