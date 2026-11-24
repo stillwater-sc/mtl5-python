@@ -182,8 +182,9 @@ against, and semantic-release manages only the **patch** component.
     mtl5's AMD.
   - **Nested dissection.** A geometric version is built by hand on grids.
     Its work grows more slowly than AMD's (n^1.62 against n^1.70), but AMD
-    still wins at 2-D sizes up to 256×256, and the page says so. The upstream
-    ordering is in progress as stillwater-sc/mtl5#919.
+    still wins at 2-D sizes up to 256×256, and the page says so. #138 then
+    adds mtl5's own `nd` ordering to the page: its separators are smaller,
+    and it beats AMD from about 100×100 up.
   - **RCM.** Its fill fills the envelope exactly on a grid.
   - **COLAMD.** The George–Ng bound is checked on `west0479`: U's pattern
     lies inside the Cholesky factor of (AQ)ᵀ(AQ) for every ordering, and the
