@@ -1132,6 +1132,118 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.24.2 (2026-11-24)
+
+### Bug Fixes
+
+- **sparse**: Require MTL5 5.24.1, where threshold pivoting works under an ordering
+  ([#133](https://github.com/stillwater-sc/mtl5-python/pull/133),
+  [`869e386`](https://github.com/stillwater-sc/mtl5-python/commit/869e386ebf52868242b3aa24cf156123efd23a40))
+
+### Continuous Integration
+
+- **docs**: Drop configure-pages, deploy only the current head of main
+  ([#128](https://github.com/stillwater-sc/mtl5-python/pull/128),
+  [`69a1e9b`](https://github.com/stillwater-sc/mtl5-python/commit/69a1e9b7c89fdf07e8bb86b5b206feaf22b936d2))
+
+- **docs**: Publish only from main ([#128](https://github.com/stillwater-sc/mtl5-python/pull/128),
+  [`69a1e9b`](https://github.com/stillwater-sc/mtl5-python/commit/69a1e9b7c89fdf07e8bb86b5b206feaf22b936d2))
+
+### Documentation
+
+- A Sphinx documentation site, deployed to GitHub Pages
+  ([#128](https://github.com/stillwater-sc/mtl5-python/pull/128),
+  [`69a1e9b`](https://github.com/stillwater-sc/mtl5-python/commit/69a1e9b7c89fdf07e8bb86b5b206feaf22b936d2))
+
+- MTL stands for Matrix Template Library
+  ([#129](https://github.com/stillwater-sc/mtl5-python/pull/129),
+  [`6458ad6`](https://github.com/stillwater-sc/mtl5-python/commit/6458ad65e7dc8777c3eff99b8a4c15220690d054))
+
+- Scope scaled=True, raise the docs SciPy floor, fix the log's bound
+  ([#132](https://github.com/stillwater-sc/mtl5-python/pull/132),
+  [`fe4b477`](https://github.com/stillwater-sc/mtl5-python/commit/fe4b4778c17e36e36e7ebbb07944f1ff7ba825e6))
+
+- Serialize deploys, always re-execute, document the concrete classes
+  ([#128](https://github.com/stillwater-sc/mtl5-python/pull/128),
+  [`69a1e9b`](https://github.com/stillwater-sc/mtl5-python/commit/69a1e9b7c89fdf07e8bb86b5b206feaf22b936d2))
+
+- Spy plots with one image cell per matrix entry
+  ([#132](https://github.com/stillwater-sc/mtl5-python/pull/132),
+  [`fe4b477`](https://github.com/stillwater-sc/mtl5-python/commit/fe4b4778c17e36e36e7ebbb07944f1ff7ba825e6))
+
+- **guide**: A covariance matrix needs linearly independent centred variables
+  ([#131](https://github.com/stillwater-sc/mtl5-python/pull/131),
+  [`47d0a8c`](https://github.com/stillwater-sc/mtl5-python/commit/47d0a8c1ed6edcdae11bb93838be7c2542d62b38))
+
+- **guide**: An SPD worked example, and the 2026-11-24 session log
+  ([#131](https://github.com/stillwater-sc/mtl5-python/pull/131),
+  [`47d0a8c`](https://github.com/stillwater-sc/mtl5-python/commit/47d0a8c1ed6edcdae11bb93838be7c2542d62b38))
+
+- **guide**: Assert every stated outcome; route square systems first
+  ([#130](https://github.com/stillwater-sc/mtl5-python/pull/130),
+  [`4340107`](https://github.com/stillwater-sc/mtl5-python/commit/4340107e296de1fb268c3a87fff5f0bd68d06540))
+
+- **guide**: Describe rcm and amd as the heuristics they are
+  ([#131](https://github.com/stillwater-sc/mtl5-python/pull/131),
+  [`47d0a8c`](https://github.com/stillwater-sc/mtl5-python/commit/47d0a8c1ed6edcdae11bb93838be7c2542d62b38))
+
+- **guide**: Flatten column vectors in the LinearOperator preconditioner
+  ([#130](https://github.com/stillwater-sc/mtl5-python/pull/130),
+  [`4340107`](https://github.com/stillwater-sc/mtl5-python/commit/4340107e296de1fb268c3a87fff5f0bd68d06540))
+
+- **guide**: Interval eigenvalue counts, qr shapes, refactor limits
+  ([#130](https://github.com/stillwater-sc/mtl5-python/pull/130),
+  [`4340107`](https://github.com/stillwater-sc/mtl5-python/commit/4340107e296de1fb268c3a87fff5f0bd68d06540))
+
+- **guide**: Make the conditioning sweep independent of rounding luck
+  ([#132](https://github.com/stillwater-sc/mtl5-python/pull/132),
+  [`fe4b477`](https://github.com/stillwater-sc/mtl5-python/commit/fe4b4778c17e36e36e7ebbb07944f1ff7ba825e6))
+
+- **guide**: Mixed precision (section 7), and sharper spy plots
+  ([#132](https://github.com/stillwater-sc/mtl5-python/pull/132),
+  [`fe4b477`](https://github.com/stillwater-sc/mtl5-python/commit/fe4b4778c17e36e36e7ebbb07944f1ff7ba825e6))
+
+- **guide**: Mixed precision, a float32 factor refined in float64
+  ([#132](https://github.com/stillwater-sc/mtl5-python/pull/132),
+  [`fe4b477`](https://github.com/stillwater-sc/mtl5-python/commit/fe4b4778c17e36e36e7ebbb07944f1ff7ba825e6))
+
+- **guide**: No wall-clock assertion in the docs build
+  ([#130](https://github.com/stillwater-sc/mtl5-python/pull/130),
+  [`4340107`](https://github.com/stillwater-sc/mtl5-python/commit/4340107e296de1fb268c3a87fff5f0bd68d06540))
+
+- **guide**: Say when the SPD examples are positive definite
+  ([#131](https://github.com/stillwater-sc/mtl5-python/pull/131),
+  [`47d0a8c`](https://github.com/stillwater-sc/mtl5-python/commit/47d0a8c1ed6edcdae11bb93838be7c2542d62b38))
+
+- **guide**: Solve() takes a 1-D right-hand side only
+  ([#130](https://github.com/stillwater-sc/mtl5-python/pull/130),
+  [`4340107`](https://github.com/stillwater-sc/mtl5-python/commit/4340107e296de1fb268c3a87fff5f0bd68d06540))
+
+- **guide**: Sparse direct solvers overview and a SciPy mapping
+  ([#130](https://github.com/stillwater-sc/mtl5-python/pull/130),
+  [`4340107`](https://github.com/stillwater-sc/mtl5-python/commit/4340107e296de1fb268c3a87fff5f0bd68d06540))
+
+- **guide**: Supernodal_ldlt also covers symmetric indefinite matrices
+  ([#131](https://github.com/stillwater-sc/mtl5-python/pull/131),
+  [`47d0a8c`](https://github.com/stillwater-sc/mtl5-python/commit/47d0a8c1ed6edcdae11bb93838be7c2542d62b38))
+
+- **guide**: Tighten the mixed-precision page's conditioning claims
+  ([#132](https://github.com/stillwater-sc/mtl5-python/pull/132),
+  [`fe4b477`](https://github.com/stillwater-sc/mtl5-python/commit/fe4b4778c17e36e36e7ebbb07944f1ff7ba825e6))
+
+- **notebooks**: Alternate the order of the refactor timing rounds
+  ([#127](https://github.com/stillwater-sc/mtl5-python/pull/127),
+  [`42a8d25`](https://github.com/stillwater-sc/mtl5-python/commit/42a8d25ce03ad6819be9d7fd53dba1954c5e036f))
+
+- **notebooks**: Sparse direct orderings, fill-in and the solve pipeline
+  ([#127](https://github.com/stillwater-sc/mtl5-python/pull/127),
+  [`42a8d25`](https://github.com/stillwater-sc/mtl5-python/commit/42a8d25ce03ad6819be9d7fd53dba1954c5e036f))
+
+- **notebooks**: Time the same work in both refactor-timing loops
+  ([#127](https://github.com/stillwater-sc/mtl5-python/pull/127),
+  [`42a8d25`](https://github.com/stillwater-sc/mtl5-python/commit/42a8d25ce03ad6819be9d7fd53dba1954c5e036f))
+
+
 ## v5.24.1 (2026-11-24)
 
 ### Bug Fixes
