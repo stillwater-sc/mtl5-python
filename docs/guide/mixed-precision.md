@@ -310,13 +310,20 @@ number formats with a much narrower exponent range than `float32`, such as
 `fp16` or the 8-bit formats. Those are available for dense matrices through
 `mtl5.mixed.lu_iterative_refine(A, b, working="fp16", scaled=True)`.
 
+Scaling normalizes the residual, not the matrix. The factor still has to
+represent $A$, and its solve has to produce $A^{-1}r/\|r\|$ without
+overflowing. When the entries of $A$ themselves sit near the edge of the
+narrow format's range, rescale the system first (multiply $A$ and $b$ by a
+power of two that brings $A$ to order one) or use a `float64` factor.
+
 ## Summary
 
 | Situation | What to use |
 |---|---|
 | $\kappa(A) \lesssim 10^7$, memory or bandwidth bound | `float32` factor + `iterative_refine(..., rel_tol=...)` |
 | $\kappa(A)$ larger, or refinement does not converge | `float32` factor as the preconditioner for `float64` GMRES |
-| data near the bottom of the narrow format's range | `iterative_refine(..., scaled=True)` |
+| $b$ near the bottom of the narrow format's range | `iterative_refine(..., scaled=True)` |
+| $A$ itself near the edge of the narrow format's range | rescale $A$ and $b$ first, or a `float64` factor |
 | the narrow factorization fails, or the cast makes $A$ singular | a `float64` factor, or another preconditioner for GMRES |
 | none of the above, and time is the only concern on a CPU | a `float64` factor |
 
