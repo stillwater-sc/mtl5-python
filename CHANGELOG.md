@@ -116,6 +116,26 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Spy plots draw one image cell per matrix entry** (orderings notebook and
+  SPD page). They used matplotlib's `ax.spy` with markers sized in points,
+  and at these sizes each marker spanned 2–4 matrix rows, so neighbouring
+  nonzeros merged into blobs. The pattern is now an image with one cell per
+  entry, rendered at about two pixels per row. Nonzeros never overlap, and
+  dense blocks still read as solid.
+- **Guide page: "Mixed precision: a narrow factor, refined"** (section 7 of
+  #125). A float32 Cholesky refined with `mtl5.mixed.iterative_refine`
+  reaches float64 accuracy in 3 corrections on a 2-D Poisson problem, with
+  half the bytes of factor values. The page also shows where it stops:
+  - On this CPU the float32 factorization is not faster than the float64
+    one, so the gain is memory and bandwidth, not time.
+  - A conditioning sweep converges while the shift that makes the matrix
+    nonsingular survives the float32 cast (κ up to about 8e6). Well past
+    that, it stalls without raising. GMRES preconditioned by the same float32 factor
+    converges at κ ≈ 8e8 and 8e10.
+  - With data near 1e-40, the float32 corrections underflow; `scaled=True`
+    recovers float64 accuracy.
+  - It documents what `info["converged"]` means: with the default
+    `rel_tol=0` it is always false.
 - **Guide page: "A symmetric positive definite example"** (section 5 of
   #125). It factors `poisson2d` with `cholesky` and `supernodal_ldlt` under
   every ordering, and grows the grid from 16×16 to 128×128:

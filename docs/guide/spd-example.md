@@ -40,6 +40,7 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import ListedColormap
 
 import mtl5
 import mtl5.sparse as ms
@@ -63,9 +64,15 @@ plt.rcParams.update(
 )
 
 
-def spy(ax, M, title, color=SERIES[0], markersize=0.6):
-    S = ms.to_scipy(M)
-    ax.spy(S, precision="present", markersize=markersize, color=color)
+SPY_DPI = 200  # about two pixels per matrix row in the spy figures
+
+
+def spy(ax, M, title, color=SERIES[0]):
+    # One image cell per matrix entry, so two nonzeros never overlap.
+    S = ms.to_scipy(M).tocoo()
+    pattern = np.zeros(S.shape, dtype=bool)
+    pattern[S.row, S.col] = True
+    ax.imshow(pattern, cmap=ListedColormap([SURFACE, color]), interpolation="none")
     ax.set_title(f"{title}\nnz = {S.nnz:,}", fontsize=9)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -120,10 +127,11 @@ numbering.
 ORDERINGS = ["natural", "rcm", "colamd", "amd"]
 chol = {o: ms.cholesky(A, ordering=o) for o in ORDERINGS}
 
-fig, axes = plt.subplots(1, 5, figsize=(14, 3.2))
-spy(axes[0], A, "A", color=INK_2, markersize=1.0)
-for ax, o, c in zip(axes[1:], ORDERINGS, SERIES):
+fig, axes = plt.subplots(2, 3, figsize=(13, 9.4), dpi=SPY_DPI)
+spy(axes[0, 0], A, "A", color=INK_2)
+for ax, o, c in zip(axes.flat[1:], ORDERINGS, SERIES):
     spy(ax, chol[o].L, f"L  ({o})", color=c)
+axes[1, 2].axis("off")
 plt.tight_layout()
 plt.show()
 
