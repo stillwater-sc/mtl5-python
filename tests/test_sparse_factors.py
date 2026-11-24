@@ -231,6 +231,7 @@ import scipy.sparse as sp
 import mtl5.sparse as ms
 
 kind = sys.argv[1]
+inject = len(sys.argv) > 2 and sys.argv[2] == "inject"   # self-check: see below
 k = 60
 eye = sp.eye(k, format="csr")
 tri = sp.diags([-1.0, 2.0, -1.0], [-1, 0, 1], shape=(k, k), format="csr")
@@ -251,29 +252,55 @@ xs = [np.ones(A1.shape[0]), np.full(A1.shape[0], 0.25)]   # A2 = 4 * A1
 f = make(A1)
 stop = threading.Event()
 torn = [0, 0]
+errors = []   # Thread.join() does not propagate a worker's exception
 
 def writer():
-    for i in range(400):
-        f.refactor(M2 if i % 2 else M1)
-    stop.set()
+    try:
+        for i in range(400):
+            f.refactor(M2 if i % 2 else M1)
+    except BaseException as e:
+        errors.append(f"writer: {e!r}")
+    finally:
+        stop.set()   # a failed writer must not leave the readers spinning
 
 def reader():
-    while not stop.is_set():
-        d = snap(f)
-        if not any(d.shape == r.shape and np.allclose(d, r) for r in ref):
-            torn[0] += 1
-        x = f.solve(b).to_numpy()
-        if not any(np.allclose(x, xr) for xr in xs):
-            torn[1] += 1
+    try:
+        while not stop.is_set():
+            if inject:
+                raise RuntimeError("injected reader failure")
+            d = snap(f)
+            if not any(d.shape == r.shape and np.allclose(d, r) for r in ref):
+                torn[0] += 1
+            x = f.solve(b).to_numpy()
+            if not any(np.allclose(x, xr) for xr in xs):
+                torn[1] += 1
+    except BaseException as e:
+        errors.append(f"reader: {e!r}")
 
 threads = [threading.Thread(target=writer)] + [threading.Thread(target=reader) for _ in range(3)]
 for t in threads:
     t.start()
 for t in threads:
     t.join()
-print("torn factor reads:", torn[0], "torn solves:", torn[1])
-sys.exit(1 if any(torn) else 0)
+print("torn factor reads:", torn[0], "torn solves:", torn[1], "errors:", errors)
+sys.exit(1 if any(torn) or errors else 0)
 """
+
+
+def _run_race(cwd, *args):
+    import subprocess
+    import sys
+
+    # `python -c` puts the working directory first on sys.path. Run from the
+    # repo root, that is the source mtl5/ package, which has no compiled _core;
+    # an empty directory keeps the installed one visible.
+    return subprocess.run(
+        [sys.executable, "-c", _RACE, *args],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=cwd,
+    )
 
 
 class TestConcurrentRefactor:
@@ -287,17 +314,11 @@ class TestConcurrentRefactor:
 
     @pytest.mark.parametrize("kind", ["cholesky", "ldlt", "splu", "supernodal_lu"])
     def test_readers_never_see_a_torn_factor(self, kind, tmp_path):
-        import subprocess
-        import sys
-
-        # `python -c` puts the working directory first on sys.path. Run from
-        # the repo root, that is the source mtl5/ package, which has no
-        # compiled _core; an empty directory keeps the installed one visible.
-        r = subprocess.run(
-            [sys.executable, "-c", _RACE, kind],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=tmp_path,
-        )
+        r = _run_race(tmp_path, kind)
         assert r.returncode == 0, r.stdout + r.stderr
+
+    def test_a_failing_reader_fails_the_run(self, tmp_path):
+        """The harness itself: a reader that raises must not pass silently."""
+        r = _run_race(tmp_path, "cholesky", "inject")
+        assert r.returncode != 0
+        assert "injected reader failure" in r.stdout
