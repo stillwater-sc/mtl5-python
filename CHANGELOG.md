@@ -1163,6 +1163,45 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.24.3 (2026-11-24)
+
+### Documentation
+
+- **guide**: A small pivot ratio is a warning, and LDLT's nnz relation needs the same ordering
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+- **guide**: Diagnostics (section 9), and API reference links on every guide page
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+- **guide**: Say when a perturbed pivot slows refinement and when it diverges
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+- **guide**: State the refinement conditions correctly on the diagnostics page
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+- **guide**: The checklist's pivot ratio and detector name the factorizations they apply to
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+- **guide**: The pivot ratio comes from ms.to_scipy(F.U).diagonal()
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+- **guide**: The pivot_perturb detector misses a badly scaled matrix
+  ([#134](https://github.com/stillwater-sc/mtl5-python/pull/134),
+  [`769ddc5`](https://github.com/stillwater-sc/mtl5-python/commit/769ddc5fe5c4dc23b00cbc552deee13528187a40))
+
+### Features
+
+- **sparse**: The pivoting factorizations' reprs show num_perturbed and accumulator
+  ([#135](https://github.com/stillwater-sc/mtl5-python/pull/135),
+  [`c5499d8`](https://github.com/stillwater-sc/mtl5-python/commit/c5499d82a22cd604df02867cf8feb42c9c326efa))
+
+
 ## v5.24.2 (2026-11-24)
 
 ### Bug Fixes
