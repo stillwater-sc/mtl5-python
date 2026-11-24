@@ -143,8 +143,9 @@ print(f"{'grid':>16} {'n':>7} {'fill':>6} {'Cholesky':>9} {'one CG':>8}")
 for label, size, fill, t_chol, t_cg in rows:
     print(f"{label:>16} {size:7,} {fill:5.1f}x {t_chol:7.0f}ms {t_cg:6.0f}ms")
 assert rows[0][1] == rows[1][1]
-assert rows[1][2] > 3 * rows[0][2]  # several times the fill
-assert rows[1][3] > 3 * rows[0][3]  # and much longer to factor (measured: about 20x)
+# Fill is deterministic and checked. The times are measurements only: one
+# run each, which a loaded build machine could skew.
+assert rows[1][2] > 3 * rows[0][2]
 ```
 
 With the same number of unknowns, the 3-D factor carries several times the
