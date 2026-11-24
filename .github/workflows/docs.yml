@@ -1,0 +1,59 @@
+name: Docs
+
+# Builds the documentation site on every PR and on main, and deploys main to
+# GitHub Pages (https://stillwater-sc.github.io/mtl5-python/).
+#
+# The build is strict: -W turns every Sphinx warning into a failure, and the
+# notebooks and the getting-started page are executed, so a docstring that no
+# longer renders or an example that no longer runs fails the PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install with the docs extra
+        run: pip install ".[docs]" -v
+      # The sphinx-build script, not `python -m sphinx`: -m puts the working
+      # directory on sys.path, and from the repo root that is the source mtl5/
+      # package, which has no compiled _core.
+      - name: Build the site
+        run: sphinx-build -W --keep-going -b html docs docs/_build/html
+      - uses: actions/configure-pages@v6
+        if: github.event_name != 'pull_request'
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
+        with:
+          path: docs/_build/html
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # One deployment at a time; a newer push cancels a queued one, never a
+    # running one.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

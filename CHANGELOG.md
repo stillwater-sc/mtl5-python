@@ -116,6 +116,33 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **A documentation site** (part of #125):
+  <https://stillwater-sc.github.io/mtl5-python/>. It is built with Sphinx and
+  MyST-NB, uses the pydata theme, and is deployed to GitHub Pages from `main`.
+  It has three parts:
+  - **Getting started:** an executable page, so its examples run at every
+    build;
+  - **User guide:** the notebooks from `notebooks/`, copied at build time and
+    executed. Git keeps them without outputs, and the site always shows fresh
+    ones;
+  - **API reference:** generated from the compiled module's docstrings.
+
+  A new `docs` CI workflow builds the site on every PR with `-W`, so a
+  docstring that no longer renders, or an example that no longer runs, fails
+  the PR. Install the build dependencies with `pip install -e ".[docs]"`.
+
+  Making the nanobind module autodoc-friendly took three adaptations in
+  `docs/conf.py`:
+  - compiled functions are presented as functions rather than values;
+  - their overload signatures are moved out of the reStructuredText body,
+    because `shape=(*, *)` is not valid markup;
+  - NumPy-style sections are parsed for callables only, so property
+    docstrings containing colons are not cut apart.
+
+  Two docstrings were fixed in passing. The iterative solvers' shared
+  Parameters section now starts after a blank line, and `spy_magnitude` no
+  longer contains a bare `|value|`, which reStructuredText reads as a
+  substitution.
 - **New notebook: `notebooks/sparse_direct_orderings.ipynb`** (part of #125).
   It follows MATLAB's `colamd` example on `west0479` and goes further:
   - spy plots of the matrix and of its `L` and `U` factors under `natural`,
