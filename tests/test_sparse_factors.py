@@ -266,25 +266,36 @@ ref = [snap(make(A1)), snap(make(A2))]
 b = A1 @ np.ones(A1.shape[0])
 xs = [np.ones(A1.shape[0]), np.full(A1.shape[0], 0.25)]   # A2 = 4 * A1
 f = make(A1)
+NREADERS = 3
 stop = threading.Event()
+start = threading.Barrier(NREADERS + 1)   # writer + readers begin together
 torn = [0, 0]
+seen = [0] * NREADERS   # observations per reader made while refactors ran
 errors = []   # Thread.join() does not propagate a worker's exception
 
 def writer():
     try:
-        for i in range(400):
+        start.wait(timeout=60)
+        # At least 400 refactors, and keep going until every reader has made
+        # an observation: otherwise the writer could finish before a reader
+        # ran and the run would pass having checked nothing. The cap keeps a
+        # stalled reader from hanging the run; the seen check below fails it.
+        i = 0
+        while (i < 400 or min(seen) == 0) and i < 200_000:
             f.refactor(M2 if i % 2 else M1)
+            i += 1
     except BaseException as e:
         errors.append(f"writer: {e!r}")
     finally:
         stop.set()   # a failed writer must not leave the readers spinning
 
-def reader():
+def reader(k):
     try:
-        # Before the loop, not in it: the writer may finish and set stop before
-        # a reader first checks it, and the injection must fire regardless.
+        # Before the barrier and the loop: the injection must fire under every
+        # schedule, independent of the synchronization.
         if inject:
             raise RuntimeError("injected reader failure")
+        start.wait(timeout=60)
         while not stop.is_set():
             d = snap(f)
             if not any(d.shape == r.shape and np.allclose(d, r) for r in ref):
@@ -292,16 +303,22 @@ def reader():
             x = f.solve(b).to_numpy()
             if not any(np.allclose(x, xr) for xr in xs):
                 torn[1] += 1
+            seen[k] += 1
     except BaseException as e:
-        errors.append(f"reader: {e!r}")
+        errors.append(f"reader {k}: {e!r}")
+        start.abort()   # release the others rather than leave them waiting
 
-threads = [threading.Thread(target=writer)] + [threading.Thread(target=reader) for _ in range(3)]
+threads = [threading.Thread(target=writer)] + [
+    threading.Thread(target=reader, args=(k,)) for k in range(NREADERS)
+]
 for t in threads:
     t.start()
 for t in threads:
     t.join()
-print("torn factor reads:", torn[0], "torn solves:", torn[1], "errors:", errors)
-sys.exit(1 if any(torn) or errors else 0)
+print("torn factor reads:", torn[0], "torn solves:", torn[1],
+      "observations per reader:", seen, "errors:", errors)
+idle = min(seen) == 0
+sys.exit(1 if any(torn) or errors or idle else 0)
 """
 
 
