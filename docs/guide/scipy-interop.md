@@ -62,7 +62,7 @@ print("from_scipy and to_scipy both copy")
 
 | SciPy | mtl5 |
 |---|---|
-| `spsolve(A, b)` | `ms.splu(A).solve(b)` |
+| `spsolve(A, b)` | `ms.splu(A).solve(b)`, for a 1-D `b` only: `spsolve` also takes a matrix of right-hand sides, `solve` does not. Solve one column at a time; the factorization is reused, so each extra column costs only the triangular solves. |
 | `splu(A, permc_spec="COLAMD")` | `ms.splu(A, ordering="colamd")`, the default |
 | `permc_spec="NATURAL"` | `ordering="natural"` |
 | `permc_spec="MMD_AT_PLUS_A"` | `ordering="amd"` (approximate minimum degree on $A + A^T$) |
