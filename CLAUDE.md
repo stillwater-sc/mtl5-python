@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**mtl5-python** is a nanobind-based Python module providing zero-copy interop between Python's scientific/ML ecosystem and MTL5 (Mathematics Template Library v5, a C++ library by Stillwater Supercomputing, Inc.).
+**mtl5-python** is a nanobind-based Python module providing zero-copy interop between Python's scientific/ML ecosystem and MTL5 (the Matrix Template Library, version 5, a C++ library by Stillwater Supercomputing, Inc.).
 
 Target ecosystem: NumPy, SciPy, JAX, PyTorch, pandas, scikit-learn.
 
