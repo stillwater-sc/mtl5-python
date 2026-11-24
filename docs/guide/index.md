@@ -13,6 +13,7 @@ direct-solvers
 ../notebooks/sparse_direct_orderings
 spd-example
 mixed-precision
+diagnostics
 scipy-interop
 ```
 

@@ -331,3 +331,5 @@ power of two that brings $A$ to order one) or use a `float64` factor.
 matrices. Its factor can be in `f32`, `fp16`, `fp8`, a posit, a fixed-point or
 a logarithmic format, which makes it the place to explore how narrow a factor
 can get before refinement gives up.
+
+API reference: {py:func}`mtl5.mixed.iterative_refine`, {py:func}`mtl5.mixed.lu_iterative_refine`, {py:func}`mtl5.sparse.cholesky`, {py:func}`mtl5.sparse.supernodal_ldlt`, {py:func}`mtl5.sparse.from_scipy`.

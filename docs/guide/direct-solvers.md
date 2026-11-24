@@ -350,3 +350,5 @@ x = ms.splu(swap, ordering="natural").solve(np.array([1.0, 2.0])).to_numpy()
 print("splu:", x)
 assert np.allclose(x, [2.0, 1.0])
 ```
+
+API reference: {py:func}`mtl5.sparse.splu`, {py:func}`mtl5.sparse.klu`, {py:func}`mtl5.sparse.cholesky`, {py:func}`mtl5.sparse.ldlt`, {py:func}`mtl5.sparse.qr`, {py:func}`mtl5.sparse.supernodal_lu`, {py:func}`mtl5.sparse.supernodal_ldlt`, {py:func}`mtl5.sparse.cg`, {py:func}`mtl5.sparse.gmres`, {py:func}`mtl5.sparse.bicgstab`, {py:func}`mtl5.sparse.ilu0`, {py:func}`mtl5.io.mm_read`.
