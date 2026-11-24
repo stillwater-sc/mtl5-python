@@ -432,10 +432,13 @@ void register_sparse_lu(nb::module_& m) {
         });
 }
 
-// KLU exposes no L / U. Its factorization is a block upper triangular form
-// with an independent LU per diagonal block, scaled and permuted per block;
-// there is no single pair of triangular factors to return, and inventing one
-// would misrepresent where BTF saves its fill. `nblocks` and `nnz` describe it.
+// KLU has no single pair of triangular factors. Its factorization is a block
+// upper triangular form B = P*(R*A)*Q with an independent LU of each diagonal
+// block; the off-diagonal blocks are never factored, only used in the block
+// back-substitution. Folding that into one global L and U would need terms
+// like L_i^{-1} B_ij, which fill in, and would misrepresent where BTF saves
+// its work. So the structure is exposed as it is: the BTF permutations, the
+// block boundaries, the row scaling, B itself, and each block's own factors.
 template <typename T>
 void register_klu(nb::module_& m) {
     using SMat = mtl::mat::compressed2D<T>;
@@ -491,6 +494,60 @@ void register_klu(nb::module_& m) {
             std::shared_lock lock(s.mtx);
             return s.num.num_perturbed;
         }, "Pivots replaced by perturbation across all blocks")
+        .def_prop_ro("row_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.btf.row_perm);
+        }, nb::rv_policy::move,
+           "Row permutation of the block triangular form, p[new] = old. "
+           "B == (diag(row_scale) @ A)[row_perm][:, col_perm].")
+        .def_prop_ro("col_perm", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.btf.col_perm);
+        }, nb::rv_policy::move,
+           "Column permutation of the block triangular form, q[new] = old")
+        .def_prop_ro("block_starts", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return perm_array(s.num.btf.blocks);
+        }, nb::rv_policy::move,
+           "Block boundaries, length nblocks + 1: block i spans rows and "
+           "columns block_starts[i]:block_starts[i+1] of B")
+        .def_prop_ro("row_scale", [](const Wrap& s)
+                         -> std::optional<nb::ndarray<nb::numpy, double, nb::ndim<1>>> {
+            std::shared_lock lock(s.mtx);
+            if (s.num.row_scale.empty()) return std::nullopt;
+            return f64_array(s.num.row_scale);
+        }, nb::rv_policy::move,
+           "Row equilibration factors indexed by ORIGINAL row, or None when "
+           "the matrix was factored unscaled (scale=False)")
+        .def_prop_ro("B", [](const Wrap& s) {
+            std::shared_lock lock(s.mtx);
+            return SMat(s.num.B);
+        }, "The permuted, scaled matrix P*(R*A)*Q, as a copy. It is block "
+           "upper triangular: only its diagonal blocks are factored, and the "
+           "blocks above them are used as they are in the block "
+           "back-substitution.")
+        .def("block", [](const Wrap& s, std::ptrdiff_t i) {
+            std::shared_lock lock(s.mtx);
+            const auto nb_ = static_cast<std::ptrdiff_t>(s.num.nblocks());
+            if (i < 0) i += nb_;
+            if (i < 0 || i >= nb_)
+                throw nb::index_error("block index out of range");
+            const auto& f = s.num.block_numeric[static_cast<std::size_t>(i)];
+            nb::dict d;
+            d["start"] = s.num.btf.blocks[static_cast<std::size_t>(i)];
+            d["stop"] = s.num.btf.blocks[static_cast<std::size_t>(i) + 1];
+            d["L"] = factor_to_crs(f.factorL());
+            d["U"] = factor_to_crs(f.factorU());
+            d["row_perm"] = perm_array(f.row_perm);
+            d["col_perm"] = perm_array(f.symbolic.col_perm);
+            return d;
+        }, "i"_a,
+           "The factors of diagonal block i, as copies: a dict with 'start' "
+           "and 'stop' (its span in B), and 'L', 'U', 'row_perm' and "
+           "'col_perm' in the block's own indices. With Bi = "
+           "B[start:stop, start:stop], Bi[row_perm][:, col_perm] == L @ U, "
+           "exactly up to rounding when num_perturbed == 0. Negative i counts "
+           "from the end.")
         .def("solve", [](const Wrap& s,
                          nb::ndarray<const double, nb::ndim<1>, nb::c_contig,
                                      nb::device::cpu> b) {

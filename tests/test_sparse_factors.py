@@ -229,12 +229,127 @@ class TestQR:
         assert rel(R.T @ R, AQ.T @ AQ) < 1e-12
 
 
-def test_klu_exposes_no_factors():
-    # KLU's block triangular form has no single (L, U) pair; see the comment on
-    # register_klu. Pinned so that adding one is a deliberate decision.
-    k = ms.klu(unsymmetric())
-    assert not hasattr(k, "L")
-    assert not hasattr(k, "U")
+def reducible(seed: int = 0):
+    """A matrix with a known block triangular form, scrambled.
+
+    Twenty diagonal blocks of sizes 1-8, each dense enough to be irreducible,
+    entries only above the block diagonal elsewhere, and then random row and
+    column permutations. BTF has to find the blocks again.
+    """
+    rng = np.random.default_rng(seed)
+    sizes = rng.integers(1, 9, 20)
+    starts = np.r_[0, np.cumsum(sizes)]
+    n = int(starts[-1])
+    M = np.zeros((n, n))
+    for b, (s0, s1) in enumerate(zip(starts[:-1], starts[1:])):
+        m = s1 - s0
+        M[s0:s1, s0:s1] = rng.uniform(1.0, 2.0, (m, m)) * (rng.random((m, m)) < 0.6)
+        M[s0:s1, s0:s1] += np.diag(rng.uniform(0.01, 0.1, m))  # weak diagonal: pivoting
+        M[s0:s1, s0:s1] += np.roll(np.eye(m), 1, axis=1) * 3.0  # cycle: irreducible
+        if s1 < n:
+            mask = rng.random((m, n - s1)) < 0.05
+            M[s0:s1, s1:] = rng.uniform(1.0, 2.0, (m, n - s1)) * mask
+    p, q = rng.permutation(n), rng.permutation(n)
+    return sp.csr_matrix(M[p][:, q]), len(sizes)
+
+
+class TestKLU:
+    """KLU has no single (L, U) pair: it factors only the diagonal blocks of
+    B = P (R A) Q. It exposes that structure as it is."""
+
+    def test_no_global_factor_pair(self):
+        # Pinned so that adding one is a deliberate decision; see register_klu.
+        k = ms.klu(unsymmetric())
+        assert not hasattr(k, "L")
+        assert not hasattr(k, "U")
+
+    def test_finds_the_blocks(self):
+        A, nblocks = reducible()
+        k = ms.klu(A)
+        assert k.nblocks == nblocks
+        starts = k.block_starts
+        assert starts.dtype == np.int64
+        assert starts[0] == 0 and starts[-1] == A.shape[0]
+        assert len(starts) == k.nblocks + 1 and np.all(np.diff(starts) > 0)
+
+    @pytest.mark.parametrize("scale", [True, False])
+    def test_b_is_the_permuted_scaled_matrix(self, scale):
+        A, _ = reducible()
+        k = ms.klu(A, scale=scale)
+        assert_permutation(k.row_perm, A.shape[0])
+        assert_permutation(k.col_perm, A.shape[0])
+        if scale:
+            assert k.row_scale is not None and k.row_scale.shape == (A.shape[0],)
+            RA = np.diag(k.row_scale) @ A.toarray()
+        else:
+            assert k.row_scale is None
+            RA = A.toarray()
+        assert rel(dense(k.B), RA[k.row_perm][:, k.col_perm]) < 1e-15
+
+    def test_b_is_block_upper_triangular(self):
+        A, _ = reducible()
+        k = ms.klu(A)
+        block_of = np.repeat(np.arange(k.nblocks), np.diff(k.block_starts))
+        B = ms.to_scipy(k.B).tocoo()
+        assert np.all(block_of[B.row] <= block_of[B.col])
+        assert np.any(block_of[B.row] < block_of[B.col])  # off-diagonal blocks exist
+
+    @pytest.mark.parametrize("scale", [True, False])
+    def test_each_block_reconstructs(self, scale):
+        A, _ = reducible()
+        k = ms.klu(A, scale=scale)
+        B = dense(k.B)
+        total = 0
+        pivoted = False
+        for i in range(k.nblocks):
+            blk = k.block(i)
+            s0, s1 = blk["start"], blk["stop"]
+            assert (s0, s1) == (k.block_starts[i], k.block_starts[i + 1])
+            m = s1 - s0
+            assert_permutation(blk["row_perm"], m)
+            assert_permutation(blk["col_perm"], m)
+            L, U = dense(blk["L"]), dense(blk["U"])
+            assert np.allclose(np.diag(L), 1.0)
+            assert np.allclose(L, np.tril(L)) and np.allclose(U, np.triu(U))
+            Bi = B[s0:s1, s0:s1][blk["row_perm"]][:, blk["col_perm"]]
+            assert rel(L @ U, Bi) < 1e-13
+            total += blk["L"].nnz + blk["U"].nnz
+            # The block's row_perm relates to its own column order: compare
+            # them to see whether pivoting moved rows off the diagonal.
+            pivoted |= not np.array_equal(blk["row_perm"], blk["col_perm"])
+        assert total == k.nnz
+        assert pivoted  # guards the identity: a trivial pivot sequence hides p vs p^-1
+
+    def test_block_index(self):
+        A, _ = reducible()
+        k = ms.klu(A)
+        assert k.block(-1)["stop"] == A.shape[0]
+        with pytest.raises(IndexError):
+            k.block(k.nblocks)
+        with pytest.raises(IndexError):
+            k.block(-k.nblocks - 1)
+
+    def test_float32(self):
+        A, _ = reducible()
+        k = ms.klu(ms.from_scipy(A.astype(np.float32)))
+        assert isinstance(k.B, ms.SparseMatrix_f32)
+        blk = k.block(0)
+        assert isinstance(blk["L"], ms.SparseMatrix_f32)
+
+    def test_factors_are_copies(self):
+        A, _ = reducible()
+        k = ms.klu(A, scale=False)
+        B_old = k.B
+        before = dense(B_old)
+        A2 = A.copy()
+        A2.data = A2.data * (1.0 + 0.1 * np.cos(np.arange(A2.nnz)))
+        k.refactor(ms.from_scipy(A2))
+        assert np.array_equal(dense(B_old), before)
+        assert rel(dense(k.B), A2.toarray()[k.row_perm][:, k.col_perm]) < 1e-15
+        blk = k.block(0)
+        s0, s1 = blk["start"], blk["stop"]
+        Bi = dense(k.B)[s0:s1, s0:s1][blk["row_perm"]][:, blk["col_perm"]]
+        assert rel(dense(blk["L"]) @ dense(blk["U"]), Bi) < 1e-12
 
 
 # The stress program for TestConcurrentRefactor. It runs in a subprocess so
@@ -255,11 +370,16 @@ A1 = (sp.kron(eye, tri) + sp.kron(tri, eye)).tocsr()
 A2 = A1.copy()
 A2.data = A2.data * 4.0
 M1, M2 = ms.from_scipy(A1), ms.from_scipy(A2)
+# KLU unscaled: row equilibration would make A1 and A2 = 4 * A1 factor
+# identically, and a torn read would then be invisible.
 make = {"cholesky": ms.cholesky, "ldlt": ms.ldlt, "splu": ms.splu,
-        "supernodal_lu": ms.supernodal_lu}[kind]
+        "supernodal_lu": ms.supernodal_lu,
+        "klu": lambda M: ms.klu(M, scale=False)}[kind]
 attr = "U" if kind in ("splu", "supernodal_lu") else "L"
 
 def snap(f):
+    if kind == "klu":
+        return ms.to_scipy(f.block(0)["U"]).data.copy()
     return ms.to_scipy(getattr(f, attr)).data.copy()
 
 ref = [snap(make(A1)), snap(make(A2))]
@@ -347,7 +467,7 @@ class TestConcurrentRefactor:
     in every run, for every factorization here.
     """
 
-    @pytest.mark.parametrize("kind", ["cholesky", "ldlt", "splu", "supernodal_lu"])
+    @pytest.mark.parametrize("kind", ["cholesky", "ldlt", "splu", "supernodal_lu", "klu"])
     def test_readers_never_see_a_torn_factor(self, kind, tmp_path):
         r = _run_race(tmp_path, kind)
         assert r.returncode == 0, r.stdout + r.stderr
