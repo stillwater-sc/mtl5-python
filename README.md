@@ -4,6 +4,10 @@ Python bindings for [MTL5](https://github.com/stillwater-sc/mtl5) — NumPy/SciP
 
 Built with [nanobind](https://github.com/wjakob/nanobind) for minimal overhead and zero-copy array interop.
 
+**Documentation:** <https://stillwater-sc.github.io/mtl5-python/>. It has a
+getting-started guide, executed notebooks on the sparse direct solvers and the
+test-matrix catalog, and an API reference.
+
 ## Install
 
 ```bash
@@ -1133,4 +1137,12 @@ nothing useful.
 ```bash
 pip install -e ".[dev]"
 pytest -v
+```
+
+The documentation site is built from `docs/` with Sphinx; it executes the
+notebooks, so it needs the compiled module:
+
+```bash
+pip install -e ".[docs]"
+sphinx-build -E -W --keep-going -b html docs docs/_build/html
 ```

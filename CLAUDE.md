@@ -36,6 +36,10 @@ pytest tests/test_vector.py::TestNorm::test_l2_norm -v
 pip install ruff
 ruff check .
 ruff format --check .
+
+# Documentation site (Sphinx + MyST-NB; executes the notebooks)
+pip install -e ".[docs]"
+sphinx-build -E -W --keep-going -b html docs docs/_build/html
 ```
 
 ## Architecture
@@ -55,6 +59,7 @@ ruff format --check .
 - `mtl5/__init__.py` — Python package, re-exports from `_core`
 - `mtl5/_universal_interop.py` — bit-exact copy to/from `universal_dtypes` NumPy arrays
 - `mtl5/pandas_ext.py` — pandas extension dtype
+- `docs/` — Sphinx source for the documentation site (`conf.py`, `index.md`, `getting-started.md`, `guide/`, `api/`), deployed to GitHub Pages by `.github/workflows/docs.yml`. `docs/designs/`, `docs/sessions/` and the other loose notes there are internal and excluded from the site. The site's notebooks are copied from `notebooks/` at build time.
 - `applications/` — Python example scripts, plus C++ experiments built only with `-DMTL5_BUILD_APPLICATIONS=ON` (default OFF, so `pip install` never compiles them)
 
 ### Element types

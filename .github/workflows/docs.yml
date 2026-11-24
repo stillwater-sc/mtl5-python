@@ -1,0 +1,78 @@
+name: Docs
+
+# Builds the documentation site on every PR and on main, and deploys main to
+# GitHub Pages (https://stillwater-sc.github.io/mtl5-python/). Only main is ever
+# published: a workflow_dispatch run on another branch builds but does not
+# deploy.
+#
+# The build is strict: -W turns every Sphinx warning into a failure, and the
+# notebooks and the getting-started page are executed, so a docstring that no
+# longer renders or an example that no longer runs fails the PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref at a time. On main, a newer push waits for the running build
+# and deploy to finish, so an older build can never deploy after a newer one; a
+# superseded run that has not started yet is dropped. On a PR, the newest push
+# cancels the build in progress.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install with the docs extra
+        run: pip install ".[docs]" -v
+      # The sphinx-build script, not `python -m sphinx`: -m puts the working
+      # directory on sys.path, and from the repo root that is the source mtl5/
+      # package, which has no compiled _core.
+      - name: Build the site
+        run: sphinx-build -E -W --keep-going -b html docs docs/_build/html
+      - uses: actions/upload-pages-artifact@v5
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: docs/_build/html
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Concurrency serializes runs, but a re-run of an old main workflow keeps
+      # its old commit. Deploy only if this run's commit is still the head of
+      # main; otherwise a newer run has deployed, or will.
+      - id: fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/${{ github.repository }}/commits/main" --jq .sha)
+          if [ "$head" = "${{ github.sha }}" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ github.sha }} is no longer the head of main ($head); not deploying."
+          fi
+      - id: deployment
+        if: steps.fresh.outputs.current == 'true'
+        uses: actions/deploy-pages@v5

@@ -61,3 +61,9 @@ _cmake_test_compile/
 # Virtual environments
 .venv/
 venv/
+
+# Sphinx documentation site: build output and generated sources
+docs/_build/
+docs/notebooks/
+docs/api/generated/
+docs/jupyter_execute/

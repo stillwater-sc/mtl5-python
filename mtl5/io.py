@@ -82,7 +82,7 @@ def spy(A, path, max_pixels: int = 1024):
 
 
 def spy_magnitude(A, path, max_pixels: int = 1024, log_scale: bool = False):
-    """Colour each non-zero by |value| — where the mass is, not just the pattern."""
+    """Colour each non-zero by `|value|` — where the mass is, not just the pattern."""
     return _io.spy_magnitude(_coerce(A), str(path), max_pixels, log_scale)
 
 

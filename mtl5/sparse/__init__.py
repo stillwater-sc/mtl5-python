@@ -382,7 +382,9 @@ def _solver_doc(f):
     A string built with `+` in the docstring position is an expression, not a
     docstring, so `help()` would show nothing; this sets `__doc__` instead.
     """
-    f.__doc__ = (f.__doc__ or "") + _SOLVER_DOC
+    # rstrip + "\n": a one-line docstring would otherwise run straight into
+    # "Parameters" with no blank line, and numpydoc parsers misread the section.
+    f.__doc__ = (f.__doc__ or "").rstrip() + "\n" + _SOLVER_DOC
     return f
 
 
