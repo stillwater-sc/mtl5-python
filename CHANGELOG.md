@@ -116,6 +116,25 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Two guide pages on the sparse direct solvers** (part of #125), executed
+  at every docs build:
+  - **"Sparse direct solvers"** covers sections 1–3 of #125.
+    - Why use a direct solver: on `west0479`, GMRES stalls, BiCGSTAB diverges
+      and ILU(0) cannot be built, while `splu` solves to rounding error. With
+      20 right-hand sides, a Cholesky factor and 20 solves beat 20 CG solves
+      by about 13×.
+    - When not to: at the same n, a 3-D Poisson factor carries about 5× the
+      fill of a 2-D one and takes about 20× longer.
+    - A short cited history, from Markowitz (1957) to KLU (2010).
+    - A table and decision path for choosing among the seven factorizations,
+      with measured fill and timings, KLU's block structure on `west0479`,
+      LDLᵀ inertia matching the eigenvalue count, and the zero-pivot case
+      that only LU's pivoting handles.
+  - **"Coming from SciPy"** covers section 8. It maps `scipy.sparse.linalg`
+    onto `mtl5.sparse`. It also shows that SciPy's `perm_r`/`perm_c` are the
+    inverses of mtl5's `row_perm`/`col_perm` (`argsort` converts between
+    them), and it uses an MTL5 float32 LU as a preconditioner for SciPy's
+    GMRES.
 - **A documentation site** (part of #125):
   <https://stillwater-sc.github.io/mtl5-python/>. It is built with Sphinx and
   MyST-NB, uses the pydata theme, and is deployed to GitHub Pages from `main`.
