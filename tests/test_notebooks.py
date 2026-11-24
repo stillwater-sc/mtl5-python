@@ -69,7 +69,11 @@ def test_notebook_runs(path: Path):
             [sys.executable, str(script)],
             capture_output=True,
             text=True,
-            cwd=work,
+            # The notebook's own directory, as under Jupyter, so a notebook
+            # reads `data/...` by the same relative path in both. Safe for the
+            # import: a script's directory, not the cwd, goes on sys.path, and
+            # the script lives in `work`, so notebooks/ cannot shadow mtl5.
+            cwd=path.parent,
             env=env,
             timeout=600,
         )

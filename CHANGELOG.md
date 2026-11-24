@@ -116,6 +116,24 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **New notebook: `notebooks/sparse_direct_orderings.ipynb`** (part of #125).
+  It follows MATLAB's `colamd` example on `west0479` and goes further:
+  - spy plots of the matrix and of its `L` and `U` factors under `natural`,
+    `colamd`, `amd` and `rcm`. `colamd` cuts the factors from 20,572 nonzeros
+    to 6,744;
+  - a comparison with MATLAB's and SciPy's counts, explaining why the raw
+    numbers differ: MATLAB counts `L + U - I`, and the three libraries pivot
+    differently. All three agree that `colamd` cuts fill about threefold;
+  - a 2-D Poisson problem where the ranking flips and `amd` wins, which leads
+    to a rule of thumb for choosing an ordering;
+  - the analyze, factor, refactor and solve pipeline. `refactor()` is about
+    3× cheaper than a fresh factor, and a 20-step time-stepping loop runs
+    more than 2× faster with it.
+
+  Its `assert` cells fail CI if an ordering stops reducing fill. The matrix is
+  stored in `notebooks/data/` with its source, so CI needs no network.
+  `tests/test_notebooks.py` now runs each notebook from its own directory, as
+  Jupyter does, so relative data paths resolve the same way in both.
 - **`CLAUDE.md` lists every bound element type** (#123). It used to say the
   module supported posit16 and posit32 and registered them with NumPy, PyTorch
   and pandas. That understated the type set and overstated the registration:
