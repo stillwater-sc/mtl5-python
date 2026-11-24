@@ -244,6 +244,7 @@ Three things to take from the measurements:
   pulls ahead as the grid grows. The times above are measured on whatever
   machine built this page, so the exact ratio varies; the fill counts do not.
 
-For the matrix classes these two do not cover, symmetric indefinite matrices
-(`ldlt`) and everything unsymmetric, see
+Symmetric indefinite matrices are outside `cholesky`'s reach, but
+`supernodal_ldlt` and `ldlt` factor them as long as no pivot is zero. For those,
+and for unsymmetric matrices, see
 [choosing a factorization](direct-solvers.md#choosing-a-factorization).
