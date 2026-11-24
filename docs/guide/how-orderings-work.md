@@ -260,7 +260,7 @@ problem, solved once, before the numeric factorization. It also means that
 values can only make things worse. With Cholesky, every pivot is on the
 diagonal and the game is exact. With LU and partial pivoting, the values
 decide the row interchanges, and the ordering can only bound the fill (see
-[unsymmetric matrices](#unsymmetric-matrices-colamd-and-the-pattern-of-a-a)
+[unsymmetric matrices](#unsymmetric-orderings)
 below).
 
 Finding the order that minimizes fill is NP-hard (Yannakakis, 1981). The
@@ -397,9 +397,12 @@ separators, and empty blocks wherever two parts never meet.
 
 The payoff is asymptotic. A planar graph has separators of $O(\sqrt{n})$
 vertices (Lipton and Tarjan, 1979), which makes nested dissection's fill
-$O(n \log n)$ and its work $O(n^{3/2})$. That is optimal for planar
-graphs: no ordering does better than a constant factor (Hoffman, Martin
-and Rose, 1973; Lipton, Rose and Tarjan, 1979). The independent parts A and
+$O(n \log n)$ and its work $O(n^{3/2})$ (Lipton, Rose and Tarjan, 1979).
+These are worst-case bounds, and grids attain them: for the $\sqrt{n} \times
+\sqrt{n}$ grid, every ordering produces $\Omega(n \log n)$ fill and needs
+$\Omega(n^{3/2})$ work (Hoffman, Martin and Rose, 1973). So on grids, nested
+dissection is within a constant factor of the best possible. Easier planar
+graphs do better: a path, for one, has no fill at all. The independent parts A and
 B can also be factored in parallel, which is why parallel solvers use it.
 
 Optimal asymptotics do not mean a smaller factor at every size. Here is this
@@ -504,6 +507,7 @@ minimum degree and nested dissection do much better: the
 [SPD example](spd-example.md) measures RCM's fill growing like
 $n^{1.5}$, against AMD's $n^{1.25}$.
 
+(unsymmetric-orderings)=
 ## Unsymmetric matrices: COLAMD and the pattern of AᵀA
 
 With LU and partial pivoting, the row interchanges depend on the values, and
@@ -512,10 +516,11 @@ ordering cannot choose a row order in advance; it chooses only the column
 order Q, and has to cope with whatever rows pivoting picks later.
 
 George and Ng (1985) gave the bound that makes this possible. Whatever the
-row interchanges, the factors of $AQ$ fit inside the Cholesky factor $L_c$
-of $(AQ)^T(AQ)$: the pattern of U is contained in that of $L_c^T$, and L's in
-that of $L_c$. So an ordering that keeps the Cholesky factor of $A^TA$
-small also keeps LU's fill small, *for every pivot sequence*.
+row interchanges, the pattern of U is contained in that of $L_c^T$, where
+$L_c$ is the Cholesky factor of $(AQ)^T(AQ)$. So an ordering that keeps the
+Cholesky factor of $A^TA$ small also keeps U's fill small, *for every pivot
+sequence*. The code below checks the containment of U, and the total of L
+and U against $2\,\mathrm{nnz}(L_c)$ as a measurement, not as a theorem.
 
 That is what COLAMD does (Davis, Gilbert, Larimore and Ng, 2004): minimum
 degree on the graph of $A^TA$, without ever forming $A^TA$. Each row of A
@@ -547,7 +552,7 @@ assert bounds["colamd"][1] < bounds["amd"][1] < bounds["natural"][1]
 assert bounds["colamd"][0] < bounds["amd"][0] < bounds["natural"][0]
 ```
 
-The bound is loose, two to six times the actual fill here, but it ranks the
+$2\,\mathrm{nnz}(L_c)$ is two to six times the actual fill here, but it ranks the
 orderings the same way the actual fill does. Minimizing it is minimizing the
 right thing.
 
@@ -565,8 +570,10 @@ applies.
 Once the order is fixed, the pattern of L can be computed exactly, still
 without arithmetic, in nearly linear time. The tool is the *elimination
 tree*: the parent of column j is the row of the first off-diagonal nonzero
-in column j of L. Column j's pattern is then the union of A's column j with
-the patterns of its children in the tree (Liu, 1990).
+in column j of L. Below the diagonal, column j's pattern is then the union
+of A's column j below the diagonal with the patterns of its children's
+columns, keeping only the rows after j (Liu, 1990). The diagonal entry is
+added on its own.
 
 This symbolic factorization is how a factor object knows its `nnz` before
 the numeric phase runs, how memory is allocated exactly once, and how the
