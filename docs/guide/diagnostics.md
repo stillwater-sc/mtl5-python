@@ -515,11 +515,14 @@ After a factorization, and before trusting its solve:
 
 1. **`num_perturbed`** (LU family). If it is nonzero, the factor is of a
    perturbed matrix: check the refinement's `converged` and `rel_residual`.
-2. **The pivot ratio**, from `ms.to_scipy(F.U).diagonal()` or LDLᵀ's
-   `diagonal()`. A ratio near the unit roundoff is a warning, whether or not
-   anything raised. Follow it up with a condition estimate, because the
-   ratio alone does not establish singularity. For a quick detector, pass a
-   small `pivot_perturb` and read `num_perturbed`.
+2. **The pivot ratio**, from `ms.to_scipy(F.U).diagonal()` for `splu` and
+   `supernodal_lu`, and from `diagonal()` for `ldlt` and `supernodal_ldlt`.
+   KLU exposes no factors, so for KLU use the detector below. A ratio near
+   the unit roundoff is a warning, whether or not anything raised. Follow it
+   up with a condition estimate, because the ratio alone does not establish
+   singularity. On the LU factorizations (`splu`, `klu`, `supernodal_lu`),
+   a quick detector is a small `pivot_perturb`, then reading `num_perturbed`.
+   The LDLᵀ factorizations have no `pivot_perturb`; read their diagonal.
 3. **The residual** of the solve you care about, in float64. It is cheap,
    and it is what refinement minimizes. It bounds the forward error only
    through κ (error ≲ κ × residual), so weigh it against the conditioning and
