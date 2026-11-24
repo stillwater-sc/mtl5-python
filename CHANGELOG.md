@@ -128,8 +128,9 @@ against, and semantic-release manages only the **patch** component.
   half the bytes of factor values. The page also shows where it stops:
   - On this CPU the float32 factorization is not faster than the float64
     one, so the gain is memory and bandwidth, not time.
-  - A conditioning sweep converges up to κ ≈ 1e8 and stalls beyond it,
-    without raising. GMRES preconditioned by the same float32 factor
+  - A conditioning sweep converges while the shift that makes the matrix
+    nonsingular survives the float32 cast (κ up to about 8e6). Well past
+    that, it stalls without raising. GMRES preconditioned by the same float32 factor
     converges at κ ≈ 8e8 and 8e10.
   - With data near 1e-40, the float32 corrections underflow; `scaled=True`
     recovers float64 accuracy.

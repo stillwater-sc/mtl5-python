@@ -172,10 +172,12 @@ Its largest is below 8 (no row sum of absolute values exceeds 8), so
 $\kappa \approx 8/\varepsilon$, and $\varepsilon$ dials in the conditioning.
 
 The sweep also records whether the shift *survives the cast* to `float32`.
-The diagonal entries are 2, 3 and 4, and the spacing of `float32` numbers
-near 4 is $4.8 \times 10^{-7}$. A smaller $\varepsilon$ rounds away: the
-`float32` matrix is then the singular Laplacian itself, and its factor's last
-pivot is rounding noise rather than $\varepsilon$. That is the
+The diagonal entries are 2, 3 and 4. A shift rounds away when it is below
+half the spacing of `float32` numbers at that entry: $1.2 \times 10^{-7}$ for
+the entries 2 and 3, and $2.4 \times 10^{-7}$ for 4. Between those, the shift
+survives on some diagonal entries only. Below $1.2 \times 10^{-7}$ it
+survives on none: the `float32` matrix is then the singular Laplacian itself,
+and its factor's last pivot is rounding noise rather than $\varepsilon$. That is the
 $\kappa\,u_{\text{factor}} < 1$ limit made concrete. Whether Cholesky even
 completes on such a matrix depends on the sign of that noise, so the sweep
 falls back to `supernodal_ldlt`, which accepts a pivot of either sign, when
@@ -208,6 +210,7 @@ sweep = {}
 for eps in [1e-1, 1e-3, 1e-5, 1e-6, 1e-7, 1e-8, 1e-10]:
     M = shifted(eps)
     rhs = M @ x_true
+    # True only if the shift survives on every diagonal entry.
     kept = bool((M.astype(np.float32).diagonal() != neumann.diagonal().astype(np.float32)).all())
     f32 = factor32(M)
     x, inf = iterative_refine(ms.from_scipy(M), f32, rhs, rel_tol=1e-14, max_iter=50)
@@ -218,27 +221,29 @@ for eps in [1e-1, 1e-3, 1e-5, 1e-6, 1e-7, 1e-8, 1e-10]:
 
 # The shift survives the cast down to eps = 1e-6, and refinement converges on all of those.
 assert all(sweep[e][4] and sweep[e][0]["converged"] for e in (1e-1, 1e-3, 1e-5, 1e-6))
-assert not any(sweep[e][4] for e in (1e-7, 1e-8, 1e-10))
+for e in (1e-7, 1e-8, 1e-10):  # below 1.2e-7 the shift survives on no entry
+    assert (shifted(e).astype(np.float32).diagonal() == neumann.diagonal().astype(np.float32)).all()
 # Well past the limit, it fails.
 assert not any(sweep[e][0]["converged"] for e in (1e-8, 1e-10))
 
-# Where it converges, the forward error is within the kappa * u64 bound
-# that any backward-stable float64 solve is held to (with a factor 10 of slack).
-u64 = np.finfo(np.float64).eps / 2
+# Where it converges, the forward error is within kappa times the achieved
+# relative residual (with a factor 10 of slack for mixing the 2-norm kappa
+# with the infinity-norm residual).
 for eps, (inf, err_refined, *_) in sweep.items():
     if inf["converged"]:
-        assert err_refined < 10 * (8 / eps) * u64, (eps, err_refined)
+        assert err_refined < 10 * (8 / eps) * inf["rel_residual"], (eps, err_refined)
 ```
 
 Three things to read off the table:
 
 - **While the shift survives the cast, refinement converges.** It needs more
   steps as $\kappa$ grows, because each step removes a smaller fraction of the
-  error. The forward error grows with $\kappa$ too, and stays within the
-  $\kappa\,u_{64}$ bound that any backward-stable `float64` solve is held to.
-  Within that bound it is not always as small as the `float64` direct
-  solve's: refinement drives the *residual* to the `float64` level, and a
-  small residual guarantees no more than the bound.
+  error. The forward error grows with $\kappa$ too. A residual bounds it,
+  but only through the conditioning:
+  $\|x - x_*\| / \|x_*\| \le \kappa(A)\, \|b - Ax\| / \|b\|$, and the
+  refined errors stay within that bound. They are not always as small as
+  the `float64` direct solve's: refinement drives the *residual* to the
+  `float64` level, and a small residual guarantees no more than the bound.
 - **Just past the limit, it may still converge, by luck.** At
   $\kappa \approx 8 \times 10^7$ the `float32` factor is of the singular
   matrix, and whether refinement converges depends on how the rounding noise
@@ -312,6 +317,7 @@ number formats with a much narrower exponent range than `float32`, such as
 | $\kappa(A) \lesssim 10^7$, memory or bandwidth bound | `float32` factor + `iterative_refine(..., rel_tol=...)` |
 | $\kappa(A)$ larger, or refinement does not converge | `float32` factor as the preconditioner for `float64` GMRES |
 | data near the bottom of the narrow format's range | `iterative_refine(..., scaled=True)` |
+| the narrow factorization fails, or the cast makes $A$ singular | a `float64` factor, or another preconditioner for GMRES |
 | none of the above, and time is the only concern on a CPU | a `float64` factor |
 
 `mtl5.mixed.lu_iterative_refine(A, b, working=...)` does the same for dense
