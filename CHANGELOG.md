@@ -1199,6 +1199,37 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.24.4 (2026-11-24)
+
+### Documentation
+
+- **guide**: AMD is not exact minimum degree; value independence is about the ordering
+  ([#136](https://github.com/stillwater-sc/mtl5-python/pull/136),
+  [`c48b719`](https://github.com/stillwater-sc/mtl5-python/commit/c48b71978b7ae6ed7bb8301bc3a605a87a087dee))
+
+- **guide**: How fill-reducing orderings work
+  ([#136](https://github.com/stillwater-sc/mtl5-python/pull/136),
+  [`c48b719`](https://github.com/stillwater-sc/mtl5-python/commit/c48b71978b7ae6ed7bb8301bc3a605a87a087dee))
+
+- **guide**: Nested dissection fill reaches the separator; pivoting can change LU fill either way
+  ([#136](https://github.com/stillwater-sc/mtl5-python/pull/136),
+  [`c48b719`](https://github.com/stillwater-sc/mtl5-python/commit/c48b71978b7ae6ed7bb8301bc3a605a87a087dee))
+
+- **guide**: State the George-Ng, elimination-tree and optimality claims precisely
+  ([#136](https://github.com/stillwater-sc/mtl5-python/pull/136),
+  [`c48b719`](https://github.com/stillwater-sc/mtl5-python/commit/c48b71978b7ae6ed7bb8301bc3a605a87a087dee))
+
+- **guide**: The elimination game predicts the symbolic pattern; George-Ng uses structural AᵀA
+  ([#136](https://github.com/stillwater-sc/mtl5-python/pull/136),
+  [`c48b719`](https://github.com/stillwater-sc/mtl5-python/commit/c48b71978b7ae6ed7bb8301bc3a605a87a087dee))
+
+### Features
+
+- **sparse**: KLU exposes its block triangular form and each block's factors
+  ([#137](https://github.com/stillwater-sc/mtl5-python/pull/137),
+  [`adfc53c`](https://github.com/stillwater-sc/mtl5-python/commit/adfc53c49747d290dc01f9dab99f7c4ead0d1f51))
+
+
 ## v5.24.3 (2026-11-24)
 
 ### Documentation
