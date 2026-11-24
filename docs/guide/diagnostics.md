@@ -171,9 +171,12 @@ because there is nothing to scale the floor by. The point is to let a narrow
 factor finish, and then rely on iterative refinement against a float64
 residual to clean up the answer.
 
-Whether refinement can actually do that depends on the matrix, not on the
-perturbation. This matrix has κ ≈ 4·10⁸. With float32's unit roundoff of
-6·10⁻⁸, that gives κ·u ≈ 24, well above the κ·u < 1 that refinement needs:
+Whether refinement can actually do that depends mostly on the matrix. The
+usual sufficient condition for convergence is κ·u well below 1, where u is
+the factor's unit roundoff. It is conservative: refinement can also converge
+when κ·u > 1, for instance when the narrow factor represents the matrix
+exactly. Here it is far from met. This matrix has κ ≈ 4·10⁸, and float32's
+unit roundoff is 6·10⁻⁸, so κ·u ≈ 24:
 
 ```{code-cell} python
 A2_64 = ms.from_scipy(A2)
@@ -184,24 +187,32 @@ for p in (1e-7, 1e-5, 1e-3):
     F = ms.splu(A2_32, pivot_perturb=p)
     x, info = iterative_refine(A2_64, F, b2, max_iter=100, rel_tol=1e-14)
     err = fwd_err(np.asarray(x), x2_true)
-    perturb_rows.append((p, F.num_perturbed, info["converged"], err))
+    perturb_rows.append((p, F.num_perturbed, info["converged"], err, info["rel_residual"]))
     print(
         f"{p:13.0e}  {F.num_perturbed:13d}  {info['converged']!s:>9}  "
         f"{info['rel_residual']:13.1e}  {err:13.1e}"
     )
 
-assert all(n_p == 1 and not conv for _, n_p, conv, _ in perturb_rows)
-assert perturb_rows[0][3] < 1e-3 < perturb_rows[-1][3]  # a larger floor is a worse factor
+assert all(row[1] == 1 and not row[2] for row in perturb_rows)
+assert perturb_rows[0][3] < 1e-3 < perturb_rows[-1][3]  # a larger floor gets less far
+kappa2 = 4.0 / 1e-8  # the 2x2's condition number, to leading order
+assert all(row[3] <= 10 * kappa2 * row[4] for row in perturb_rows)  # error <~ kappa * residual
 ```
 
-Every run completes and reports one perturbed pivot. None of them converges,
-and `converged=False` is how you find out. The smallest floor, about float32's
-unit roundoff, gives the best answer. A larger floor changes the matrix more,
-and refinement then converges toward the solution of the wrong system.
+Every run completes and reports one perturbed pivot. None of them converges
+within 100 iterations, and `converged=False` is how you find out. Refinement
+computes its residual with the original A, so if it did converge, the result
+would solve the original system. A perturbed factor only slows it. The larger
+the floor, the worse the factor approximates A, and the slower the iteration
+contracts, until it stops making progress. The smallest floor, about
+float32's unit roundoff, gets furthest.
 
 So read a nonzero `num_perturbed` as a warning: the factor is of a different
-matrix, and only the refinement's `converged` flag and `rel_residual` tell you
-whether the answer is still usable.
+matrix, and the answer is only as good as the refinement made it. Check
+`converged` and `rel_residual`, and remember that a small residual bounds
+the error only through the conditioning. The relative forward error can be
+as large as κ times the relative residual. Here that is 4·10⁸ × 2·10⁻¹³ ≈
+10⁻⁴, close to the measured 4·10⁻⁵.
 
 ### No error does not mean nonsingular
 
@@ -503,7 +514,9 @@ After a factorization, and before trusting its solve:
    whether or not anything raised. For a quick detector, pass a small
    `pivot_perturb` and read `num_perturbed`.
 3. **The residual** of the solve you care about, in float64. It is cheap,
-   and it is what refinement minimizes.
+   and it is what refinement minimizes. It bounds the forward error only
+   through κ (error ≲ κ × residual), so weigh it against the conditioning and
+   the accuracy you need.
 4. **`nnz`** against `A.nnz`, and **`nblocks`** or **`nsuper`** for KLU and
    supernodal LU. These tell you whether the ordering, the threshold and the
    block structure did what you expected. The

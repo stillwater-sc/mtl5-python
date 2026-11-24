@@ -131,8 +131,9 @@ against, and semantic-release manages only the **patch** component.
   - What each factor's `__repr__` shows, field by field, and what it leaves
     out: `num_perturbed`, `accumulator` and `dtype` are properties only.
   - A zero pivot raises. `pivot_perturb` lets the factorization finish and
-    counts the replacements in `num_perturbed`, but refinement still fails
-    when κ·u > 1, and `converged=False` is how you find out.
+    counts the replacements in `num_perturbed`. On a matrix with κ·u ≈ 24,
+    refinement then fails to converge, and `converged=False` is how you find
+    out.
   - A singular float64 matrix (the Neumann Laplacian) factors without
     raising, with `num_perturbed=0`. The pivot ratio from `U.diagonal()`, or
     a small `pivot_perturb` used as a detector, catches it.
