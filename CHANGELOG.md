@@ -135,7 +135,7 @@ against, and semantic-release manages only the **patch** component.
     refinement then fails to converge, and `converged=False` is how you find
     out.
   - A singular float64 matrix (the Neumann Laplacian) factors without
-    raising, with `num_perturbed=0`. The pivot ratio from `U.diagonal()`, or
+    raising, with `num_perturbed=0`. The pivot ratio from `ms.to_scipy(F.U).diagonal()`, or
     a small `pivot_perturb` used as a detector, catches it.
   - Threshold pivoting: from 1 to 0.001, fill falls about 3.5× while max |L|
     follows its `1/threshold` bound and the residual grows about 100×.

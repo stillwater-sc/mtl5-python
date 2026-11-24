@@ -248,7 +248,7 @@ assert np.abs(x).max() > 1e12
 The factor reports `num_perturbed=0`, and `solve` returns a vector of size
 10¹⁶ for a right-hand side of ones. Two cheap checks catch it:
 
-- **The pivot ratio.** `U.diagonal()` holds the pivots. A smallest-to-largest
+- **The pivot ratio.** `ms.to_scipy(F.U).diagonal()` holds the pivots. A smallest-to-largest
   ratio near the unit roundoff means the matrix is singular to working
   precision. The ratio is not a condition number: a small ratio always
   deserves a look, but a large one does not prove the matrix well
@@ -513,7 +513,7 @@ After a factorization, and before trusting its solve:
 
 1. **`num_perturbed`** (LU family). If it is nonzero, the factor is of a
    perturbed matrix: check the refinement's `converged` and `rel_residual`.
-2. **The pivot ratio**, from `U.diagonal()` or LDLᵀ's `diagonal()`. A ratio
+2. **The pivot ratio**, from `ms.to_scipy(F.U).diagonal()` or LDLᵀ's `diagonal()`. A ratio
    near the unit roundoff means the matrix is singular to working precision,
    whether or not anything raised. For a quick detector, pass a small
    `pivot_perturb` and read `num_perturbed`.
