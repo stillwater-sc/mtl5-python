@@ -16,8 +16,9 @@ symmetric positive definite (SPD), provided they are nonsingular:
 - graph Laplacians, once a node is grounded (a plain Laplacian is singular,
   since the constant vector is in its nullspace);
 - normal equations $A^TA$, when $A$ has full column rank;
-- covariance matrices, when no variable is a linear combination of the
-  others.
+- covariance matrices, when the centred variables are linearly independent
+  (so no variable is an affine function of the others, not even $X$ and
+  $X + 1$).
 
 For SPD matrices, `mtl5.sparse` has two factorizations that exploit the
 symmetry and need no pivoting. `cholesky` raises `RuntimeError` on a matrix
