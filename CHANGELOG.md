@@ -72,6 +72,22 @@ against, and semantic-release manages only the **patch** component.
   That broke `applications/pandas_sensor_analysis.py`. The fix is the one
   above; #115's interim copy in the constructor is gone again.
 
+### Documentation
+
+- **`CLAUDE.md` lists every bound element type** (#123). It used to say the
+  module supported posit16 and posit32 and registered them with NumPy, PyTorch
+  and pandas. That understated the type set and overstated the registration:
+  - the bindings cover 25 element types (native IEEE, complex, integer, and
+    Universal fp8, fp16, cfloat32, posit, fixpnt, lns, takum and cascades);
+  - nothing is registered with PyTorch, and pandas registers only `posit16`.
+
+  The new table comes from `type_suffix<T>()` in `python/src/mtl5_types.hpp`.
+  It also records how coverage differs by entry point: `dtypes()`/`convert()`
+  cover 17 types, the `universal_dtypes` interop 13, pandas one. The
+  key-files list now reflects that the bindings are split across
+  `python/src/mtl5_*.cpp`, and that `applications/` holds C++ experiments
+  that build only with `MTL5_BUILD_APPLICATIONS=ON`.
+
 ### Changed
 
 - **MTL5 pinned to v5.22.0** (was v5.20.0), and the package version set to
