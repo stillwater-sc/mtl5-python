@@ -51,7 +51,7 @@ print("shares memory:", np.shares_memory(ms.to_scipy(A).data, S.tocsr().data))
 | `permc_spec="MMD_ATA"` | no direct equivalent: `colamd` orders $A^TA$ without forming it |
 | `factorized(A)` | `ms.splu(A).solve` |
 | `SuperLU.L`, `SuperLU.U` | `.L`, `.U` (MTL5 sparse matrices; `ms.to_scipy` converts) |
-| `SuperLU.perm_r`, `SuperLU.perm_c` | `.row_perm`, `.col_perm`, **inverted**: see below |
+| `SuperLU.perm_r`, `SuperLU.perm_c` | `.row_perm`, `.col_perm`, in the inverse convention: see below |
 | `SuperLU.solve(b, trans="T")` | not available: only $Ax = b$ |
 | no equivalent | `.refactor(A2)`, numeric refactorization with the analysis reused |
 | no equivalent (scikit-sparse's CHOLMOD) | `ms.cholesky`, `ms.ldlt`, `ms.supernodal_ldlt` |
@@ -75,8 +75,10 @@ matrix directly:
 
 $$A[\text{row\_perm}][:,\ \text{col\_perm}] = L\,U$$
 
-The two conventions are inverses of each other, so `argsort` converts between
-them:
+The two conventions are inverses of each other. For a given factorization,
+`argsort` converts SciPy's permutations into mtl5's convention. The two
+libraries still choose different pivots and orderings for the same matrix,
+so their permutation arrays generally differ even after conversion:
 
 ```{code-cell} python
 f = spla.splu(S.tocsc(), permc_spec="COLAMD")

@@ -131,10 +131,11 @@ against, and semantic-release manages only the **patch** component.
       LDLᵀ inertia matching the eigenvalue count, and the zero-pivot case
       that only LU's pivoting handles.
   - **"Coming from SciPy"** covers section 8. It maps `scipy.sparse.linalg`
-    onto `mtl5.sparse`. It also shows that SciPy's `perm_r`/`perm_c` are the
-    inverses of mtl5's `row_perm`/`col_perm` (`argsort` converts between
-    them), and it uses an MTL5 float32 LU as a preconditioner for SciPy's
-    GMRES.
+    onto `mtl5.sparse`. It also shows that SciPy's `perm_r`/`perm_c` use the
+    inverse of mtl5's permutation convention, so `argsort` converts a SciPy
+    factorization's permutations into mtl5's convention; the two libraries
+    still pivot differently. And it uses an MTL5 float32 LU as a
+    preconditioner for SciPy's GMRES.
 - **A documentation site** (part of #125):
   <https://stillwater-sc.github.io/mtl5-python/>. It is built with Sphinx and
   MyST-NB, uses the pydata theme, and is deployed to GitHub Pages from `main`.

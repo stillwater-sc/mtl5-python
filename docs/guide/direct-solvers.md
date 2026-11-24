@@ -219,11 +219,18 @@ linear systems", *Acta Numerica* 25 (2016), 383–566.
 
 Every factorization takes `ordering=` (see the
 [orderings guide](../notebooks/sparse_direct_orderings)), solves with
-`.solve(b)`, and has `.refactor(A2)` for a matrix with the same pattern.
+`.solve(b)`, and has `.refactor(A2)` for a matrix with the same pattern. One
+exception applies to `refactor()`. `splu`, `supernodal_lu` and `klu` replay
+their stored pivot sequence through a path that has no accumulator. So if the
+factorization was built with a non-default `accumulator=`, `refactor()`
+raises `ValueError` rather than silently drop back to element precision.
+Build a new factorization instead. `supernodal_ldlt` reruns its full numeric
+factorization, so it keeps the accumulator.
 
 A decision path:
 
-1. **Rectangular, or least squares?** Use `qr`.
+1. **Overdetermined ($m \ge n$), or least squares?** Use `qr`. Underdetermined
+   systems ($m < n$) are not supported by these factorizations.
 2. **Symmetric positive definite?** Use `cholesky`, or `supernodal_ldlt`
    when the factors are large.
 3. **Symmetric indefinite?** Use `supernodal_ldlt` or `ldlt`. Neither pivots;
@@ -287,9 +294,22 @@ assert int((ms.ldlt(A_ind).diagonal() < 0).sum()) == int((eigs < shift).sum())
 
 Cholesky refuses the matrix. Both LDLᵀ factorizations accept it, and the
 signs of `D` count the eigenvalues on each side of zero. By Sylvester's law
-of inertia, $LDL^T$ preserves those counts, so the factorization is also a
-cheap way to count eigenvalues in an interval. Shift by $\sigma$, factor,
-and count the negative pivots.
+of inertia, $LDL^T$ preserves those counts. The negative pivots of
+$A - \sigma I$ therefore count the eigenvalues of $A$ below $\sigma$. To count
+the eigenvalues in an interval $[a, b)$, factor at both ends and subtract:
+
+```{code-cell} python
+def count_below(A, sigma):
+    shifted = (A - sigma * sp.identity(A.shape[0])).tocsr()
+    return int((ms.ldlt(shifted).diagonal() < 0).sum())
+
+
+a, b = 200.3, 400.3  # endpoints chosen off the diagonal value, so no pivot is zero
+inside = count_below(small, b) - count_below(small, a)
+print(f"eigenvalues in [{a}, {b}): {inside} by two LDLT factorizations, "
+      f"{int(((eigs >= a) & (eigs < b)).sum())} by eigvalsh")
+assert inside == int(((eigs >= a) & (eigs < b)).sum())
+```
 
 What LDLᵀ without pivoting cannot do is pass a zero pivot. LU's row
 interchanges handle that case:
