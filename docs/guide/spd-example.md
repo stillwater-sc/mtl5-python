@@ -111,8 +111,9 @@ A symmetric factorization must permute rows and columns together, $PAP^T$, to
 keep the symmetry, so it takes one permutation. `amd` is the default for both.
 It orders the graph of $A$ directly. `colamd` is offered too, but it orders
 $A^TA$, which for a symmetric $A$ is the pattern of $A^2$, a denser graph than
-the one being factored. `rcm` minimises the bandwidth, and `natural` keeps the
-grid's row-by-row numbering.
+the one being factored. `rcm` is a heuristic that reduces the bandwidth,
+without guaranteeing the minimum, and `natural` keeps the grid's row-by-row
+numbering.
 
 ```{code-cell} python
 ORDERINGS = ["natural", "rcm", "colamd", "amd"]
@@ -140,9 +141,11 @@ grid row couples each unknown only to its left neighbour, giving $2k - 1$
 entries, and each of the remaining $n - k$ rows of $L$ carries $k + 1$.
 `rcm` keeps a band of about the same width, but numbers the grid along its
 diagonals, which shortens most rows of the envelope: it saves about a quarter
-of the fill. `amd` does not try to keep a band at all. It eliminates first the
-unknowns whose elimination creates the least fill, which leaves a factor with
-well under half the entries.
+of the fill. `amd` does not try to keep a band at all. At each step it
+eliminates an unknown of smallest *approximate degree*: few neighbours in the
+graph that remains, estimated cheaply instead of counted exactly. Low degree is
+a proxy for low fill, not a guarantee of it, but on this grid it leaves a
+factor with well under half the entries.
 
 ```{code-cell} python
 envelope = (2 * k - 1) + (n - k) * (k + 1)
