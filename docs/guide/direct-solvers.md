@@ -58,12 +58,17 @@ b = S @ np.ones(S.shape[0])
 
 for name in ("gmres", "bicgstab"):
     x, info = getattr(ms, name)(W, b, rtol=1e-10, maxiter=2000)
-    print(f"{name:>9}: info = {info}, relative residual {relres(S, np.asarray(x), b):.1e}")
+    r = relres(S, np.asarray(x), b)
+    print(f"{name:>9}: info = {info}, relative residual {r:.1e}")
+    assert info != 0 and r > 1e-3, f"{name} now converges on west0479: update the text"
 
+ilu0_failed = False
 try:
     ms.ilu0(W)
 except RuntimeError as err:
+    ilu0_failed = True
     print(f"     ilu0: {err}")
+assert ilu0_failed, "ILU(0) now builds on west0479: update the text"
 
 x = ms.splu(W).solve(b).to_numpy()
 print(f"     splu: relative residual {relres(S, x, b):.1e}")
@@ -137,7 +142,9 @@ for label, A in (("2-D 125 x 125", poisson(125, 2)), ("3-D 25 x 25 x 25", poisso
 print(f"{'grid':>16} {'n':>7} {'fill':>6} {'Cholesky':>9} {'one CG':>8}")
 for label, size, fill, t_chol, t_cg in rows:
     print(f"{label:>16} {size:7,} {fill:5.1f}x {t_chol:7.0f}ms {t_cg:6.0f}ms")
-assert rows[0][1] == rows[1][1] and rows[1][2] > 3 * rows[0][2]
+assert rows[0][1] == rows[1][1]
+assert rows[1][2] > 3 * rows[0][2]  # several times the fill
+assert rows[1][3] > 3 * rows[0][3]  # and much longer to factor (measured: about 20x)
 ```
 
 With the same number of unknowns, the 3-D factor carries several times the
@@ -215,7 +222,7 @@ linear systems", *Acta Numerica* 25 (2016), 383–566.
 | `splu` | square, unsymmetric | threshold partial | `colamd` | the general-purpose choice; `threshold=`, `pivot_perturb=`, `accumulator=`; exposes `L`, `U` and both permutations | `refactor()` reuses the old pivot sequence |
 | `supernodal_lu` | square, unsymmetric | threshold partial | `colamd` | dense block updates; `scale=True` row-equilibrates, which helps most in low precision | supernodes pay off on denser factors |
 | `klu` | square, unsymmetric, reducible | per block | AMD per block | block triangular form: factors only the diagonal blocks; strong on circuits and flowsheets | no single `L`, `U` to inspect |
-| `qr` | rectangular $m \ge n$ | none (orthogonal) | `colamd` | least squares without forming $A^TA$; exposes `R` | `Q` stays implicit |
+| `qr` | tall, $m \ge n$: least squares | none (orthogonal) | `colamd` | least squares without forming $A^TA$; exposes `R` | `Q` stays implicit |
 
 Every factorization takes `ordering=` (see the
 [orderings guide](../notebooks/sparse_direct_orderings)), solves with
@@ -229,14 +236,21 @@ factorization, so it keeps the accumulator.
 
 A decision path:
 
-1. **Overdetermined ($m \ge n$), or least squares?** Use `qr`. Underdetermined
-   systems ($m < n$) are not supported by these factorizations.
-2. **Symmetric positive definite?** Use `cholesky`, or `supernodal_ldlt`
+For a **square** system $Ax = b$:
+
+1. **Symmetric positive definite?** Use `cholesky`, or `supernodal_ldlt`
    when the factors are large.
-3. **Symmetric indefinite?** Use `supernodal_ldlt` or `ldlt`. Neither pivots;
+2. **Symmetric indefinite?** Use `supernodal_ldlt` or `ldlt`. Neither pivots;
    if one raises on a zero pivot, fall back to `splu`.
-4. **Unsymmetric?** Use `splu`. If the matrix comes from a circuit, a
+3. **Unsymmetric?** Use `splu`. If the matrix comes from a circuit, a
    flowsheet or another network, also try `klu` and compare `.nnz`.
+
+For a **rectangular** system:
+
+4. **Overdetermined ($m > n$): least squares.** Use `qr`, which minimizes
+   $\lVert Ax - b \rVert_2$ without forming $A^TA$. `qr` also accepts a square
+   matrix, but for a square system the factorizations above are cheaper.
+5. **Underdetermined ($m < n$)** is not supported by these factorizations.
 
 ### The table, measured
 
@@ -275,21 +289,28 @@ matrix into the middle of its spectrum, and it becomes indefinite:
 ```{code-cell} python
 small = ms.to_scipy(mtl5.generators.poisson2d(10, 10))
 eigs = np.linalg.eigvalsh(small.toarray())
-shift = 500.3  # inside the spectrum, and not equal to any diagonal entry
+# Inside the spectrum. A shift can still produce a zero pivot, since pivots are
+# Schur complements, not diagonal entries; the factorizations succeeding below
+# is what shows that this one does not.
+shift = 500.3
 A_ind = (small - shift * sp.identity(100)).tocsr()
+below = int((eigs < shift).sum())
 
+cholesky_refused = False
 try:
     ms.cholesky(A_ind)
 except RuntimeError as err:
+    cholesky_refused = True
     print("cholesky:", err)
+assert cholesky_refused
 
 for name in ("ldlt", "supernodal_ldlt"):
-    f = getattr(ms, name)(A_ind)
-    d = f.diagonal()
-    print(f"{name}: {int((d < 0).sum())} negative and {int((d > 0).sum())} positive pivots")
+    d = getattr(ms, name)(A_ind).diagonal()
+    negative = int((d < 0).sum())
+    print(f"{name}: {negative} negative and {int((d > 0).sum())} positive pivots")
+    assert negative == below, name
 
-print(f"eigenvalues below the shift: {int((eigs < shift).sum())}")
-assert int((ms.ldlt(A_ind).diagonal() < 0).sum()) == int((eigs < shift).sum())
+print(f"eigenvalues below the shift: {below}")
 ```
 
 Cholesky refuses the matrix. Both LDLᵀ factorizations accept it, and the
@@ -304,7 +325,7 @@ def count_below(A, sigma):
     return int((ms.ldlt(shifted).diagonal() < 0).sum())
 
 
-a, b = 200.3, 400.3  # endpoints chosen off the diagonal value, so no pivot is zero
+a, b = 200.3, 400.3  # endpoints for which both factorizations succeed: no zero pivot
 inside = count_below(small, b) - count_below(small, a)
 print(f"eigenvalues in [{a}, {b}): {inside} by two LDLT factorizations, "
       f"{int(((eigs >= a) & (eigs < b)).sum())} by eigvalsh")
@@ -316,9 +337,15 @@ interchanges handle that case:
 
 ```{code-cell} python
 swap = sp.csr_matrix(np.array([[0.0, 1.0], [1.0, 0.0]]))
+ldlt_refused = False
 try:
     ms.ldlt(swap, ordering="natural")
 except RuntimeError as err:
+    ldlt_refused = True
     print("ldlt:", err)
-print("splu:", ms.splu(swap, ordering="natural").solve(np.array([1.0, 2.0])).to_numpy())
+assert ldlt_refused
+
+x = ms.splu(swap, ordering="natural").solve(np.array([1.0, 2.0])).to_numpy()
+print("splu:", x)
+assert np.allclose(x, [2.0, 1.0])
 ```

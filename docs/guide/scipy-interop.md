@@ -28,16 +28,34 @@ b = S @ np.ones(n)
 
 ## Matrices
 
-Every function in `mtl5.sparse` takes either an MTL5 `SparseMatrix_*` or any
-SciPy sparse matrix. `from_scipy` and `to_scipy` convert explicitly. Both
-**copy**: MTL5 stores CSR in its own containers, so a SciPy matrix and its
-MTL5 counterpart never share memory. Convert once and reuse the result when
-the same matrix is used repeatedly.
+The solvers in `mtl5.sparse` accept two kinds of matrix:
+
+- a SciPy sparse matrix of `float32` or `float64`, in any format (CSR, CSC,
+  COO, …). Other dtypes raise `TypeError`; convert first, for example with
+  `A.astype(np.float64)`.
+- an MTL5 CSR matrix, `SparseMatrix_f32` or `SparseMatrix_f64`. MTL5's COO
+  and ELL containers are not accepted by the solvers.
+
+`from_scipy` and `to_scipy` convert explicitly, and both **copy**. MTL5 stores
+CSR in its own containers, so a SciPy matrix and its MTL5 counterpart never
+share memory. When the same matrix is used repeatedly, convert it once and
+reuse the result.
 
 ```{code-cell} python
 A = ms.from_scipy(S)
 print(type(A).__name__, A.shape, A.nnz)
-print("shares memory:", np.shares_memory(ms.to_scipy(A).data, S.tocsr().data))
+
+# from_scipy copies: changing the SciPy matrix afterwards leaves A unchanged.
+src = S.copy()
+copied = ms.from_scipy(src)
+src.data[:] = 0.0
+assert np.array_equal(ms.to_scipy(copied).data, S.data)
+
+# to_scipy copies: changing the result leaves the MTL5 matrix unchanged.
+out = ms.to_scipy(copied)
+out.data[:] = 0.0
+assert np.array_equal(ms.to_scipy(copied).data, S.data)
+print("from_scipy and to_scipy both copy")
 ```
 
 ## Direct solvers
@@ -55,7 +73,7 @@ print("shares memory:", np.shares_memory(ms.to_scipy(A).data, S.tocsr().data))
 | `SuperLU.solve(b, trans="T")` | not available: only $Ax = b$ |
 | no equivalent | `.refactor(A2)`, numeric refactorization with the analysis reused |
 | no equivalent (scikit-sparse's CHOLMOD) | `ms.cholesky`, `ms.ldlt`, `ms.supernodal_ldlt` |
-| `lsqr(A, b)`, `lsmr(A, b)` (iterative) | `ms.qr(A).solve(b)` (direct sparse QR) |
+| `lsqr(A, b)`, `lsmr(A, b)` (iterative) | `ms.qr(A).solve(b)` (direct sparse QR), for $m \ge n$ only: `lsqr` and `lsmr` also handle underdetermined systems, `ms.qr` does not |
 
 Both libraries solve to the same accuracy:
 
