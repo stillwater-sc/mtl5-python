@@ -138,7 +138,13 @@ The bridge also works the other way, so SciPy's solvers can use MTL5 pieces:
 
 ```{code-cell} python
 lu32 = ms.splu(S.astype(np.float32))
-M = spla.LinearOperator((n, n), matvec=lambda r: lu32.solve(r).to_numpy().astype(np.float64))
+# SciPy may hand matvec an (n, 1) column; solve() takes 1-D, so flatten it.
+# SciPy restores the shape of the result itself.
+M = spla.LinearOperator(
+    (n, n), matvec=lambda r: lu32.solve(np.ravel(r)).to_numpy().astype(np.float64)
+)
+# The column form works too, which a matrix product with M relies on.
+assert M.matvec(np.ones((n, 1))).shape == (n, 1)
 
 x, info = spla.gmres(S, b, M=M, rtol=1e-12, restart=20, maxiter=50)
 print(f"SciPy GMRES with an MTL5 float32 LU preconditioner: info = {info}, "
