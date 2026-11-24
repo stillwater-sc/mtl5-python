@@ -128,7 +128,7 @@ against, and semantic-release manages only the **patch** component.
     to a rule of thumb for choosing an ordering;
   - the analyze, factor, refactor and solve pipeline. `refactor()` is about
     3× cheaper than a fresh factor, and a 20-step time-stepping loop runs
-    about 2.7× faster with it.
+    more than 2× faster with it.
 
   Its `assert` cells fail CI if an ordering stops reducing fill. The matrix is
   stored in `notebooks/data/` with its source, so CI needs no network.
