@@ -202,10 +202,14 @@ assert all(row[3] <= 10 * kappa2 * row[4] for row in perturb_rows)  # error <~ k
 Every run completes and reports one perturbed pivot. None of them converges
 within 100 iterations, and `converged=False` is how you find out. Refinement
 computes its residual with the original A, so if it did converge, the result
-would solve the original system. A perturbed factor only slows it. The larger
-the floor, the worse the factor approximates A, and the slower the iteration
-contracts, until it stops making progress. The smallest floor, about
-float32's unit roundoff, gets furthest.
+would solve the original system. What the perturbation changes is the rate.
+With one replaced pivot, each step multiplies the error along that pivot's
+direction by roughly 1 − d/f, where d is the true pivot and f the floor.
+Here d = 10⁻⁸ and every floor is larger, so the factor is in the range from 0.9
+to almost 1, and the iteration crawls. The larger the floor, the slower it
+goes, and the smallest floor, about float32's unit roundoff, gets furthest. A
+floor below d/2 would make the factor larger than 1 in magnitude, and
+refinement would diverge.
 
 So read a nonzero `num_perturbed` as a warning: the factor is of a different
 matrix, and the answer is only as good as the refinement made it. Check
