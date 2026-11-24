@@ -11,6 +11,7 @@ from the repository's `notebooks/` directory. To run a notebook yourself,
 
 direct-solvers
 ../notebooks/sparse_direct_orderings
+spd-example
 scipy-interop
 ```
 

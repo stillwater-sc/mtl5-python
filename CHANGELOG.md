@@ -116,6 +116,15 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Guide page: "A symmetric positive definite example"** (section 5 of
+  #125). It factors `poisson2d` with `cholesky` and `supernodal_ldlt` under
+  every ordering, and grows the grid from 16×16 to 128×128:
+  - The natural ordering's fill equals the envelope of A exactly, which the
+    page asserts; its growth exponent is 3/2.
+  - `amd` grows like n^1.25, below `rcm` (about 1.5) and `colamd` (1.29).
+    `colamd` orders AᵀA, the wrong graph for a symmetric matrix.
+  - `supernodal_ldlt` stores the same pattern as `cholesky`, minus the unit
+    diagonal (asserted), and is faster on the larger `amd` factors.
 - **Two guide pages on the sparse direct solvers** (part of #125), executed
   at every docs build:
   - **"Sparse direct solvers"** covers sections 1–3 of #125.
