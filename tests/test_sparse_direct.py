@@ -330,6 +330,7 @@ class TestOrderings:
         np.testing.assert_array_equal(ms.amd(A), ms.ordering(A, "amd"))
         np.testing.assert_array_equal(ms.colamd(A), ms.ordering(A, "colamd"))
         np.testing.assert_array_equal(ms.rcm(A), ms.ordering(A, "rcm"))
+        np.testing.assert_array_equal(ms.nested_dissection(A), ms.ordering(A, "nd"))
 
     def test_natural_is_the_identity(self, system):
         A, _, _ = system
@@ -353,7 +354,32 @@ class TestOrderings:
     def test_unknown_ordering(self, system):
         A, _, _ = system
         with pytest.raises(ValueError, match="unknown ordering"):
-            ms.ordering(A, "nested_dissection")
+            ms.ordering(A, "metis")
+
+
+class TestNestedDissection:
+    """ordering="nd", from MTL5 5.25.0 (MTL5 #920, issue 919)."""
+
+    def test_listed(self):
+        assert "nd" in ms.orderings()
+
+    @pytest.mark.parametrize(
+        "factor", [ms.splu, ms.supernodal_lu, ms.cholesky, ms.ldlt, ms.supernodal_ldlt, ms.qr]
+    )
+    def test_every_factorization_accepts_it(self, factor, system):
+        A, xt, b = system
+        F = factor(A, ordering="nd")
+        x = F.solve(b)
+        x = x.to_numpy() if hasattr(x, "to_numpy") else np.asarray(x)
+        assert np.linalg.norm(x - xt) / np.linalg.norm(xt) < 1e-10
+
+    def test_beats_amd_on_a_large_grid(self):
+        """MTL5 measures nnz(L) under ND at 0.84x AMD's on a 256 x 256 grid
+        (0.92x at 128); the asymptotic advantage is ND's reason to exist."""
+        A = laplacian_2d(256)
+        nd = ms.cholesky(A, ordering="nd").nnz
+        amd = ms.cholesky(A, ordering="amd").nnz
+        assert nd < 0.95 * amd, (nd, amd)
 
 
 class TestMixedPrecisionDirectSolve:
@@ -461,7 +487,7 @@ class TestSymmetricFactorizations:
 
     def test_supernodal_lu_rejects_natural_ordering(self, system):
         A, _, _ = system
-        with pytest.raises(ValueError, match="must be 'amd', 'colamd' or 'rcm'"):
+        with pytest.raises(ValueError, match="must be 'amd', 'colamd', 'rcm' or 'nd'"):
             ms.supernodal_lu(A, ordering="natural")
 
     def test_supernodal_lu_scaled_variant(self, system):

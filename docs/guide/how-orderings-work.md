@@ -460,9 +460,37 @@ partitioning, and orders the pieces more carefully. That is why it wins
 clearly on large 3-D meshes, where separators are $O(n^{2/3})$ and minimum
 degree degrades.
 
-mtl5 does not have a nested dissection ordering yet. It is in progress
-upstream as
-[stillwater-sc/mtl5#919](https://github.com/stillwater-sc/mtl5/issues/919).
+mtl5 has a nested dissection ordering, `ordering="nd"` (since MTL5 5.25.0,
+[stillwater-sc/mtl5#919](https://github.com/stillwater-sc/mtl5/issues/919)).
+It needs no coordinates: it finds separators in the graph itself, as
+George's automatic nested dissection does. From a far-out vertex, it builds
+breadth-first levels and takes as the separator the narrowest level that
+leaves no more than 70% of the vertices on one side. It then trims the
+separator to the vertices that actually touch the far side, and orders
+pieces of fewer than 64 vertices with AMD. Those choices make its separators
+smaller than the straight lines above, and the difference shows:
+
+```{code-cell} python
+print("    n     AMD     hand-built ND   mtl5 nd      (nnz(L) relative to AMD)")
+nd_rows = []
+for k in (64, 128, 256):
+    A = laplacian_2d(k)
+    amd = ms.cholesky(A, ordering="amd").nnz
+    hand = cholesky_nnz(A, grid_nested_dissection(k, A, leaf=256)[0])
+    nd = ms.cholesky(A, ordering="nd").nnz
+    nd_rows.append((k, amd, hand, nd))
+    print(f"{k * k:6d}  {1.0:6.2f}  {hand / amd:13.2f}  {nd / amd:10.2f}")
+
+assert all(nd < hand for _, _, hand, nd in nd_rows)  # better separators than straight lines
+assert nd_rows[-1][3] < 0.9 * nd_rows[-1][1]  # and it beats AMD on large grids
+ratio = [nd / amd for _, amd, _, nd in nd_rows]
+assert ratio[0] > ratio[1] > ratio[2]  # its edge grows with n
+```
+
+On the small grid AMD is still as good. From about 100×100 up, nested
+dissection produces the smaller factor, and its advantage grows with the
+grid. In 3-D it is larger still: MTL5 measures 0.64 times AMD's fill on a
+32³ grid.
 
 ## Reverse Cuthill–McKee: a distance signal
 
@@ -598,7 +626,7 @@ and RCM, whose tree is close to a path, does not.
 | ordering | signal from the pattern | scope | best for |
 |---|---|---|---|
 | minimum degree / `amd` | current degree in the elimination graph | local, greedy, adaptive | general sparse symmetric matrices; the default for `cholesky`, `ldlt` |
-| nested dissection (mtl5#919) | small separators | global, divide and conquer | large 2-D and 3-D meshes; parallel factorization |
+| nested dissection / `nd` | small separators | global, divide and conquer | large 2-D and 3-D meshes; parallel factorization |
 | `rcm` | graph distance (BFS levels) | global, but aims at bandwidth | banded and profile solvers, locality |
 | `colamd` | degrees in the graph of AᵀA (rows as cliques) | local, greedy | LU with partial pivoting; the default for `splu`, `qr` |
 | `natural` | none | — | matrices already ordered well, and baselines |
@@ -608,6 +636,7 @@ trust: local degree, global separators, distance, or the column
 intersections that bound fill under any pivoting.
 
 API reference: {py:func}`mtl5.sparse.amd`, {py:func}`mtl5.sparse.colamd`,
-{py:func}`mtl5.sparse.rcm`, {py:func}`mtl5.sparse.ordering`,
+{py:func}`mtl5.sparse.rcm`, {py:func}`mtl5.sparse.nested_dissection`,
+{py:func}`mtl5.sparse.ordering`,
 {py:func}`mtl5.sparse.orderings`, {py:func}`mtl5.sparse.cholesky`,
 {py:func}`mtl5.sparse.splu`.

@@ -124,14 +124,14 @@ without guaranteeing the minimum, and `natural` keeps the grid's row-by-row
 numbering.
 
 ```{code-cell} python
-ORDERINGS = ["natural", "rcm", "colamd", "amd"]
+ORDERINGS = ["natural", "rcm", "colamd", "amd", "nd"]
+COLORS = SERIES + ["#8a5cc7"]  # a fifth hue for nested dissection
 chol = {o: ms.cholesky(A, ordering=o) for o in ORDERINGS}
 
 fig, axes = plt.subplots(2, 3, figsize=(13, 9.4), dpi=SPY_DPI)
 spy(axes[0, 0], A, "A", color=INK_2)
-for ax, o, c in zip(axes.flat[1:], ORDERINGS, SERIES):
+for ax, o, c in zip(axes.flat[1:], ORDERINGS, COLORS):
     spy(ax, chol[o].L, f"L  ({o})", color=c)
-axes[1, 2].axis("off")
 plt.tight_layout()
 plt.show()
 
@@ -154,7 +154,11 @@ of the fill. `amd` does not try to keep a band at all. At each step it
 eliminates an unknown of smallest *approximate degree*: few neighbours in the
 graph that remains, estimated cheaply instead of counted exactly. Low degree is
 a proxy for low fill, not a guarantee of it, but on this grid it leaves a
-factor with well under half the entries.
+factor with well under half the entries. `nd`, nested dissection, splits the
+grid at small separators and numbers each separator after the two parts it
+divides. Its factor shows the recursion as nested blocks. At this size it
+fills a little more than `amd`; the next section shows how that changes as
+the grid grows.
 
 ```{code-cell} python
 envelope = (2 * k - 1) + (n - k) * (k + 1)
@@ -164,6 +168,7 @@ assert chol["natural"].nnz == envelope
 for o in ORDERINGS:
     print(f"{o:>8}: nnz(L) = {chol[o].nnz:7,}  ({chol[o].nnz / A.nnz:4.1f}x nnz(A))")
 assert chol["amd"].nnz < chol["colamd"].nnz < chol["rcm"].nnz <= chol["natural"].nnz
+assert chol["amd"].nnz < chol["nd"].nnz < chol["colamd"].nnz
 ```
 
 ## How fill and time grow with the problem size
@@ -200,8 +205,11 @@ a band of the same width, grows at nearly the same rate. The best possible
 growth on a 2-D grid is $O(n \log n)$, which nested dissection achieves
 (George, 1973), and which shows up on this range of sizes as a slope of about
 1.1. Minimum degree is a greedy heuristic with no such guarantee: here it lands
-in between, well below $3/2$ but above the nested dissection rate. mtl5 has no
-nested dissection ordering yet.
+in between, well below $3/2$ but above the nested dissection rate. mtl5's
+`nd` ordering (since MTL5 5.25.0) starts above `amd` on the small grids and
+grows more slowly. Beyond about $100 \times 100$ it produces the smaller
+factor: 0.92 times `amd`'s at $128 \times 128$, and 0.84 times at
+$256 \times 256$.
 
 ```{code-cell} python
 def slope(o):
@@ -212,7 +220,7 @@ def slope(o):
 
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.8))
-for o, c in zip(ORDERINGS, SERIES):
+for o, c in zip(ORDERINGS, COLORS):
     ns = [results[o, k_][0] for k_ in SIZES]
     ax1.loglog(ns, [results[o, k_][2] for k_ in SIZES], "o-", color=c, label=f"{o} (slope {slope(o):.2f})")
     ax2.loglog(ns, [results[o, k_][3] for k_ in SIZES], "o-", color=c, label=f"{o}, cholesky")
@@ -231,6 +239,8 @@ for o in ORDERINGS:
 assert abs(slope("natural") - 1.5) < 0.05
 assert abs(slope("rcm") - 1.5) < 0.1
 assert slope("amd") < 1.35
+assert slope("nd") < slope("amd")  # ND's fill grows more slowly
+assert results["nd", SIZES[-1]][2] < results["amd", SIZES[-1]][2]  # and wins at 128 x 128
 
 # The O(n log n) rate, fitted over the same sizes, for comparison.
 ns = np.array([k_ * k_ for k_ in SIZES], dtype=float)

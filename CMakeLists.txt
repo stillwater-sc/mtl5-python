@@ -151,17 +151,20 @@ endif()
 #              supernodal_lu and klu ignored `threshold` under every ordering
 #              but natural; it compiles and runs, so only the floor stops it.
 #              tests/test_sparse_direct.py::TestThresholdPivoting pins it.
+#   v5.25.0 -- mtl5_sparse_direct.cpp includes ordering/nested_dissection.hpp
+#              (MTL5 #920, issue 919) for ordering="nd"; it does not exist in
+#              5.24.x, so this floor is a compile-time one.
 #
 # The version argument to find_package is what applies that floor to the OTHER
 # build path. A bare find_package(MTL5 QUIET) accepts *any* system-installed
 # MTL5 and skips the FetchContent block entirely, so a developer with 5.7.x
 # installed would silently build against it and get ~140 template errors deep
 # inside norms.hpp instead of a version message. MTL5 ships its ConfigVersion
-# with COMPATIBILITY SameMajorVersion, under which 5.24.1 rejects an installed
-# 5.24.0 or older and accepts 5.24.1 or any later 5.x -- exactly the floor we want. (It also
+# with COMPATIBILITY SameMajorVersion, under which 5.25.0 rejects an installed
+# 5.24.x or older and accepts 5.25.0 or any later 5.x -- exactly the floor we want. (It also
 # rejects a 6.x install, which is correct: an MTL5 major bump is the manual
 # intervention case in the version policy, not something to absorb silently.)
-find_package(MTL5 5.24.1 QUIET)
+find_package(MTL5 5.25.0 QUIET)
 if(NOT MTL5_FOUND)
     include(FetchContent)
     # Suppress MTL5's own tests, examples, and install targets
@@ -171,7 +174,7 @@ if(NOT MTL5_FOUND)
     FetchContent_Declare(
         mtl5
         GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-        GIT_TAG        v5.24.1
+        GIT_TAG        v5.25.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )

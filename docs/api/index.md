@@ -76,6 +76,7 @@ suffixes.
    amd
    colamd
    rcm
+   nested_dissection
    SparseLU_f64
    SupernodalLU_f64
    SparseCholesky_f64
