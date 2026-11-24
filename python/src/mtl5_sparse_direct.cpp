@@ -365,12 +365,16 @@ void register_sparse_lu(nb::module_& m) {
             std::shared_lock lock(s.mtx);
             return factor_to_crs(s.num.factorL());
         }, "Unit lower triangular factor, diagonal stored, as a copy. "
-           "A[row_perm][:, col_perm] == L @ U.")
+           "A[row_perm][:, col_perm] == L @ U. Exact up to rounding only "
+           "when num_perturbed == 0: a perturbed pivot (pivot_perturb > 0) "
+           "makes L @ U reconstruct the perturbed matrix, not A.")
         .def_prop_ro("U", [](const Wrap& s) {
             std::shared_lock lock(s.mtx);
             return factor_to_crs(s.num.factorU());
         }, "Upper triangular factor, as a copy. "
-           "A[row_perm][:, col_perm] == L @ U.")
+           "A[row_perm][:, col_perm] == L @ U. Exact up to rounding only "
+           "when num_perturbed == 0: a perturbed pivot (pivot_perturb > 0) "
+           "makes L @ U reconstruct the perturbed matrix, not A.")
         .def_prop_ro("row_perm", [](const Wrap& s) {
             std::shared_lock lock(s.mtx);
             return perm_array(s.num.row_perm);
@@ -879,7 +883,9 @@ void register_supernodal_lu(nb::module_& m) {
         }, "Unit lower triangular factor, diagonal stored, as a copy. "
            "With scale=True, (diag(row_scale) @ A)[row_perm][:, col_perm] "
            "== L @ U. With scale=False, row_scale is None and the "
-           "identity is A[row_perm][:, col_perm] == L @ U.")
+           "identity is A[row_perm][:, col_perm] == L @ U. Either holds up "
+           "to rounding only when num_perturbed == 0: a perturbed pivot makes "
+           "L @ U reconstruct the perturbed matrix.")
         .def_prop_ro("U", [](const Wrap& s) {
             std::shared_lock lock(s.mtx);
             return factor_to_crs(s.num.factorU());

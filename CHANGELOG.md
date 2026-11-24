@@ -31,6 +31,10 @@ against, and semantic-release manages only the **patch** component.
   - `qr`: `R`, `col_perm`. Q stays implicit as Householder vectors, so it is
     not exposed.
 
+  The LU identities hold up to rounding only when `num_perturbed == 0`. With
+  `pivot_perturb > 0`, a pivot that falls below it is replaced, so `L @ U`
+  reconstructs the perturbed matrix rather than `A`.
+
   Two deliberate choices:
   - **Permutations use MTL5's convention, `p[new] = old`.** That is the
     inverse of scipy's `SuperLU.perm_r`/`perm_c`, so the scipy names are not

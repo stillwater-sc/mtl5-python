@@ -155,6 +155,22 @@ class TestSupernodalLU:
         assert f.L.nnz + f.U.nnz == f.nnz
 
 
+@pytest.mark.parametrize("factor", [ms.splu, ms.supernodal_lu], ids=["splu", "supernodal_lu"])
+def test_perturbed_pivot_breaks_the_identity(factor):
+    """The documented caveat: the LU identities need num_perturbed == 0.
+
+    The second pivot of this matrix is 1e-8. pivot_perturb=1e-3 replaces it,
+    so L @ U is A with that pivot raised to 1e-3 -- off by about 1e-3, far
+    beyond rounding. Pinned so the docstrings' qualification stays true.
+    """
+    A = sp.csr_matrix(np.array([[1.0, 1.0], [1.0, 1.0 + 1e-8]]))
+    lu = factor(A, pivot_perturb=1e-3)
+    assert lu.num_perturbed == 1
+    PAQ = A.toarray()[lu.row_perm][:, lu.col_perm]
+    err = np.abs(dense(lu.L) @ dense(lu.U) - PAQ).max()
+    assert err == pytest.approx(1e-3, rel=1e-3)
+
+
 class TestCholesky:
     @pytest.mark.parametrize("ordering", ["amd", "rcm", "natural"])
     def test_reconstructs(self, ordering):
