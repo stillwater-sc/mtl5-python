@@ -161,6 +161,47 @@ class TestThresholdPivoting:
         assert ms.klu(A, threshold=0.01).nnz < 0.5 * ms.klu(A).nnz
 
 
+class TestReprDiagnostics:
+    """The repr is where people look first, so the pivoting factorizations
+    print num_perturbed and the accumulator, which are otherwise visible only
+    as properties."""
+
+    @pytest.mark.parametrize("factor", [ms.splu, ms.klu, ms.supernodal_lu])
+    def test_pivoting_factors_show_num_perturbed_and_accumulator(self, factor):
+        F = factor(laplacian_2d(6))
+        r = repr(F)
+        assert f"nnz={F.nnz}" in r
+        assert "num_perturbed=0" in r
+        assert "accumulator='default'" in r
+
+    @pytest.mark.parametrize("factor", [ms.splu, ms.klu, ms.supernodal_lu])
+    def test_a_perturbed_pivot_shows(self, factor):
+        """The Neumann Laplacian is singular; its last pivot is rounding
+        noise, which a small pivot_perturb replaces."""
+        A = laplacian_2d(6)
+        A = (A - sp.diags(np.asarray(A.sum(axis=1)).ravel())).tocsr()
+        A.eliminate_zeros()
+        F = factor(A, pivot_perturb=1e-10)
+        assert F.num_perturbed == 1
+        assert "num_perturbed=1" in repr(F)
+
+    @pytest.mark.parametrize("factor", [ms.splu, ms.klu, ms.supernodal_lu, ms.supernodal_ldlt])
+    def test_accumulator_shows(self, factor):
+        A32 = ms.from_scipy(laplacian_2d(6).astype(np.float32))
+        assert "accumulator='f64'" in repr(factor(A32, accumulator="f64"))
+
+    def test_supernodal_ldlt_shows_ordering_and_nnz(self):
+        F = ms.supernodal_ldlt(laplacian_2d(6), ordering="rcm")
+        r = repr(F)
+        assert "ordering='rcm'" in r
+        assert f"nnz={F.nnz}" in r
+
+    def test_supernodal_lu_shows_ordering(self):
+        F = ms.supernodal_lu(laplacian_2d(6), ordering="amd")
+        assert "ordering='amd'" in repr(F)
+        assert f"nsuper={F.nsuper}" in repr(F)
+
+
 class TestRefactor:
     def test_refactor_matches_a_full_factor(self, system):
         """The whole premise: reusing the analysis must not change the answer."""
