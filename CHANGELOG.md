@@ -1244,6 +1244,59 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.1 (2026-11-25)
+
+### Bug Fixes
+
+- **bench**: A whitespace-only probes.blas_vendor is no vendor
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Harden the ingest against moved runs, bad numbers and partial scans
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Leave foreign databases alone; lossless keys for non-UTF-8 names
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Mark databases this package creates; version check before DDL
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Rebuild deletes only a DuckDB file; stricter JSON and sidecar checks
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Reject a run whose sidecar and probes name different BLAS vendors
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Reject negative timings; a blas run needs its vendor; stat in the walk
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Require the full machine state; serialize ingests; safer rebuild
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+### Documentation
+
+- Session log for the afternoon of 2026-11-24; CHANGELOG cross-reference to nd
+  ([#139](https://github.com/stillwater-sc/mtl5-python/pull/139),
+  [`d2d8f6b`](https://github.com/stillwater-sc/mtl5-python/commit/d2d8f6b72598c03a62f2c44442557ff19aa2ffa9))
+
+### Features
+
+- **bench**: Ingest mtl5_bench results into DuckDB with provenance tiers
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+- **bench**: Ingest mtl5_bench results into DuckDB with provenance tiers (#121 P1)
+  ([#140](https://github.com/stillwater-sc/mtl5-python/pull/140),
+  [`a299018`](https://github.com/stillwater-sc/mtl5-python/commit/a2990189e1b042554bffc57abd8380b52bd76292))
+
+
 ## v5.24.4 (2026-11-24)
 
 ### Documentation
