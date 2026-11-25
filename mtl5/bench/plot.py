@@ -282,6 +282,7 @@ def capability_card(df) -> BenchFigure:
     """A machine's capability card, from :func:`mtl5.bench.analyze.capability`."""
     if len(df) != 1:
         raise ValueError(f"a capability card describes one run; the frame has {len(df)}")
+    df = df.copy()  # the figure keeps the frame it was drawn from
     row = df.iloc[0]
     with style.house_style():
         fig = _figure(style.WIDTH_DOUBLE, 2.5)
@@ -412,6 +413,7 @@ def _entry_labels(entry_ids: Sequence[str]) -> dict[str, str]:
 
 def thread_scaling(df, *, max_series: int = 12) -> BenchFigure:
     """Speedup against threads, from :func:`mtl5.bench.analyze.thread_scaling`."""
+    df = df.copy()  # the figure keeps the frame it was drawn from
     entries = sorted(df["entry_id"].unique())
     _check_series(len(entries), max_series, "entries")
     labels = _entry_labels(entries)

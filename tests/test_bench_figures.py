@@ -229,6 +229,16 @@ def test_a_redraw_keeps_the_roofline_labels(tmp_path):
     assert "gemm f64" not in labels and "gemm f32" not in labels
 
 
+@pytest.mark.parametrize("kind", sorted(FRAMES))
+def test_a_figure_keeps_its_own_frame(kind):
+    # The card and the scaling figure kept the caller's frame, so a change to
+    # it after drawing went into the saved CSV but not into the figure.
+    df = _pinned(kind)
+    fig = plot.FIGURES[kind](df)
+    df.loc[:, "git_commit"] = "changed"
+    assert "changed" not in set(fig.data["git_commit"])
+
+
 def test_the_write_order_does_not_move_the_layout(tmp_path):
     # Constrained layout left on reran at each draw from where the last left
     # the axes, so an SVG written after a PNG differed from one written first.
