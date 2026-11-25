@@ -122,17 +122,30 @@ def _duckdb():
     return duckdb
 
 
+def _is_duckdb_file(path: Path) -> bool:
+    """True when path starts with DuckDB's file header ('DUCK' at byte 8)."""
+    if not path.is_file():
+        return False
+    with path.open("rb") as f:
+        head = f.read(12)
+    return head[8:12] == b"DUCK"
+
+
 def connect(db: str | os.PathLike = ":memory:", *, rebuild: bool = False):
     """Open (or create) a benchmark database and return the DuckDB connection.
 
-    ``rebuild=True`` deletes an existing database file first. A database
+    ``rebuild=True`` deletes an existing database file first, and refuses to
+    delete a file that is not a DuckDB database. A database
     written by another schema version raises, since it is a cache and is
     rebuilt rather than migrated.
     """
     duckdb = _duckdb()
     path = str(db)
     if rebuild and path != ":memory:":
-        for p in (Path(path), Path(path + ".wal")):
+        target = Path(path)
+        if target.exists() and not _is_duckdb_file(target):
+            raise ValueError(f"{path} is not a DuckDB database; --rebuild deletes only one")
+        for p in (target, Path(path + ".wal")):
             if p.exists():
                 p.unlink()
     con = duckdb.connect(path)
@@ -236,6 +249,16 @@ def _validate_json(doc: Any) -> None:
     skipped = doc.get("skipped", [])
     if not isinstance(skipped, list) or not all(isinstance(s, dict) for s in skipped):
         raise _Rejected("'skipped' is not a list of objects")
+    for i, s in enumerate(skipped):
+        for key in ("area", "op", "dtype", "reason"):
+            if s.get(key) is not None and not isinstance(s[key], str):
+                raise _Rejected(f"skipped[{i}].{key} is not a string")
+    try:
+        # A lone surrogate (\ud800) decodes from JSON but cannot be encoded,
+        # and every key and row is encoded on its way to a hash or DuckDB.
+        json.dumps(doc, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        raise _Rejected("the JSON contains text that is not valid Unicode") from None
 
 
 def _entry_id(r: dict) -> str:
@@ -269,6 +292,13 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
         missing = [k for k in si.REQUIRED_KEYS if k not in fields]
         if missing:
             reasons.append("sidecar lacks " + ", ".join(missing))
+        empty = [
+            k
+            for k in si.REQUIRED_KEYS
+            if k in fields and not fields[k] and k not in si.EMPTY_ALLOWED
+        ]
+        if empty:
+            reasons.append("sidecar has empty " + ", ".join(empty))
         if "benchmark" in fields and fields["benchmark"] != "mtl5_bench":
             raise _Rejected(f"sidecar says benchmark={fields['benchmark']}, not mtl5_bench")
         for key in ("label", "machine", "class", "simd_backend"):
@@ -615,7 +645,12 @@ def _ingest(root_path: Path, con) -> IngestReport:
             # integer digit limit; RecursionError a pathologically nested file.
             record(FileOutcome(rel, "json", "rejected", [f"invalid JSON: {exc}"]), content_hash)
             continue
-        if not isinstance(doc, dict) or "schema" not in doc:
+        if not isinstance(doc, dict):
+            record(
+                FileOutcome(rel, "json", "rejected", ["the JSON is not an object"]), content_hash
+            )
+            continue
+        if "schema" not in doc:
             record(
                 FileOutcome(
                     rel, "json", "deferred", ["JSON without a schema field (bench_blas.py: P2)"]

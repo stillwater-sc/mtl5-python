@@ -199,7 +199,33 @@ class TestIncomplete:
         path = tree / (I7_A + ".sysinfo")
         path.write_text(path.read_text() + "turbo=disabled\n")
         _, report = bench.ingest(tree)
-        assert _status(report, I7_A).reasons == ["sidecar key 'turbo' has conflicting values"]
+        # The conflicted key is dropped, so it is also missing.
+        assert _status(report, I7_A).reasons == [
+            "sidecar key 'turbo' has conflicting values",
+            "sidecar lacks turbo",
+        ]
+
+    def test_conflicting_identity_key_is_order_independent(self, tree):
+        path = tree / (I7_A + ".sysinfo")
+        text = path.read_text()
+        verdicts = []
+        for extra in ("machine=other\n", None):
+            if extra is None:
+                # The contradicting value first, the matching one last.
+                body = "machine=other\n" + text
+            else:
+                body = text + extra
+            path.write_text(body)
+            _, report = bench.ingest(tree)
+            o = _status(report, I7_A)
+            verdicts.append((o.status, o.reasons))
+        assert verdicts[0] == verdicts[1]
+        assert verdicts[0][0] == "incomplete"
+
+    def test_empty_commit_and_host(self, tree):
+        _edit_sidecar(tree, I7_A, git_commit="", preflight_host=" ", cxx_flags="")
+        _, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == ["sidecar has empty preflight_host, git_commit"]
 
     def test_thread_count_disagreement(self, tree):
         _edit_sidecar(tree, I7_A, pool_size="4")
@@ -295,6 +321,23 @@ class TestRejected:
         con, report = bench.ingest(tree)
         assert _status(report, I7_A).status == "ingested"
         assert _scalar(con, "SELECT count(*) FROM results WHERE samples IS NULL") == 1
+
+    def test_non_object_json(self, tree):
+        (tree / I7_A).write_text("[]")
+        assert self._rejected(tree) == "the JSON is not an object"
+
+    def test_lone_surrogate(self, tree):
+        (tree / (I7_A + ".sysinfo")).unlink()
+        doc = _load(tree, I7_A)
+        text = json.dumps(doc).replace('"class": "medium"', '"class": "\\ud800"', 1)
+        (tree / I7_A).write_text(text)
+        assert self._rejected(tree) == "the JSON contains text that is not valid Unicode"
+
+    def test_skipped_reason_not_a_string(self, tree):
+        doc = _load(tree, I7_A)
+        doc["skipped"] = [{"area": "direct", "op": "x", "dtype": "f64", "reason": 3}]
+        _dump(tree, I7_A, doc)
+        assert self._rejected(tree) == "skipped[0].reason is not a string"
 
     def test_orphan_sidecar(self, tree):
         (tree / I7_A).unlink()
@@ -413,6 +456,12 @@ class TestHistory:
         con, report = bench.ingest(tree, con)
         assert report.new_rows == 0
         con.close()
+
+    def test_rebuild_refuses_to_delete_a_non_database(self, tree):
+        target = tree / I7_A
+        with pytest.raises(ValueError, match="not a DuckDB database"):
+            bench.ingest(tree, target, rebuild=True)
+        assert target.read_bytes() == (FIXTURES / I7_A).read_bytes()
 
     def test_rebuild_needs_a_path(self, tree):
         con, _ = bench.ingest(tree)
@@ -547,23 +596,25 @@ class TestComparabilityKey:
         assert n == 0
         assert _scalar(con, "SELECT max(definition_version) FROM entry_definitions") == 2
 
-    def test_unchecked_result_is_excluded_from_trends(self, tree):
+    @pytest.mark.parametrize("check", ["missing", "failed"])
+    def test_result_without_a_passing_check_is_excluded_from_trends(self, tree, check):
         doc = _load(tree, I7_A)
-        del doc["results"][0]["check"]
+        first = doc["results"][0]
+        if check == "missing":
+            del first["check"]
+        else:
+            first["check"]["ok"] = False
         _dump(tree, I7_A, doc)
         con, _ = bench.ingest(tree)
+        run_id = _scalar(con, "SELECT run_id FROM runs WHERE path = ?", [I7_A])
+        eid = "/".join(first[k] for k in ("area", "op", "dtype", "shape"))
+        key = [run_id, eid]
+        where = "WHERE run_id = ? AND entry_id = ?"
+        stored = _scalar(con, f"SELECT check_ok FROM results {where}", key)
+        assert stored is (None if check == "missing" else False)
+        assert _scalar(con, f"SELECT count(*) FROM trend_results {where}", key) == 0
         total = _scalar(con, "SELECT count(*) FROM results")
-        trend = _scalar(con, "SELECT count(*) FROM trend_results")
-        assert total - trend == 1
-
-    def test_failed_check_is_excluded_from_trends(self, tree):
-        doc = _load(tree, I7_A)
-        doc["results"][0]["check"]["ok"] = False
-        _dump(tree, I7_A, doc)
-        con, _ = bench.ingest(tree)
-        total = _scalar(con, "SELECT count(*) FROM results")
-        trend = _scalar(con, "SELECT count(*) FROM trend_results")
-        assert total - trend == 1
+        assert _scalar(con, "SELECT count(*) FROM trend_results") == total - 1
 
 
 # --------------------------------------------------------------------------

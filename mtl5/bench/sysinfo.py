@@ -12,6 +12,7 @@ import hashlib
 
 __all__ = [
     "REQUIRED_KEYS",
+    "EMPTY_ALLOWED",
     "parse_sysinfo",
     "machine_fingerprint",
     "machine_identity",
@@ -21,8 +22,15 @@ __all__ = [
     "short_hash",
 ]
 
+#: Required keys that may legitimately be empty: a build with no extra flags,
+#: and the CPU vendor, which arm64's /proc/cpuinfo does not report (every
+#: Jetson and Arduino run in MTL5's data has it empty; cpu_brand identifies
+#: the part there).
+EMPTY_ALLOWED = frozenset({"cxx_flags", "cpu_vendor"})
+
 #: Sidecar keys a run needs for its provenance to count as complete. A run
-#: missing any of them is ingested in the ``incomplete`` tier, which trend
+#: missing any of them, or with one empty (other than those in
+#: :data:`EMPTY_ALLOWED`), is ingested in the ``incomplete`` tier, which trend
 #: queries exclude.
 REQUIRED_KEYS = (
     # what ran
@@ -62,11 +70,13 @@ def parse_sysinfo(text: str) -> tuple[dict[str, str], list[str]]:
 
     Blank lines and lines starting with ``#`` are skipped. A line without
     ``=`` is a problem. So is a key repeated with a different value: which
-    value describes the run is then unknown. A key repeated with the same
-    value is harmless and is not reported.
+    value describes the run is then unknown, so the key is dropped, and the
+    verdict cannot depend on which line came last. A key repeated with the
+    same value is harmless and is not reported.
     """
     fields: dict[str, str] = {}
     problems: list[str] = []
+    conflicted: set[str] = set()
     for lineno, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -76,9 +86,12 @@ def parse_sysinfo(text: str) -> tuple[dict[str, str], list[str]]:
             continue
         key, value = line.split("=", 1)
         key, value = key.strip(), value.strip()
-        if key in fields and fields[key] != value:
+        if key in fields and fields[key] != value and key not in conflicted:
             problems.append(f"sidecar key {key!r} has conflicting values")
+            conflicted.add(key)
         fields[key] = value
+    for key in conflicted:
+        del fields[key]
     return fields, problems
 
 
