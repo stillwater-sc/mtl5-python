@@ -266,9 +266,10 @@ def thread_scaling(
 
     The reference is the latest multi-threaded run. The runs compared are the
     latest run for each thread count among runs of the same physical machine,
-    label, commit, build configuration and machine state (less the CPUs it ran
-    on) as the reference, so only the thread count differs. ``entries``
-    keeps the entries whose id is, or starts with, one of the given prefixes
+    label, backend (with the BLAS vendor), commit, build configuration and
+    machine state (less the CPUs it ran on) as the reference, so only the
+    thread count differs. ``entries`` keeps the entries whose id is, or starts
+    with, one of the given prefixes
     (``"blas3/gemm"`` keeps ``blas3/gemm/f64/...`` and ``blas3/gemm/f32/...``).
 
     One row per (entry, thread count), the 1-thread rows included, with
@@ -290,7 +291,17 @@ def thread_scaling(
             ["run_timestamp", "threads"], ascending=False, na_position="last", kind="stable"
         ).iloc[0]
         runs["_state"] = [_state_without_placement(con, rid) for rid in runs["run_id"]]
-        key = ["machine_fingerprint", "label", "build_config", "_state", "git_commit", "git_dirty"]
+        # The backend too: the label is "blas" for every vendor, and only the
+        # backend says which.
+        key = [
+            "machine_fingerprint",
+            "label",
+            "backend",
+            "build_config",
+            "_state",
+            "git_commit",
+            "git_dirty",
+        ]
         # As strings, so a missing value matches a missing value.
         k = runs[key].astype(str)
         same = runs[(k == k.loc[ref.name]).all(axis=1)]

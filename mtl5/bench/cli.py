@@ -72,7 +72,7 @@ def _cmd_figure(args: argparse.Namespace) -> int:
                 areas=args.area,
                 tiers=tiers,
             )
-            fig = plot.roofline(df, label_entries=args.entry or ())
+            fig = plot.roofline(df, label_entries=args.entry)
         elif args.kind == "scaling":
             df = analyze.thread_scaling(
                 db,

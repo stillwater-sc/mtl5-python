@@ -47,6 +47,7 @@ __all__ = [
     "thread_scaling",
     "rate_vs_size",
     "from_csv",
+    "read_frame",
     "provenance",
 ]
 
@@ -174,12 +175,13 @@ def _point_style(i: int) -> dict:
 
 
 def _line_style(i: int) -> dict:
+    """A colour, marker and dash, with a distinct marker and dash pair for the
+    first 49 series, so no two of them differ by colour alone."""
     n = len(style.PALETTE)
-    j = (i + i // n) % n
     return {
         "color": style.PALETTE[i % n],
-        "marker": style.MARKERS[j],
-        "linestyle": style.LINESTYLES[j],
+        "marker": style.MARKERS[(i + i // n) % n],
+        "linestyle": style.LINESTYLES[i % n],
     }
 
 
@@ -345,17 +347,26 @@ def capability_card(df) -> BenchFigure:
     return BenchFigure("card", fig, df)
 
 
-def roofline(df, *, label_entries: Sequence[str] = ()) -> BenchFigure:
+def roofline(df, *, label_entries: Sequence[str] | None = None) -> BenchFigure:
     """One run's entries on its roofline, from :func:`mtl5.bench.analyze.roofline`.
 
     Points are grouped by area. ``label_entries`` names entries to label on
     the plot, by id or by a prefix of whole segments (``"blas3/gemm"`` labels
-    ``blas3/gemm/f64/...`` but not ``blas3/gemmt/...``).
+    ``blas3/gemm/f64/...`` but not ``blas3/gemmt/...``). The selection is kept
+    in the frame as a ``labelled`` column, so a redraw from the saved frame
+    labels the same entries; ``label_entries`` given here overrides it.
     """
     if df["run_id"].nunique() != 1:
         raise ValueError("a roofline places the entries of one run")
     areas = sorted(df["area"].dropna().unique())
     _check_series(len(areas), 49, "areas")
+    df = df.copy()
+    if label_entries is not None:
+        df["labelled"] = df["entry_id"].map(lambda e: _matches(e, label_entries))
+    elif "labelled" in df:
+        df["labelled"] = df["labelled"].map(lambda v: v is True or str(v) == "True")
+    else:
+        df["labelled"] = False
     row = df.iloc[0]
     with style.house_style():
         fig = _figure(style.WIDTH_DOUBLE, 3.6)
@@ -376,7 +387,7 @@ def roofline(df, *, label_entries: Sequence[str] = ()) -> BenchFigure:
                 **_point_style(i),
             )
         for _, p in df.iterrows():
-            if _matches(p["entry_id"], label_entries):
+            if p["labelled"]:
                 ax.annotate(
                     f"{p['op']} {p['dtype']}",
                     (p["intensity"], p["gflops"]),
@@ -442,21 +453,28 @@ def rate_vs_size(df, *, max_series: int = 12) -> BenchFigure:
 
     df = df.copy()
     df["_machine"] = [m if _present(m) else "no machine" for m in df["machine"]]
+    # A series is one run's measurements of an operation: two runs of one
+    # backend (two builds, two sessions) are two lines, never one median.
     keys = sorted(
-        df[["_machine", "operation", "backend"]].drop_duplicates().itertuples(index=False)
+        df[["_machine", "operation", "backend", "run_id"]].drop_duplicates().itertuples(index=False)
     )
-    _check_series(len(keys), max_series, "series (machine, operation, backend)")
+    _check_series(len(keys), max_series, "series (machine, operation, backend, run)")
     several = len({k[0] for k in keys}) > 1
+    runs_per = {}
+    for m, op, b, _ in keys:
+        runs_per[(m, op, b)] = runs_per.get((m, op, b), 0) + 1
     units = sorted(df["unit"].dropna().unique())
     metric = df["metric"].iloc[0] if "metric" in df else "rate"
     with style.house_style():
         fig = _figure(style.WIDTH_SINGLE, 2.8)
         ax = fig.subplots()
-        for i, (machine, op, backend) in enumerate(keys):
-            mask = (df["_machine"] == machine) & (df["operation"] == op)
-            pts = df[mask & (df["backend"] == backend)]
+        for i, (machine, op, backend, run) in enumerate(keys):
+            pts = df[df["run_id"] == run]
+            pts = pts[(pts["operation"] == op) & (pts["backend"] == backend)]
             pts = pts.groupby("size", as_index=False)["value"].median().sort_values("size")
             label = f"{op} ({backend})" + (f", {machine}" if several else "")
+            if runs_per[(machine, op, backend)] > 1:
+                label += f", {_run_tag(df[df['run_id'] == run].iloc[0])}"
             ax.plot(pd.to_numeric(pts["size"]), pts["value"], label=label, **_line_style(i))
         ax.set_xscale("log", base=2)
         ax.set_xlabel("problem size n")
@@ -468,6 +486,16 @@ def rate_vs_size(df, *, max_series: int = 12) -> BenchFigure:
     return BenchFigure("rate", fig, df.drop(columns="_machine"))
 
 
+def _run_tag(row) -> str:
+    """A short name for a run in a legend: its commit, else its date, else its id."""
+    import pandas as pd
+
+    if _present(row.get("git_commit")):
+        return str(row["git_commit"])[:7]
+    t = pd.to_datetime(row.get("run_timestamp"), errors="coerce")
+    return str(t.date()) if not pd.isna(t) else f"run {str(row['run_id'])[:7]}"
+
+
 #: The figures by kind, as :func:`from_csv` and the command line name them.
 FIGURES = {
     "card": capability_card,
@@ -477,10 +505,42 @@ FIGURES = {
 }
 
 
-def from_csv(path: str | os.PathLike, kind: str, **kwargs) -> BenchFigure:
-    """Draw a figure again from the frame :meth:`BenchFigure.save` wrote."""
+# Columns that are text even when they look like numbers or like "NA": an
+# all-digit commit stays a string with its leading zeros, a machine named NA
+# stays named.
+TEXT_COLUMNS = frozenset(
+    {
+        "run_id", "machine", "machine_dir", "machine_fingerprint", "label", "backend",
+        "build_config", "state_class", "git_commit", "run_timestamp", "tier",
+        "entry_id", "area", "op", "dtype", "shape", "operation", "metric", "unit",
+        "cpu_vendor", "cpu_brand", "cpu_arch", "cpu_simd", "build_isa", "simd_backend",
+        "compiler", "compiler_version", "os_name", "os_version", "hw_fma_isa",
+        "blas_vendor",
+    }
+)  # fmt: skip
+
+
+def read_frame(path: str | os.PathLike):
+    """Read a frame :meth:`BenchFigure.save` wrote, as the figure had it.
+
+    Only an empty field is missing. The text columns stay text; every other
+    column is numeric where all its values are.
+    """
     import pandas as pd
 
+    df = pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""])
+    for col in df.columns:
+        if col in TEXT_COLUMNS:
+            continue
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except (TypeError, ValueError):
+            pass
+    return df
+
+
+def from_csv(path: str | os.PathLike, kind: str, **kwargs) -> BenchFigure:
+    """Draw a figure again from the frame :meth:`BenchFigure.save` wrote."""
     if kind not in FIGURES:
         raise ValueError(f"unknown figure {kind!r}; use one of {sorted(FIGURES)}")
-    return FIGURES[kind](pd.read_csv(path), **kwargs)
+    return FIGURES[kind](read_frame(path), **kwargs)

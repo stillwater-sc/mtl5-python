@@ -68,11 +68,11 @@ def _roundtrip(df):
     buf = io.StringIO()
     df.to_csv(buf, index=False)
     buf.seek(0)
-    return pd.read_csv(buf)
+    return plot.read_frame(buf)
 
 
 def _pinned(kind: str):
-    return pd.read_csv(PINNED / f"{kind}.csv")
+    return plot.read_frame(PINNED / f"{kind}.csv")
 
 
 def _copy_fixture(tmp_path: Path) -> Path:
@@ -203,6 +203,30 @@ def test_a_saved_figure_is_redrawn_from_its_csv(tmp_path, kind):
     again.save(tmp_path / "again", data=False)
     for fmt in ("pdf", "svg", "png"):
         assert (tmp_path / f"{kind}.{fmt}").read_bytes() == (tmp_path / f"again.{fmt}").read_bytes()
+
+
+def test_a_redraw_keeps_text_that_looks_like_a_number_or_missing(tmp_path):
+    # pandas reads "NA" as missing and "0012345678" as 12345678 by default.
+    df = _pinned("scaling")
+    df["machine"] = "NA"
+    df["git_commit"] = "0012345678"
+    fig = plot.thread_scaling(df)
+    fig.save(tmp_path / "s", ["svg"])
+    again = plot.from_csv(tmp_path / "s.csv", "scaling")
+    footer = "machine NA · commit 0012345 · 2 runs, 2026-11-12"
+    assert footer in [t.get_text() for t in again.figure.texts]
+    assert again._render("svg") == fig._render("svg")
+
+
+def test_a_redraw_keeps_the_roofline_labels(tmp_path):
+    fig = plot.roofline(_pinned("roofline"), label_entries=["blas3/gemm"])
+    fig.save(tmp_path / "r", ["svg"])
+    again = plot.from_csv(tmp_path / "r.csv", "roofline")
+    assert again._render("svg") == fig._render("svg")
+    # An explicit selection still wins over the saved one.
+    bare = plot.from_csv(tmp_path / "r.csv", "roofline", label_entries=[])
+    labels = [t.get_text() for t in bare.figure.axes[0].texts]
+    assert "gemm f64" not in labels and "gemm f32" not in labels
 
 
 def test_the_write_order_does_not_move_the_layout(tmp_path):
@@ -371,6 +395,18 @@ def test_scaling_needs_a_multithreaded_run(tmp_path):
     con.close()
 
 
+def test_scaling_does_not_pair_blas_vendors(tmp_path):
+    # Every vendor's runs are labelled "blas": only the backend tells a
+    # 1-thread OpenBLAS run from an 8-thread MKL one.
+    root = _copy_fixture(tmp_path)
+    _edit_sysinfo(root / RUN_DIR / "native-t1.json.sysinfo", blas_vendor="openblas")
+    _edit_sysinfo(root / RUN_DIR / "native-t8.json.sysinfo", blas_vendor="mkl")
+    con, _ = ingest(root, time_from_git=False)
+    with pytest.raises(LookupError, match="1-thread run"):
+        analyze.thread_scaling(con, "i7-12700k")
+    con.close()
+
+
 def test_scaling_does_not_cross_a_machine_state_change(tmp_path):
     root = _copy_fixture(tmp_path)
     _edit_sysinfo(root / RUN_DIR / "native-t1.json.sysinfo", turbo="disabled")
@@ -454,6 +490,34 @@ def test_rate_reduces_repeated_samples_to_their_median(tmp_path):
     con.close()
 
 
+def test_rate_keeps_two_runs_of_one_backend_apart(tmp_path):
+    # Two runs of one backend were merged into one median per size: rates of
+    # 10 and 30 plotted as 20, which neither run measured.
+    root = _copy_fixture(tmp_path)
+    src = root / "blas_sweep_blis.csv"
+    other = root / "blas_sweep_blis_rebuilt.csv"
+    lines = src.read_text().splitlines()
+    rows = [lines[0]]
+    for line in lines[1:]:
+        f = line.split(",")
+        f[8] = str(float(f[8]) * 3)
+        rows.append(",".join(f))
+    other.write_text("\n".join(rows) + "\n")
+    (root / "blas_sweep_blis_rebuilt.csv.sysinfo").write_text(
+        (root / "blas_sweep_blis.csv.sysinfo").read_text()
+    )
+    con, _ = ingest(root, time_from_git=False)
+    df = analyze.rate_vs_size(con, operations=["gemm"], tiers=INCOMPLETE)
+    con.close()
+    fig = plot.rate_vs_size(df)
+    lines = _lines(fig)
+    assert len(lines) == 2
+    for run in df["run_id"].unique():
+        rows = df[df["run_id"] == run].sort_values("size")
+        label = f"gemm (blis), run {run[:7]}"
+        assert list(lines[label].get_ydata()) == list(rows["value"])
+
+
 # --- style ------------------------------------------------------------------------------------
 
 
@@ -469,6 +533,14 @@ def test_series_are_distinct_in_grayscale():
 
 def test_point_styles_are_distinct_past_the_palette():
     pairs = {tuple(plot._point_style(i).values()) for i in range(49)}
+    assert len(pairs) == 49
+
+
+def test_line_styles_never_differ_by_colour_alone():
+    # Series i and i + 7 shared a marker and a dash, so in gray they were one.
+    pairs = {
+        (plot._line_style(i)["marker"], str(plot._line_style(i)["linestyle"])) for i in range(49)
+    }
     assert len(pairs) == 49
 
 
