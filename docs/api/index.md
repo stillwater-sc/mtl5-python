@@ -171,3 +171,50 @@ table, one row per file row and metric.
    Format
    FORMATS
 ```
+
+### Figures
+
+The core figures are drawn in two steps. `mtl5.bench.analyze` reads the
+database into a DataFrame with one row per plotted point. `mtl5.bench.plot`
+then draws a figure from that frame and nothing else. A figure's
+{meth}`~mtl5.bench.plot.BenchFigure.save` writes vector PDF and SVG, a 300 dpi
+PNG and the frame as CSV, and {func}`~mtl5.bench.plot.from_csv` draws the same
+figure, byte for byte, from that CSV. Every figure carries a provenance footer
+(machines, commits, runs, dates), which warns when a run's provenance is
+incomplete. `mtl5-bench figure {card,roofline,scaling,rate}` wraps both steps.
+
+```{eval-rst}
+.. currentmodule:: mtl5.bench.analyze
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   capability
+   roofline
+   thread_scaling
+   rate_vs_size
+
+.. currentmodule:: mtl5.bench.plot
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   BenchFigure
+   capability_card
+   roofline
+   thread_scaling
+   rate_vs_size
+   from_csv
+   provenance
+
+.. currentmodule:: mtl5.bench.style
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   house_style
+   save
+```

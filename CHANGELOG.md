@@ -15,6 +15,38 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Benchmark figures in `mtl5.bench`** (#121, milestone P3).
+  - Four core figures:
+    - a capability card: CPU, build, FMA peaks, bandwidths and the roofline
+      they make;
+    - a roofline with every entry of a run placed on it;
+    - speedup against threads;
+    - a rate against problem size, from the `bench_all` sweeps.
+  - **Two steps.** `mtl5.bench.analyze` returns a DataFrame per question,
+    and `mtl5.bench.plot` draws a figure from that frame and nothing else.
+    `BenchFigure.save` writes PDF, SVG, PNG and the frame as CSV, and
+    `plot.from_csv` redraws the same files, byte for byte, from the CSV. The
+    tests compare data, not pixels: the analysis reproduces pinned frames,
+    each figure's artists hold the frame's numbers, and redraws are
+    byte-identical.
+  - **House style** (`mtl5.bench.style`):
+    - colour: Okabe-Ito without its yellow;
+    - grayscale: a marker and a dash pattern per series;
+    - column- and page-width sizes;
+    - TrueType text in the PDFs;
+    - no timestamps in the files.
+  - **Provenance footer** on every figure: machines, commits, runs and dates,
+    plus `INCOMPLETE PROVENANCE` when a run has gaps.
+  - **Run selection.** Incomplete runs are read only on request
+    (`tiers=`, or `--include-incomplete`).
+  - **Thread scaling** compares the latest multi-threaded run with a 1-thread
+    run of the same commit, build and machine state. Pinning is left out of
+    the state: a 1- and an 8-thread run differ in their CPUs by design.
+  - **Layout.** The layout is fixed once when a figure is built. Left to
+    constrained layout, writing a PNG before an SVG moved the SVG's axes.
+  - **CLI:** `mtl5-bench figure {card,roofline,scaling,rate}`. The `bench`
+    extra now includes matplotlib.
+
 - **Legacy benchmark formats in `mtl5.bench`** (#121, milestone P2).
   - MTL5's CSV harnesses and `bench_blas.py --json` are ingested alongside
     `mtl5_bench`. Each dialect is a declarative `Format` in

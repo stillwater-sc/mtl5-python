@@ -1,4 +1,4 @@
-"""Benchmark data: ingestion, provenance and (in later milestones) analysis.
+"""Benchmark data: ingestion, provenance, analysis and figures.
 
 This subpackage reads the benchmark results MTL5 commits under
 ``benchmarks/data`` into a DuckDB database, with the provenance that decides
@@ -30,10 +30,18 @@ per file row and metric; :mod:`mtl5.bench.formats` describes each dialect.
 A legacy file outside a timestamp directory takes its run time from the git
 commit that added it.
 
-The submodules ``sysinfo``, ``schema``, ``formats`` and ``ingest`` hold the
-details. Only
-the standard library is imported here; DuckDB and pandas are imported when a
-function needs them.
+Figures are drawn in two steps: :mod:`mtl5.bench.analyze` reads the database
+into a DataFrame per question, and :mod:`mtl5.bench.plot` draws a figure from
+that frame alone, in the house style of :mod:`mtl5.bench.style`::
+
+    from mtl5.bench import analyze, plot
+    df = analyze.thread_scaling("bench.duckdb", "i7-12700k", entries=["blas3/gemm"])
+    plot.thread_scaling(df).save("scaling")   # scaling.pdf/.svg/.png and .csv
+
+The submodules ``sysinfo``, ``schema``, ``formats``, ``ingest``, ``analyze``,
+``plot`` and ``style`` hold the details. Only the standard library is
+imported here; DuckDB, pandas and matplotlib are imported when a function
+needs them.
 """
 
 from .ingest import INGEST_STATUSES, FileOutcome, IngestReport, connect, ingest
