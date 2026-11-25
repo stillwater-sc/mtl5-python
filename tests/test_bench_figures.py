@@ -421,6 +421,20 @@ def test_scaling_with_no_passing_results_is_empty_not_an_error(tmp_path):
     assert df.empty and {"threads", "speedup", "efficiency"} <= set(df.columns)
 
 
+def test_scaling_needs_a_recorded_commit(tmp_path):
+    # As strings, two missing commits matched each other, so incomplete runs
+    # with no commit could be compared across different code.
+    root = _copy_fixture(tmp_path)
+    for name in ("native-t1.json.sysinfo", "native-t8.json.sysinfo"):
+        _edit_sysinfo(root / RUN_DIR / name, git_commit="")
+    con, _ = ingest(root, time_from_git=False)
+    tiers = con.execute("SELECT tier FROM runs WHERE threads IS NOT NULL").fetchall()
+    assert tiers == [("incomplete",), ("incomplete",)]
+    with pytest.raises(LookupError, match="no recorded commit"):
+        analyze.thread_scaling(con, "i7-12700k", tiers=INCOMPLETE)
+    con.close()
+
+
 def test_scaling_does_not_pair_blas_vendors(tmp_path):
     # Every vendor's runs are labelled "blas": only the backend tells a
     # 1-thread OpenBLAS run from an 8-thread MKL one.

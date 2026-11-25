@@ -293,6 +293,13 @@ def thread_scaling(
         ref = multi.sort_values(
             ["run_timestamp", "threads"], ascending=False, na_position="last", kind="stable"
         ).iloc[0]
+        commit = ref["git_commit"]
+        if not isinstance(commit, str) or not commit.strip():
+            # Two runs with no recorded commit may run different code.
+            raise LookupError(
+                f"the latest multi-threaded {machine!r} run ({ref['run_id']}) has no "
+                "recorded commit, so no 1-thread run can be shown to run the same code"
+            )
         runs["_state"] = [_state_without_placement(con, rid) for rid in runs["run_id"]]
         # The backend too: the label is "blas" for every vendor, and only the
         # backend says which.
