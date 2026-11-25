@@ -749,6 +749,7 @@ def trend(
     unit = trends._one(df, "unit") if "unit" in df else "value"
     pts = trends.points(df)
     cps = trends.change_points(df, k=k, min_effect=min_effect)
+    assigned = trends._assign(df)
     labels = _entry_labels(entries)
     colors = {"regression": style.PALETTE[1], "improvement": style.PALETTE[2]}
     with style.house_style():
@@ -756,10 +757,10 @@ def trend(
         axes = fig.subplots(len(entries), 1, squeeze=False)[:, 0]
         for ax, entry in zip(axes, entries):
             p = pts[pts["entry_id"] == entry].reset_index(drop=True)
-            runs = df[df["entry_id"] == entry]
-            x_of = {(r.series_key, r.git_commit): i for i, r in enumerate(p.itertuples())}
+            runs = assigned[assigned["entry_id"] == entry]
+            x_of = {pt: i for i, pt in enumerate(p["point"])}
             # Every run, faintly: the spread the intervals summarize.
-            xs = [x_of[(r.series_key, r.git_commit)] for r in runs.itertuples()]
+            xs = [x_of[pt] for pt in runs["_point"]]
             ax.plot(xs, runs["value"], linestyle="", marker="o", markersize=2.2,
                     color="#9a9a9a", zorder=2)  # fmt: skip
             for seg, g in p.groupby("segment"):
@@ -781,10 +782,7 @@ def trend(
                 bounds = [0, *cuts, len(g)]
                 for a, b in zip(bounds, bounds[1:]):
                     part = g.iloc[a:b]
-                    sel = runs[
-                        runs["git_commit"].isin(part["git_commit"])
-                        & (runs["series_key"] == part["series_key"].iloc[0])
-                    ]
+                    sel = runs[runs["_point"].isin(part["point"])]
                     level = math.exp(float(np.log(sel["value"].astype(float)).mean()))
                     ax.plot([part.index[0] - 0.3, part.index[-1] + 0.3], [level, level],
                             color=_point_style(int(seg))["color"], linestyle="-",

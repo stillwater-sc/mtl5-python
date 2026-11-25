@@ -132,6 +132,47 @@ def test_several_change_points():
     assert list(cps["kind"]) == ["regression", "improvement"]
 
 
+def _levels(levels, *, reps=2, noise=0.0, seed=0):
+    """A series at the given level per commit, with ``reps`` runs each."""
+    steps, prev = {}, 100.0
+    for c, level in enumerate(levels):
+        if level != prev:
+            steps[c] = level / prev
+        prev = level
+    return synth(steps, commits=len(levels), reps=reps, noise=noise, seed=seed)
+
+
+def test_a_reported_step_is_between_adjacent_stretches():
+    # The 80 -> 120 step was found first, against the whole 100, 80 stretch,
+    # and reported as +34% instead of the +50% the level lines show.
+    cps = trends.change_points(_levels([100, 100, 80, 80, 120, 120], noise=0.001, seed=1))
+    assert list(cps["ratio"]) == pytest.approx([0.8, 1.5], rel=0.01)
+    assert list(cps["kind"]) == ["regression", "improvement"]
+
+
+def test_identical_repeats_still_place_the_step_right():
+    # With zero noise every t was infinite and the first split won, so one
+    # step became two change points, the first at the wrong commit.
+    cps = trends.change_points(_levels([100, 100, 80, 80]))
+    assert len(cps) == 1
+    assert cps.iloc[0]["after"][:2] == "02" and cps.iloc[0]["ratio"] == pytest.approx(0.8)
+    assert cps.iloc[0]["t"] == -math.inf
+    assert len(trends.change_points(_levels([100, 100, 100]))) == 0
+
+
+def test_a_rerun_after_another_series_is_a_new_point():
+    # Commit 00 ran in series K1, then 01 in K2, then 00 again in K1. The
+    # rerun was merged into the first point, and the series never returned.
+    df = synth(commits=2, reps=2, keys=lambda c: f"K{c + 1}", build=lambda c: f"b{c}")
+    rerun = df[df["git_commit"].str.startswith("00")].copy()
+    rerun["run_timestamp"] += pd.Timedelta(days=5)
+    rerun["run_id"] += "x"
+    pts = trends.points(pd.concat([df, rerun], ignore_index=True))
+    assert list(pts["git_commit"].str[:2]) == ["00", "01", "00"]
+    assert list(pts["segment"]) == [0, 1, 2] and list(pts["n"]) == [2, 2, 2]
+    assert list(pts["break_fields"]) == ["", "build_config", "build_config"]
+
+
 def test_min_effect_holds_back_a_precise_but_tiny_step():
     # 0.1% noise makes a 1% step overwhelming statistically, yet small.
     df = synth({6: 0.99}, noise=0.001)

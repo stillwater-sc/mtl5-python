@@ -97,16 +97,39 @@ def _logs(df):
     return np.log(values)
 
 
-def _commit_order(df):
-    """The frame's commits in time order, by their first run."""
-    first = df.groupby("git_commit")["run_timestamp"].min().sort_values(kind="stable")
-    return list(first.index)
+def _assign(df):
+    """The runs in the order they happened, each with its segment and point.
+
+    Per entry, runs are ordered by time (then run id). A run whose series
+    key differs from the previous run's starts a new segment, even if its
+    commit already has a point earlier on; a point is a stretch of
+    consecutive runs of one segment at one commit. So a rerun of an older
+    commit after another series ran joins neither that series nor its own
+    earlier point.
+    """
+    d = df.assign(_log=_logs(df), _order=range(len(df)))
+    d = d.sort_values(["entry_id", "run_timestamp", "run_id", "_order"], kind="stable")
+    segments, pts = [], []
+    prev = None
+    seg = pt = -1
+    for entry, key, commit in zip(d["entry_id"], d["series_key"], d["git_commit"]):
+        if prev is None or entry != prev[0]:
+            seg = pt = -1
+        if prev is None or entry != prev[0] or key != prev[1]:
+            seg += 1
+            pt += 1
+        elif commit != prev[2]:
+            pt += 1
+        segments.append(seg)
+        pts.append(pt)
+        prev = (entry, key, commit)
+    return d.assign(_segment=segments, _point=pts)
 
 
 def noise(df):
     """Run-to-run noise per (entry, series): ``s`` on the log scale, ``dof``, ``source``.
 
-    ``source`` is ``"repeats"`` when the runs at one commit give the degrees
+    ``source`` is ``"repeats"`` when the runs at one point give the degrees
     of freedom (two or more, or one when nothing better exists),
     ``"differences"`` when successive points had to stand in, and ``"none"``
     when neither is possible.
@@ -115,23 +138,22 @@ def noise(df):
     import pandas as pd
 
     rows = []
-    d = df.assign(_log=_logs(df))
+    d = _assign(df)
     for (entry, key), g in d.groupby(["entry_id", "series_key"], sort=True):
-        within = g.groupby("git_commit")["_log"]
+        within = g.groupby("_point")["_log"]
         dof = int((within.count() - 1).clip(lower=0).sum())
         ss = float(within.apply(lambda x: ((x - x.mean()) ** 2).sum()).sum())
         if dof >= 2:
             rows.append((entry, key, math.sqrt(ss / dof), dof, "repeats"))
             continue
-        means = within.mean()[[c for c in _commit_order(g)]]
-        diffs = np.diff(means.to_numpy())
+        diffs = np.diff(within.mean().sort_index().to_numpy())
         if len(diffs) >= 2:
             # Median absolute difference: robust to the few steps a trend has.
             # A difference of two noisy means has sqrt(2) times their noise.
             s = 1.4826 * float(np.median(np.abs(diffs))) / math.sqrt(2)
             rows.append((entry, key, s, len(diffs) - 1, "differences"))
         elif dof == 1:
-            # One commit's pair of sessions: an estimate, with a wide interval.
+            # One point's pair of sessions: an estimate, with a wide interval.
             rows.append((entry, key, math.sqrt(ss), 1, "repeats"))
         else:
             rows.append((entry, key, float("nan"), 0, "none"))
@@ -139,37 +161,29 @@ def noise(df):
 
 
 def points(df):
-    """One row per (entry, series, commit), in time order per entry.
+    """One row per point, in the order the runs happened, per entry.
 
-    ``value`` is the geometric mean of the commit's runs, ``ci_lo`` and
-    ``ci_hi`` its 95% confidence interval (missing when the noise is
-    unknown), ``n`` the run count, ``segment`` the index of the unbroken
-    stretch of the entry's history it belongs to, and ``break_fields`` the
-    key fields that changed at the first point of a new stretch.
+    A point is consecutive runs of one series at one commit. ``value`` is
+    the geometric mean of its runs, ``ci_lo`` and ``ci_hi`` its 95%
+    confidence interval (missing when the noise is unknown), ``n`` the run
+    count, ``segment`` the index of the unbroken stretch of the entry's
+    history it belongs to, ``point`` its index in the entry's history, and
+    ``break_fields`` the key fields that changed at the first point of a new
+    stretch.
     """
     import numpy as np
     import pandas as pd
 
     nz = noise(df).set_index(["entry_id", "series_key"])
-    d = df.assign(_log=_logs(df))
+    d = _assign(df)
     rows = []
     for entry, e in d.groupby("entry_id", sort=True):
-        order = {c: i for i, c in enumerate(_commit_order(e))}
-        grouped = e.groupby(["series_key", "git_commit"], sort=False)
-        pts = []
-        for (key, commit), g in grouped:
-            pts.append((order[commit], g["run_timestamp"].min(), key, commit, g))
-        pts.sort(key=lambda p: (p[1], p[0], p[2]))
-        segment, prev = -1, None
-        for _, when, key, commit, g in pts:
+        prev = None
+        for point, g in e.groupby("_point", sort=True):
             first = g.iloc[0]
-            if prev is None or key != prev[0]:
-                segment += 1
-                changed = (
-                    []
-                    if prev is None
-                    else [f for f in BREAK_FIELDS if f in g and str(first[f]) != str(prev[1][f])]
-                )
+            key = first["series_key"]
+            if prev is not None and first["_segment"] != prev["_segment"]:
+                changed = [f for f in BREAK_FIELDS if f in g and str(first[f]) != str(prev[f])]
             else:
                 changed = []
             n = len(g)
@@ -184,9 +198,10 @@ def points(df):
                 {
                     "entry_id": entry,
                     "series_key": key,
-                    "segment": segment,
-                    "git_commit": commit,
-                    "run_timestamp": when,
+                    "segment": int(first["_segment"]),
+                    "point": int(point),
+                    "git_commit": first["git_commit"],
+                    "run_timestamp": g["run_timestamp"].min(),
                     "n": n,
                     "value": math.exp(mean),
                     "ci_lo": lo,
@@ -195,7 +210,7 @@ def points(df):
                     "machine": first.get("machine"),
                 }
             )
-            prev = (key, first)
+            prev = first
     out = pd.DataFrame(rows)
     if out.empty:
         return out
@@ -203,36 +218,45 @@ def points(df):
     return out
 
 
-def _split(logs: Sequence, s: float, k: float, min_effect: float, lo: int, hi: int, found: list):
-    """Binary segmentation of points ``lo..hi-1``; each point is a list of logs."""
+def _split(logs: Sequence, s: float, k: float, min_effect: float, lo: int, hi: int, cuts: list):
+    """Binary segmentation of points ``lo..hi-1``; each point is a list of logs.
+
+    Candidates are ranked by the step over its scale, ``|step| / sqrt(1/nl +
+    1/nr)``: the same order as ``|t|`` when the noise is positive, and still
+    an order when it is zero (identical repeats make every ``t`` infinite).
+    """
     best = None
     for c in range(lo + 1, hi):
         left = [x for p in logs[lo:c] for x in p]
         right = [x for p in logs[c:hi] for x in p]
         step = sum(right) / len(right) - sum(left) / len(left)
-        se = s * math.sqrt(1 / len(left) + 1 / len(right))
-        t = step / se if se > 0 else math.inf * (1 if step > 0 else -1 if step < 0 else 0)
-        if t != t:  # 0 / 0: no step and no noise
-            continue
-        if best is None or abs(t) > abs(best[1]):
-            best = (c, t, step)
+        scale = math.sqrt(1 / len(left) + 1 / len(right))
+        rank = abs(step) / scale
+        if best is None or rank > best[1]:
+            best = (c, rank, step, scale)
     if best is None:
         return
-    c, t, step = best
-    if abs(t) >= k and abs(step) >= math.log1p(min_effect):
-        found.append((c, t, step))
-        _split(logs, s, k, min_effect, lo, c, found)
-        _split(logs, s, k, min_effect, c, hi, found)
+    c, rank, step, scale = best
+    if step == 0:
+        return
+    t = math.inf if s == 0 else rank / s
+    if t >= k and abs(step) >= math.log1p(min_effect):
+        cuts.append(c)
+        _split(logs, s, k, min_effect, lo, c, cuts)
+        _split(logs, s, k, min_effect, c, hi, cuts)
 
 
 def change_points(df, *, k: float = 4.0, min_effect: float = 0.02):
     """The change points of every series, one row each.
 
-    ``before`` and ``after`` are the commits either side of the step,
-    ``ratio`` the after/before ratio of the geometric means of the two
-    stretches the step separates, ``t`` the step's t statistic, and
-    ``kind`` ``"regression"`` or ``"improvement"`` by the metric's direction
-    (:data:`HIGHER_IS_BETTER`). A series whose noise is unknown has none.
+    ``before`` and ``after`` are the commits either side of the step.
+    ``ratio`` and ``t`` describe the step between the two **adjacent**
+    stretches the change point separates, after all change points are
+    found: the after/before ratio of their geometric means, and its t
+    statistic (infinite when the noise is zero). ``index`` is the position of
+    the ``after`` point within its segment. ``kind`` is ``"regression"`` or
+    ``"improvement"`` by the metric's direction (:data:`HIGHER_IS_BETTER`).
+    A series whose noise is unknown has none.
     """
     import pandas as pd
 
@@ -241,30 +265,36 @@ def change_points(df, *, k: float = 4.0, min_effect: float = 0.02):
     metric = _one(df, "metric")
     higher = metric in HIGHER_IS_BETTER
     nz = noise(df).set_index(["entry_id", "series_key"])
-    pts = points(df)
-    d = df.assign(_log=_logs(df))
+    d = _assign(df)
     rows = []
-    for (entry, segment), seg in pts.groupby(["entry_id", "segment"], sort=True):
+    for (entry, segment), seg in d.groupby(["entry_id", "_segment"], sort=True):
         key = seg["series_key"].iloc[0]
         s = float(nz.loc[(entry, key), "s"])
-        if math.isnan(s) or len(seg) < 2:
+        groups = list(seg.groupby("_point", sort=True))
+        if math.isnan(s) or len(groups) < 2:
             continue
-        runs = d[(d["entry_id"] == entry) & (d["series_key"] == key)]
-        logs = [list(runs.loc[runs["git_commit"] == c, "_log"]) for c in seg["git_commit"]]
-        found: list = []
-        _split(logs, s, k, min_effect, 0, len(logs), found)
-        commits = list(seg["git_commit"])
-        for c, t, step in sorted(found):
+        logs = [list(g["_log"]) for _, g in groups]
+        commits = [g["git_commit"].iloc[0] for _, g in groups]
+        cuts: list = []
+        _split(logs, s, k, min_effect, 0, len(logs), cuts)
+        cuts.sort()
+        bounds = [0, *cuts, len(logs)]
+        for i, c in enumerate(cuts):
+            left = [x for p in logs[bounds[i] : c] for x in p]
+            right = [x for p in logs[c : bounds[i + 2]] for x in p]
+            step = sum(right) / len(right) - sum(left) / len(left)
+            scale = math.sqrt(1 / len(left) + 1 / len(right))
+            t = math.copysign(math.inf, step) if s == 0 else step / (s * scale)
             ratio = math.exp(step)
             worse = ratio < 1 if higher else ratio > 1
             rows.append(
                 {
                     "entry_id": entry,
                     "series_key": key,
-                    "segment": segment,
+                    "segment": int(segment),
                     "before": commits[c - 1],
                     "after": commits[c],
-                    "index": int(seg.index[c] - seg.index[0]),
+                    "index": c,
                     "ratio": ratio,
                     "t": t,
                     "kind": "regression" if worse else "improvement",
