@@ -169,6 +169,12 @@ def test_threads_must_be_max_or_a_positive_integer(db, threads):
         analyze.machines(db, threads=threads)
 
 
+def test_a_named_machine_without_that_thread_count_is_an_error(db):
+    # It was dropped from the comparison without a word.
+    with pytest.raises(LookupError, match="no 1-thread run of jetson-orin"):
+        analyze.machines(db, threads=1, machines=["i7-12700k", "jetson-orin"])
+
+
 def test_no_machine_ran_the_thread_count(db):
     with pytest.raises(LookupError, match="threads=3"):
         analyze.machines(db, threads=3)
@@ -359,6 +365,28 @@ def test_balance_leaves_out_runs_without_probes():
     df["bandwidth_gbytes_per_s"] = None
     with pytest.raises(ValueError, match="nothing to plot"):
         plot.machine_balance(df)
+
+
+def test_balance_does_not_mix_rows_that_share_an_index_label():
+    df = _pinned("machines")
+    expected = df.groupby("machine")["bandwidth_gbytes_per_s"].median()
+    df.index = [0] * len(df)
+    ax = plot.machine_balance(df).figure.axes[0]
+    labels = plot._machine_labels(df)
+    for m, label in labels.items():
+        (c,) = [c for c in ax.containers if c.get_label() == label]
+        assert c.lines[0].get_xdata()[0] == pytest.approx(expected[m])
+
+
+def test_balance_redraws_at_its_saved_precision(tmp_path):
+    fig = plot.machine_balance(_pinned("machines"), precision="f32")
+    fig.save(tmp_path / "b", ["svg"])
+    again = plot.from_csv(tmp_path / "b.csv", "balance")
+    assert again.figure.axes[0].get_ylabel() == "f32 FMA peak (GFLOP/s)"
+    assert again._render("svg") == fig._render("svg")
+    # An explicit precision still wins over the saved one.
+    f64 = plot.from_csv(tmp_path / "b.csv", "balance", precision="f64")
+    assert f64.figure.axes[0].get_ylabel() == "f64 FMA peak (GFLOP/s)"
 
 
 def test_compare_table_keeps_its_unit():

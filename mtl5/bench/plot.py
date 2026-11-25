@@ -524,7 +524,7 @@ def _machine_labels(df) -> dict[str, str]:
     }
 
 
-def machine_balance(df, *, precision: str = "f64", max_series: int = 12) -> BenchFigure:
+def machine_balance(df, *, precision: str | None = None, max_series: int = 12) -> BenchFigure:
     """FMA peak against bandwidth per machine, from :func:`mtl5.bench.analyze.machines`.
 
     Each machine is the median of its runs, with bars from the least to the
@@ -532,10 +532,16 @@ def machine_balance(df, *, precision: str = "f64", max_series: int = 12) -> Benc
     a machine on the ``4 FLOP/byte`` line needs a kernel to do 4 FLOP per
     byte moved before its FMA peak, not its memory, is the limit (its ridge
     point). Runs without a positive peak and bandwidth are left off the axes,
-    and a machine with no such run is named in the title.
+    and a machine with no such run is named in the title. ``precision`` is
+    kept in the frame as a column, so a redraw from the saved CSV uses it.
     """
     import numpy as np
 
+    if precision is None:
+        # The frame keeps the precision it was drawn at, so a redraw from the
+        # saved CSV shows the same peaks.
+        saved = sorted(set(df["precision"].dropna())) if "precision" in df else []
+        precision = saved[0] if len(saved) == 1 else "f64"
     if precision not in ("f64", "f32"):
         raise ValueError(f"precision must be 'f64' or 'f32', not {precision!r}")
     peak_col = f"fma_peak_{precision}_gflops"
@@ -544,7 +550,10 @@ def machine_balance(df, *, precision: str = "f64", max_series: int = 12) -> Benc
             raise ValueError(f"the frame has no {col} column")
     import pandas as pd
 
-    df = df.copy()  # the figure keeps the frame it was drawn from
+    # A copy the figure keeps, with a fresh index: rows are looked up by label
+    # below, and a repeated label would mix two machines' probes.
+    df = df.copy().reset_index(drop=True)
+    df["precision"] = precision
     # Only runs with both probes, positive and finite, go on a log-log plot.
     x_all = pd.to_numeric(df["bandwidth_gbytes_per_s"], errors="coerce")
     y_all = pd.to_numeric(df[peak_col], errors="coerce")

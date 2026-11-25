@@ -543,6 +543,16 @@ def _sessions(
         runs = runs[runs["threads"] == most]
     else:
         runs = runs[runs["threads"] == threads]
+        if machines is not None:
+            # A named machine with runs at other thread counts only would
+            # otherwise drop out of the comparison without a word.
+            names = runs[["machine", "machine_dir", "machine_fingerprint"]].stack().dropna()
+            absent = set(machines) - set(names)
+            if absent:
+                raise LookupError(
+                    f"no {threads}-thread run of {', '.join(sorted(absent))} with a "
+                    "recorded commit and a clean tree"
+                )
     if runs.empty:
         raise LookupError(
             f"no {'/'.join(tiers)} mtl5-bench run with label={label!r}, threads={threads} "
