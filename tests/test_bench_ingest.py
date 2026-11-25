@@ -329,6 +329,12 @@ class TestRejected:
         assert _status(report, I7_A).status == "ingested"
         assert _scalar(con, "SELECT count(*) FROM results WHERE samples IS NULL") == 1
 
+    def test_run_json_without_a_schema(self, tree):
+        doc = _load(tree, I7_A)
+        del doc["schema"]
+        _dump(tree, I7_A, doc)
+        assert self._rejected(tree) == "missing field 'schema'"
+
     def test_non_object_json(self, tree):
         (tree / I7_A).write_text("[]")
         assert self._rejected(tree) == "the JSON is not an object"
@@ -368,7 +374,7 @@ class TestOtherFiles:
         (tree / "i7-12700k" / "mtl5_bench" / "20261111T190041Z" / "summary.md").write_text("# s\n")
         (tree / "gemm.png").write_bytes(b"\x89PNG")
         (tree / ".sidecar-exempt").write_text("# none\n")
-        (tree / "bench_blas.json").write_text('{"results": []}')
+        (tree / "bench_blas.json").write_text('{"meta": {}, "results": []}')
         _, report = bench.ingest(tree)
         got = {o.path: (o.kind, o.status) for o in report.outcomes}
         assert got["blas_sweep_mkl.csv"] == ("csv", "deferred")
@@ -385,12 +391,25 @@ class TestOtherFiles:
             (tree / name).write_text("{}")
         except (OSError, UnicodeEncodeError):
             pytest.skip("this file system refuses non-UTF-8 names")
+        # A valid name spelling the escape literally coexists with it.
+        (tree / "run-\\xff.json").write_text("{}")
         con, report = bench.ingest(tree)
-        (o,) = [o for o in report.outcomes if o.path.startswith("run-")]
-        assert (o.path, o.status) == ("run-\\xff.json", "rejected")
+        (o,) = [o for o in report.outcomes if o.path.startswith("/non-utf8/")]
+        assert o.path == "/non-utf8/" + b"run-\xff.json".hex()
+        assert o.reasons == ["the file name is not UTF-8: run-\\xff.json"]
+        assert _status(report, "run-\\xff.json").status == "rejected"
         assert report.counts()["ingested"] == 3
         con, report = bench.ingest(tree, con)
         assert report.new_rows == 0
+        # Removing either is recorded on its own.
+        (tree / name).unlink()
+        con, report = bench.ingest(tree, con)
+        assert [o.path for o in report.outcomes if o.status == "removed"] == [
+            "/non-utf8/" + b"run-\xff.json".hex()
+        ]
+        (tree / "run-\\xff.json").unlink()
+        con, report = bench.ingest(tree, con)
+        assert [o.path for o in report.outcomes if o.status == "removed"] == ["run-\\xff.json"]
 
     def test_hidden_directories_are_not_walked(self, tree):
         (tree / ".git").mkdir()
@@ -522,6 +541,43 @@ class TestHistory:
             bench.connect(other)
         # The failed connect closed its connection: a read-only open works.
         duckdb.connect(str(other), read_only=True).close()
+
+    def test_a_foreign_database_without_meta_is_left_alone(self, tmp_path):
+        other = tmp_path / "other.duckdb"
+        c = duckdb.connect(str(other))
+        c.execute("CREATE TABLE important AS SELECT 42 AS x")
+        c.close()
+        with pytest.raises(RuntimeError, match="did not create"):
+            bench.connect(other)
+        with pytest.raises(ValueError, match="not an mtl5 benchmark database"):
+            bench.connect(other, rebuild=True)
+        c = duckdb.connect(str(other), read_only=True)
+        assert c.execute("SELECT x FROM important").fetchone() == (42,)
+        assert c.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'meta'"
+        ).fetchone() == (0,)
+        c.close()
+
+    def test_unchanged_ingest_still_checks_the_generation(self, tree, monkeypatch):
+        ing = sys.modules["mtl5.bench.ingest"]
+        con, _ = bench.ingest(tree)
+        real_walk = ing._walk
+        raced = []
+
+        def walk_and_race(root, exclude):
+            paths = real_walk(root, exclude)
+            if not raced:
+                raced.append(True)
+                (tree / JETSON).unlink()
+                (tree / (JETSON + ".sysinfo")).unlink()
+                bench.ingest(tree, con.cursor())  # commits the removal
+                shutil.copy(FIXTURES / JETSON, tree / JETSON)
+                shutil.copy(FIXTURES / (JETSON + ".sysinfo"), tree / (JETSON + ".sysinfo"))
+            return paths
+
+        monkeypatch.setattr(ing, "_walk", walk_and_race)
+        with pytest.raises(RuntimeError, match="changed during this ingest"):
+            bench.ingest(tree, con)
 
     def test_old_schema_reports_the_version_not_a_binder_error(self, tmp_path):
         db = tmp_path / "old.duckdb"
@@ -723,6 +779,16 @@ class TestComparabilityKey:
         )
         assert n == 0
         assert _scalar(con, "SELECT max(definition_version) FROM entry_definitions") == 2
+        # Both points are still trend data, as two series of one point each.
+        first = _load(tree, I7_A)["results"][0]
+        eid = "/".join(first[k] for k in ("area", "op", "dtype", "shape"))
+        rows = con.execute(
+            "SELECT definition_version, series_key FROM trend_results "
+            "WHERE machine = 'i7-12700k' AND entry_id = ? ORDER BY 1",
+            [eid],
+        ).fetchall()
+        assert [v for v, _ in rows] == [0, 2]
+        assert rows[0][1] != rows[1][1]
 
     @pytest.mark.parametrize("check", ["missing", "failed"])
     def test_result_without_a_passing_check_is_excluded_from_trends(self, tree, check):

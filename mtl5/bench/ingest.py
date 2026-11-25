@@ -187,10 +187,18 @@ def connect(db: str | os.PathLike = ":memory:", *, rebuild: bool = False):
 
 
 def _initialize(con, path: str) -> None:
-    has_meta = con.execute(
-        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'meta'"
-    ).fetchone()[0]
-    if has_meta:
+    tables = {
+        name
+        for (name,) in con.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_catalog = current_database()"
+        ).fetchall()
+    }
+    if tables and "meta" not in tables:
+        # Someone else's database: installing the schema would mark it as
+        # ours, and a later --rebuild would then delete it.
+        raise RuntimeError(f"{path} is a DuckDB database this package did not create")
+    if tables:
         meta = dict(con.execute("SELECT key, value FROM meta").fetchall())
         if meta.get("application") != _APPLICATION:
             raise RuntimeError(f"{path} is a DuckDB database this package did not create")
@@ -202,11 +210,19 @@ def _initialize(con, path: str) -> None:
             )
         con.execute(DDL)
         return
-    con.execute(DDL)
-    con.execute(
-        "INSERT INTO meta VALUES ('application', ?), ('schema_version', ?)",
-        [_APPLICATION, str(SCHEMA_VERSION)],
-    )
+    # A new database: the schema and the marker commit together, so an
+    # interrupted first open leaves nothing a retry would call foreign.
+    con.execute("BEGIN TRANSACTION")
+    try:
+        con.execute(DDL)
+        con.execute(
+            "INSERT INTO meta VALUES ('application', ?), ('schema_version', ?)",
+            [_APPLICATION, str(SCHEMA_VERSION)],
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
 
 
 # --------------------------------------------------------------------------
@@ -675,11 +691,19 @@ def _ingest(root_path: Path, con) -> IngestReport:
         if not _is_utf8(rel):
             # Python carries the undecodable bytes as surrogates, which
             # neither a hash input nor a VARCHAR accepts. The file is
-            # accounted for under an escaped name instead of aborting.
-            shown = os.fsencode(rel).decode("utf-8", "backslashreplace")
+            # accounted for under a key no walked path can have (walked paths
+            # never start with '/'), lossless because it is the bytes in hex;
+            # the reason shows the escaped name.
+            raw = os.fsencode(rel)
+            shown = raw.decode("utf-8", "backslashreplace")
             record(
-                FileOutcome(shown, "other", "rejected", ["the file name is not UTF-8"]),
-                _sha256(os.fsencode(rel), full.read_bytes()),
+                FileOutcome(
+                    f"/non-utf8/{raw.hex()}",
+                    "other",
+                    "rejected",
+                    [f"the file name is not UTF-8: {shown}"],
+                ),
+                _sha256(raw, full.read_bytes()),
             )
             continue
         classified = _classify(rel, path_set)
@@ -716,12 +740,12 @@ def _ingest(root_path: Path, con) -> IngestReport:
             )
             continue
         if "schema" not in doc:
-            record(
-                FileOutcome(
-                    rel, "json", "deferred", ["JSON without a schema field (bench_blas.py: P2)"]
-                ),
-                content_hash,
-            )
+            if "meta" in doc and "probes" not in doc:
+                # bench_blas.py --json writes {"meta": ..., "results": ...}.
+                o = FileOutcome(rel, "json", "deferred", ["bench_blas.py JSON is milestone P2"])
+            else:
+                o = FileOutcome(rel, "json", "rejected", ["missing field 'schema'"])
+            record(o, content_hash)
             continue
 
         if run_id in known_runs:
@@ -814,6 +838,10 @@ def _write(
     generation: int,
 ) -> None:
     if not file_rows and not bind_root:
+        # Nothing to write, but a report of the tree is a claim about the
+        # database too: refuse it if another ingest changed the database.
+        if _generation(con) != generation:
+            raise RuntimeError("the database changed during this ingest; run it again")
         return
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     con.execute("BEGIN TRANSACTION")
