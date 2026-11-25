@@ -42,8 +42,12 @@ Across machines, :func:`mtl5.bench.analyze.machines` and
 :func:`~mtl5.bench.analyze.cross_machine` take each machine's latest commit's
 sessions, and :mod:`mtl5.bench.tables` reduces them to comparison tables.
 
+Over time, :func:`mtl5.bench.analyze.trend` reads an entry's history, and
+:mod:`mtl5.bench.trends` finds its series breaks, confidence intervals and
+change points.
+
 The submodules ``sysinfo``, ``schema``, ``formats``, ``ingest``, ``analyze``,
-``plot``, ``tables`` and ``style`` hold the details. Only the standard library is
+``plot``, ``tables``, ``trends`` and ``style`` hold the details. Only the standard library is
 imported here; DuckDB, pandas and matplotlib are imported when a function
 needs them.
 """

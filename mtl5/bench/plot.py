@@ -48,6 +48,7 @@ __all__ = [
     "rate_vs_size",
     "machine_balance",
     "cross_machine",
+    "trend",
     "from_csv",
     "read_frame",
     "provenance",
@@ -717,6 +718,145 @@ def cross_machine(df, *, max_series: int = 12, max_entries: int = 30) -> BenchFi
     return BenchFigure("compare", fig, df)
 
 
+def trend(
+    df, *, k: float | None = None, min_effect: float | None = None, max_entries: int = 6
+) -> BenchFigure:
+    """An entry's history, from :func:`mtl5.bench.analyze.trend`.
+
+    One panel per entry, commits in time order along the x axis. Each run
+    is a faint dot, each commit its geometric mean with a 95% confidence
+    interval, and each stretch between change points a level line. A dashed
+    line is a series break, labelled with the key fields that changed;
+    nothing is compared across it. A coloured line is a change point,
+    labelled with the step: vermillion for a regression, green for an
+    improvement. ``k`` and ``min_effect`` are the detection thresholds of
+    :func:`mtl5.bench.trends.change_points`; they are kept in the frame, so
+    a redraw from the saved CSV uses them.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from . import trends
+
+    df = df.copy().reset_index(drop=True)  # the figure keeps its frame
+    k = _saved(df, "cp_k", k, 4.0)
+    min_effect = _saved(df, "cp_min_effect", min_effect, 0.02)
+    df["cp_k"] = k
+    df["cp_min_effect"] = min_effect
+    df["run_timestamp"] = pd.to_datetime(df["run_timestamp"])
+    entries = sorted(df["entry_id"].unique())
+    _check_series(len(entries), max_entries, "entries")
+    unit = trends._one(df, "unit") if "unit" in df else "value"
+    pts = trends.points(df)
+    cps = trends.change_points(df, k=k, min_effect=min_effect)
+    assigned = trends._assign(df)
+    labels = _entry_labels(entries)
+    colors = {"regression": style.PALETTE[1], "improvement": style.PALETTE[2]}
+    with style.house_style():
+        fig = _figure(style.WIDTH_DOUBLE, 0.7 + 1.9 * len(entries))
+        axes = fig.subplots(len(entries), 1, squeeze=False)[:, 0]
+        for ax, entry in zip(axes, entries):
+            p = pts[pts["entry_id"] == entry].reset_index(drop=True)
+            runs = assigned[assigned["entry_id"] == entry]
+            x_of = {pt: i for i, pt in enumerate(p["point"])}
+            # Every run, faintly: the spread the intervals summarize.
+            xs = [x_of[pt] for pt in runs["_point"]]
+            ax.plot(xs, runs["value"], linestyle="", marker="o", markersize=2.2,
+                    color="#9a9a9a", zorder=2)  # fmt: skip
+            for seg, g in p.groupby("segment"):
+                st = _point_style(int(seg))
+                # One (2, N) array: a list of length-1 arrays is read as scalars.
+                err = np.vstack(
+                    [
+                        (g["value"] - g["ci_lo"]).fillna(0).clip(lower=0).to_numpy(),
+                        (g["ci_hi"] - g["value"]).fillna(0).clip(lower=0).to_numpy(),
+                    ]
+                )
+                ax.errorbar(g.index.to_numpy(), g["value"].to_numpy(), yerr=err,
+                            linestyle="", markersize=4, elinewidth=0.9, capsize=2,
+                            zorder=3, **st)  # fmt: skip
+            # Level lines: each stretch between change points, per segment.
+            ec = cps[cps["entry_id"] == entry]
+            for seg, g in p.groupby("segment"):
+                cuts = sorted(int(c) for c in ec.loc[ec["segment"] == seg, "index"])
+                bounds = [0, *cuts, len(g)]
+                for a, b in zip(bounds, bounds[1:]):
+                    part = g.iloc[a:b]
+                    sel = runs[runs["_point"].isin(part["point"])]
+                    level = math.exp(float(np.log(sel["value"].astype(float)).mean()))
+                    ax.plot([part.index[0] - 0.3, part.index[-1] + 0.3], [level, level],
+                            color=_point_style(int(seg))["color"], linestyle="-",
+                            marker="", linewidth=0.8, alpha=0.7, zorder=1)  # fmt: skip
+            # Series breaks.
+            for i in p.index[1:]:
+                if p.at[i, "segment"] != p.at[i - 1, "segment"]:
+                    ax.axvline(i - 0.5, color=style.MUTED, linestyle="--", linewidth=0.8)
+                    ax.annotate(
+                        f"series break: {p.at[i, 'break_fields'] or 'series key'}",
+                        (i - 0.5, 1.0),
+                        xycoords=("data", "axes fraction"),
+                        xytext=(2, -2),
+                        textcoords="offset points",
+                        ha="left",
+                        va="top",
+                        fontsize=5.5,
+                        color=style.MUTED,
+                    )
+            # Change points.
+            for c in ec.itertuples():
+                g = p[p["segment"] == c.segment]
+                x = g.index[0] + c.index - 0.5
+                color = colors[c.kind]
+                ax.axvline(x, color=color, linestyle="-", linewidth=1.0)
+                ax.annotate(
+                    f"{(c.ratio - 1) * 100:+.1f}% {c.kind}",
+                    (x, 0.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(2, 2),
+                    textcoords="offset points",
+                    ha="left",
+                    va="bottom",
+                    fontsize=6,
+                    color=color,
+                )
+            ax.set_xticks(list(p.index))
+            ax.set_xticklabels(
+                [f"{str(c)[:7]}\n{t:%m-%d}" for c, t in zip(p["git_commit"], p["run_timestamp"])],
+                fontsize=6,
+            )
+            ax.set_xlim(-0.6, len(p) - 0.4)
+            ax.grid(axis="x", visible=False)
+            ax.set_ylabel(unit)
+            first = runs.iloc[0]
+            threads = int(first["threads"])
+            ax.set_title(
+                " · ".join(
+                    str(v)
+                    for v in (
+                        labels[entry],
+                        first["machine"],
+                        first["label"],
+                        f"{threads} thread{'s' if threads != 1 else ''}",
+                    )
+                    if _present(v)
+                ),
+                loc="left",
+            )
+        _finish(fig, df)
+    return BenchFigure("trend", fig, df)
+
+
+def _saved(df, column: str, given, default):
+    """A drawing option: as given, else as the saved frame has it, else the default."""
+    if given is not None:
+        return given
+    if column in df:
+        values = sorted(set(df[column].dropna()))
+        if len(values) == 1:
+            return float(values[0])
+    return default
+
+
 #: The figures by kind, as :func:`from_csv` and the command line name them.
 FIGURES = {
     "card": capability_card,
@@ -725,6 +865,7 @@ FIGURES = {
     "rate": rate_vs_size,
     "balance": machine_balance,
     "compare": cross_machine,
+    "trend": trend,
 }
 
 

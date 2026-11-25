@@ -257,3 +257,46 @@ figures.
    compare_table
    to_markdown
 ```
+
+### Trends
+
+A trend is one entry's history on one machine, at one label and thread
+count, read from the `trend_results` view only: complete, checked runs.
+{mod}`mtl5.bench.trends` groups the runs into series by their comparability
+key, so a change of build or machine state is a **series break**, not a
+change, and into points by commit. Each point gets a 95% confidence interval
+from the run-to-run noise of its series. A **change point** is a step within
+a series of at least `k` standard errors of that noise (default 4) and at
+least `min_effect` in size (default 2%). `mtl5-bench trend ENTRY --machine M`
+prints the summary and the change points and draws the figure;
+`--fail-on-regression` makes it a check.
+
+```{eval-rst}
+.. currentmodule:: mtl5.bench.analyze
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   trend
+
+.. currentmodule:: mtl5.bench.trends
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   points
+   noise
+   change_points
+   summary
+   t975
+
+.. currentmodule:: mtl5.bench.plot
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   trend
+```
