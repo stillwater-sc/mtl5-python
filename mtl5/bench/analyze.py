@@ -66,6 +66,9 @@ _ROOF_PROBES = {
     "bandwidth_gbytes_per_s": "bandwidth_gbytes_per_s",
 }
 
+# bench_all columns that describe one sample rather than the point measured.
+_SAMPLE_COLUMNS = frozenset({"iterations"})
+
 # Sysinfo fields a capability card shows.
 _CARD_SYSINFO = (
     "cpu_simd",
@@ -328,7 +331,9 @@ def thread_scaling(
         ).df()
     df = res.merge(chosen, on="run_id")
     if entries is not None:
-        df = df[df["entry_id"].map(lambda e: _matches(e, entries))]
+        # As bool: an empty frame maps to an empty object Series, which as an
+        # indexer selects columns, not rows.
+        df = df[df["entry_id"].map(lambda e: _matches(e, entries)).astype(bool)]
     base = df[df["threads"] == 1].set_index("entry_id")["median_s"]
     df = df[df["entry_id"].isin(base.index)].copy()
     df["speedup"] = df["entry_id"].map(base) / df["median_s"]
@@ -350,21 +355,23 @@ def rate_vs_size(
     Read from the ``bench_all`` CSVs (the BLAS and LAPACK sweeps, the scaling
     sweeps), which measure each operation over a range of sizes. Repeated
     samples of one point are reduced to their median, with the count in
-    ``samples``. ``machine=None`` reads every machine, including files
-    committed outside a machine directory.
+    ``samples``; rows of one point that differ in another column are refused
+    with ``ValueError``, since they are different points. ``machine=None``
+    reads every machine, including files committed outside a machine
+    directory.
     """
+    import json
+
     ops = None if operations is None else list(operations)
     bks = None if backends is None else list(backends)
     with _Db(db) as con:
-        df = con.execute(
+        raw = con.execute(
             f"""
             SELECT {_RUN_COLUMNS},
                    m.params->>'operation' AS operation,
                    m.params->>'backend' AS series_backend,
                    TRY_CAST(m.params->>'size' AS BIGINT) AS size,
-                   m.metric, m.unit,
-                   median(m.value) AS value,
-                   count(*) AS samples
+                   m.metric, m.unit, m.value, m.attributes
             FROM measurements m
             JOIN current_runs r USING (run_id)
             WHERE m.format LIKE 'bench_all/%'
@@ -374,12 +381,36 @@ def rate_vs_size(
               AND {_MATCH_MACHINE}
               AND (?::VARCHAR[] IS NULL OR list_contains(?::VARCHAR[], m.params->>'operation'))
               AND (?::VARCHAR[] IS NULL OR list_contains(?::VARCHAR[], m.params->>'backend'))
-            GROUP BY ALL
-            HAVING size IS NOT NULL
-            ORDER BY machine NULLS FIRST, operation, series_backend, size, r.run_id
+              AND TRY_CAST(m.params->>'size' AS BIGINT) IS NOT NULL
             """,
             [metric, list(tiers), machine, machine, ops, ops, bks, bks],
         ).df()
+    point = ["run_id", "operation", "series_backend", "size"]
+    # Rows of one point may differ only in what describes a sample. A row that
+    # differs in another column (a thread count, say) is another point, which
+    # this frame has no column for: refuse it rather than take a median across.
+    raw["_other"] = [
+        json.dumps({k: v for k, v in json.loads(a or "{}").items() if k not in _SAMPLE_COLUMNS},
+                   sort_keys=True)
+        for a in raw["attributes"]
+    ]  # fmt: skip
+    mixed = raw.groupby(point, dropna=False)["_other"].nunique()
+    if (mixed > 1).any():
+        run, op, backend, size = mixed[mixed > 1].index[0]
+        rows = raw[(raw["run_id"] == run) & (raw["operation"] == op)]
+        cols = sorted({k for o in rows["_other"] for k in json.loads(o)})
+        raise ValueError(
+            f"rows of {op} ({backend}) at size {size} in run {run} differ in "
+            f"{', '.join(cols)}: rate_vs_size reduces repeated samples of one point, "
+            "and these are different points"
+        )
+    first = raw.drop(columns=["value", "attributes", "_other"]).drop_duplicates(point)
+    agg = (
+        raw.groupby(point, dropna=False)["value"].agg(value="median", samples="count").reset_index()
+    )
+    df = first.merge(agg, on=point).sort_values(
+        ["machine", "operation", "series_backend", "size", "run_id"], na_position="first"
+    )
     # The CSV's backend column names the series; the run's backend is the file's.
     df = df.drop(columns=["backend"]).rename(columns={"series_backend": "backend"})
     return df.reset_index(drop=True)

@@ -405,6 +405,22 @@ def test_scaling_needs_a_multithreaded_run(tmp_path):
     con.close()
 
 
+def test_scaling_with_no_passing_results_is_empty_not_an_error(tmp_path):
+    import json
+
+    root = _copy_fixture(tmp_path)
+    for name in ("native-t1.json", "native-t8.json"):
+        path = root / RUN_DIR / name
+        doc = json.loads(path.read_text())
+        for r in doc["results"]:
+            r["check"]["ok"] = False
+        path.write_text(json.dumps(doc))
+    con, _ = ingest(root, time_from_git=False)
+    df = analyze.thread_scaling(con, "i7-12700k", entries=["blas3/gemm"])
+    con.close()
+    assert df.empty and {"threads", "speedup", "efficiency"} <= set(df.columns)
+
+
 def test_scaling_does_not_pair_blas_vendors(tmp_path):
     # Every vendor's runs are labelled "blas": only the backend tells a
     # 1-thread OpenBLAS run from an 8-thread MKL one.
@@ -526,6 +542,26 @@ def test_rate_keeps_two_runs_of_one_backend_apart(tmp_path):
         rows = df[df["run_id"] == run].sort_values("size")
         label = f"gemm (blis), run {run[:7]}"
         assert list(lines[label].get_ydata()) == list(rows["value"])
+
+
+def test_rate_refuses_rows_that_are_different_points(tmp_path):
+    # A column the format does not model (here a thread count) makes rows of
+    # one (operation, backend, size) different points, not repeated samples.
+    root = _copy_fixture(tmp_path)
+    csv = root / "blas_sweep_blis.csv"
+    header = "operation,backend,size,median_ns,min_ns,max_ns,mean_ns,stddev_ns,gflops,iterations"
+    rows = ["gemm,blis,64,1,1,1,1,0,10.0,5", "gemm,blis,64,1,1,1,1,0,30.0,5"]
+    csv.write_text("\n".join([f"{header},threads", f"{rows[0]},1", f"{rows[1]},8"]) + "\n")
+    con, _ = ingest(root, time_from_git=False)
+    with pytest.raises(ValueError, match="differ in threads"):
+        analyze.rate_vs_size(con, tiers=INCOMPLETE)
+    # Rows that differ only in what describes a sample are samples of one point.
+    csv.write_text("\n".join([header, rows[0], rows[1].replace(",5", ",7")]) + "\n")
+    con.close()
+    con, _ = ingest(root, time_from_git=False)
+    df = analyze.rate_vs_size(con, tiers=INCOMPLETE)
+    assert df["samples"].tolist() == [2] and df["value"].tolist() == [20.0]
+    con.close()
 
 
 # --- style ------------------------------------------------------------------------------------
