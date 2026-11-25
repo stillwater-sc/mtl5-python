@@ -430,7 +430,18 @@ def test_scaling_needs_a_recorded_commit(tmp_path):
     con, _ = ingest(root, time_from_git=False)
     tiers = con.execute("SELECT tier FROM runs WHERE threads IS NOT NULL").fetchall()
     assert tiers == [("incomplete",), ("incomplete",)]
-    with pytest.raises(LookupError, match="no recorded commit"):
+    with pytest.raises(LookupError, match="recorded commit and a clean tree"):
+        analyze.thread_scaling(con, "i7-12700k", tiers=INCOMPLETE)
+    con.close()
+
+
+def test_scaling_does_not_compare_dirty_builds(tmp_path):
+    # Two dirty builds of one commit may differ in their uncommitted changes.
+    root = _copy_fixture(tmp_path)
+    for name in ("native-t1.json.sysinfo", "native-t8.json.sysinfo"):
+        _edit_sysinfo(root / RUN_DIR / name, git_dirty="1")
+    con, _ = ingest(root, time_from_git=False)
+    with pytest.raises(LookupError, match="recorded commit and a clean tree"):
         analyze.thread_scaling(con, "i7-12700k", tiers=INCOMPLETE)
     con.close()
 

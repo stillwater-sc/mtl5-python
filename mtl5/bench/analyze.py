@@ -267,7 +267,8 @@ def thread_scaling(
 ):
     """Speedup and parallel efficiency against the 1-thread run.
 
-    The reference is the latest multi-threaded run. The runs compared are the
+    Only runs with a recorded commit and a clean tree are compared. The
+    reference is the latest multi-threaded run. The runs compared are the
     latest run for each thread count among runs of the same physical machine,
     label, backend (with the BLAS vendor), commit, build configuration and
     machine state (less the CPUs it ran on) as the reference, so only the
@@ -279,27 +280,30 @@ def thread_scaling(
     ``speedup = median_s(1 thread) / median_s`` and
     ``efficiency = speedup / threads``.
     """
+    import pandas as pd
+
     with _Db(db) as con:
         runs = _runs(con, machine, label=label, tiers=tiers)
+        if runs.empty:
+            _one_run(con, machine, label=label, threads=None, run_id=None, tiers=tiers)
+        # Only runs that name their code: a recorded commit and a clean tree.
+        # Two runs with no commit, or two dirty builds of one commit, may run
+        # different code, and their ratio would not be a speedup.
+        known = runs["git_commit"].map(lambda c: isinstance(c, str) and bool(c.strip()))
+        clean = runs["git_dirty"].map(lambda d: d is not None and d is not pd.NA and d == 0)
+        runs = runs[known & clean.astype(bool)]
         multi = runs[runs["threads"] > 1]
         if multi.empty:
-            _one_run(con, machine, label=label, threads=None, run_id=None, tiers=tiers)
             raise LookupError(
                 f"no multi-threaded {'/'.join(tiers)} mtl5-bench run of {machine!r}"
                 + (f" with label={label!r}" if label is not None else "")
+                + " with a recorded commit and a clean tree"
             )
         # The reference: the latest multi-threaded run, the most threads first
         # among runs of one time (a session's runs share its directory's time).
         ref = multi.sort_values(
             ["run_timestamp", "threads"], ascending=False, na_position="last", kind="stable"
         ).iloc[0]
-        commit = ref["git_commit"]
-        if not isinstance(commit, str) or not commit.strip():
-            # Two runs with no recorded commit may run different code.
-            raise LookupError(
-                f"the latest multi-threaded {machine!r} run ({ref['run_id']}) has no "
-                "recorded commit, so no 1-thread run can be shown to run the same code"
-            )
         runs["_state"] = [_state_without_placement(con, rid) for rid in runs["run_id"]]
         # The backend too: the label is "blas" for every vendor, and only the
         # backend says which.
@@ -310,7 +314,6 @@ def thread_scaling(
             "build_config",
             "_state",
             "git_commit",
-            "git_dirty",
         ]
         # As strings, so a missing value matches a missing value.
         k = runs[key].astype(str)
