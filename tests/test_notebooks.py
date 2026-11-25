@@ -66,6 +66,10 @@ def test_notebook_runs(path: Path):
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = MTL5_IMPORT_ROOT + os.pathsep + existing if existing else MTL5_IMPORT_ROOT
     env["MPLBACKEND"] = "Agg"
+    # Jupyter's output is UTF-8 on every platform, and the notebooks print
+    # non-ASCII text (ε, ∞). A script's stdout follows the locale instead,
+    # which is cp1252 on the Windows runners and can't encode those.
+    env["PYTHONIOENCODING"] = "utf-8"
 
     with tempfile.TemporaryDirectory() as work:
         script = Path(work) / "cells.py"
@@ -74,6 +78,7 @@ def test_notebook_runs(path: Path):
             [sys.executable, str(script)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             # The notebook's own directory, as under Jupyter, so a notebook
             # reads `data/...` by the same relative path in both. Safe for the
             # import: a script's directory, not the cwd, goes on sys.path, and
