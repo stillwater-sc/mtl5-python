@@ -208,6 +208,59 @@ def _cmd_table(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_trend(args: argparse.Namespace) -> int:
+    from . import analyze, plot, tables, trends
+    from .style import check_formats
+
+    formats = [f.strip() for f in args.format.split(",") if f.strip()]
+    try:
+        check_formats(formats)
+    except ValueError as exc:
+        print(f"mtl5-bench: {exc}", file=sys.stderr)
+        return 2
+    if not Path(args.db).exists():
+        print(f"mtl5-bench: no database {args.db}; run 'mtl5-bench ingest' first", file=sys.stderr)
+        return 2
+    try:
+        df = analyze.trend(
+            args.db,
+            args.machine,
+            args.entry,
+            metric=args.metric,
+            label=args.label,
+            threads=_threads(args.threads, 1),
+        )
+        if df.empty:
+            raise LookupError(f"no complete results of {', '.join(args.entry)} on {args.machine}")
+        cps = trends.change_points(df, k=args.k, min_effect=args.min_effect)
+        summary = trends.summary(df)
+        fig = None if args.no_figure else plot.trend(df, k=args.k, min_effect=args.min_effect)
+    except (LookupError, ValueError) as exc:
+        print(f"mtl5-bench: {exc}", file=sys.stderr)
+        return 1
+    print(tables.to_markdown(summary, digits=2))
+    if cps.empty:
+        print(f"no change points (k={args.k}, min effect {args.min_effect:.0%})")
+    else:
+        report = cps.assign(change_pct=(cps["ratio"] - 1) * 100)[
+            ["entry_id", "before", "after", "change_pct", "t", "kind"]
+        ]
+        report = report.assign(before=report["before"].str[:7], after=report["after"].str[:7])
+        print(tables.to_markdown(report, digits=3, footer=plot.provenance(df)))
+    if fig is not None:
+        out = args.out or f"trend-{args.machine}"
+        try:
+            paths = fig.save(out, formats, data=not args.no_data)
+        except (OSError, ValueError) as exc:
+            print(f"mtl5-bench: {exc}", file=sys.stderr)
+            return 1
+        for path in paths:
+            print(path)
+    if args.fail_on_regression and (cps["kind"] == "regression").any():
+        return 3
+    return 0
+
+
 #: The entries a scaling figure shows when none are named.
 SCALING_ENTRIES = (
     "blas1/dot/f64",
@@ -333,6 +386,44 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--format", choices=["md", "csv"], default="md", help="(default: md)")
     p.add_argument("--out", help="write to this file instead of standard output")
     p.set_defaults(func=_cmd_table)
+
+    p = sub.add_parser(
+        "trend",
+        help="an entry's history on one machine: series, intervals, change points",
+        description=(
+            "Read the complete, checked runs of ENTRY on MACHINE, at one label and "
+            "thread count; group them into series by the comparability key, and "
+            "into points by commit; print each entry's summary and its change "
+            "points, and draw the trend figure. A change point is a step of at "
+            "least --k standard errors of the measured run-to-run noise and at "
+            "least --min-effect in size."
+        ),
+    )
+    p.add_argument("entry", nargs="+", help="entry ids or prefixes; the area may be left out")
+    p.add_argument("--machine", required=True, help="machine label, directory or fingerprint")
+    p.add_argument("--db", default="bench.duckdb", help="database file (default: %(default)s)")
+    p.add_argument("--label", default="native", help="the runs' label (default: %(default)s)")
+    p.add_argument("--threads", help="the thread count (default: 1)")
+    p.add_argument(
+        "--metric",
+        default="gflops",
+        help="gflops (default), roofline_pct, gbytes_per_s or median_s",
+    )
+    p.add_argument("--k", type=float, default=4.0, help="t threshold (default: %(default)s)")
+    p.add_argument(
+        "--min-effect",
+        type=float,
+        default=0.02,
+        help="smallest step to flag, as a fraction (default: %(default)s)",
+    )
+    p.add_argument(
+        "--fail-on-regression", action="store_true", help="exit 3 if a regression is found"
+    )
+    p.add_argument("--out", help="figure path without suffix (default: trend-MACHINE)")
+    p.add_argument("--format", default="pdf,svg,png", help="formats (default: %(default)s)")
+    p.add_argument("--no-data", action="store_true", help="do not write the CSV")
+    p.add_argument("--no-figure", action="store_true", help="print the report only")
+    p.set_defaults(func=_cmd_trend)
 
     args = parser.parse_args(argv)
     if args.command == "figure" and args.kind in ("balance", "compare") and args.machine:

@@ -33,6 +33,7 @@ from typing import Any
 
 __all__ = [
     "METRICS",
+    "trend",
     "PROVENANCE_COLUMNS",
     "machines",
     "cross_machine",
@@ -303,8 +304,17 @@ def _state_without_placement(con, run_id: str) -> str:
 
 
 def _matches(entry_id: str, wanted: Sequence[str]) -> bool:
-    """Whether ``entry_id`` is one of ``wanted`` or under one, by whole segments."""
-    return any(entry_id == w or entry_id.startswith(w.rstrip("/") + "/") for w in wanted)
+    """Whether ``entry_id`` is one of ``wanted`` or under one, by whole segments.
+
+    The area may be left out: ``"gemm/f64"`` matches ``blas3/gemm/f64/...``.
+    """
+    without_area = entry_id.split("/", 1)[1] if "/" in entry_id else entry_id
+    for w in wanted:
+        w = w.rstrip("/")
+        for e in (entry_id, without_area):
+            if e == w or e.startswith(w + "/"):
+                return True
+    return False
 
 
 def thread_scaling(
@@ -662,3 +672,61 @@ def cross_machine(
     df["metric"] = metric
     df["unit"] = METRICS[metric]
     return df.sort_values(["entry_id", "machine", "run_timestamp", "run_id"]).reset_index(drop=True)
+
+
+# --- trends ---------------------------------------------------------------------
+
+
+def trend(
+    db,
+    machine: str,
+    entries: Sequence[str],
+    *,
+    metric: str = "gflops",
+    label: str | None = "native",
+    threads: int = 1,
+):
+    """An entry's history on one machine, one row per (run, entry).
+
+    Read from the ``trend_results`` view only: current runs in the complete
+    tier whose check passed, so every row is a comparable measurement. Each
+    row carries its ``series_key`` and the run fields that make it
+    (``backend``, ``build_config``, ``state_class``, ``class``,
+    ``definition_version``), so :mod:`mtl5.bench.trends` can tell a series
+    break from a change. ``entries`` are ids or prefixes of whole segments;
+    the area may be left out (``"gemm/f64"``).
+    """
+    if metric not in METRICS:
+        raise ValueError(f"unknown metric {metric!r}; use one of {', '.join(METRICS)}")
+    threads = _threads_arg(threads)
+    if threads == "max":
+        raise ValueError("a trend holds the thread count fixed: give a number")
+    with _Db(db) as con:
+        df = con.execute(
+            f"""
+            SELECT t.run_id, coalesce(t.machine, r.machine_dir) AS machine, r.machine_dir,
+                   t.machine_fingerprint, t.label, t.threads, t.backend, t.build_config,
+                   t.state_class, t.class, t.git_commit, r.git_dirty, t.run_timestamp, r.tier,
+                   t.entry_id, t.definition_version, t.series_key, t.area, t.op, t.dtype,
+                   t.shape, t.{metric} AS value
+            FROM trend_results t
+            JOIN current_runs r USING (run_id)
+            WHERE {_MATCH_MACHINE.replace("r.machine,", "t.machine, r.machine_dir,")}
+              AND (? IS NULL OR t.label = ?)
+              AND t.threads = ?
+              AND t.{metric} > 0
+            ORDER BY t.entry_id, t.run_timestamp, t.run_id
+            """,
+            [machine, machine, label, label, threads],
+        ).df()
+        if df.empty:
+            known = _machines(con, ("complete",))
+    if df.empty:
+        raise LookupError(
+            f"no complete run of {machine!r} with label={label!r} and threads={threads}; "
+            f"machines: {', '.join(known) or 'none'}"
+        )
+    df = df[df["entry_id"].map(lambda e: _matches(e, entries)).astype(bool)]
+    df["metric"] = metric
+    df["unit"] = METRICS[metric]
+    return df.reset_index(drop=True)

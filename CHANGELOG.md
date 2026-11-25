@@ -15,6 +15,37 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Trends in `mtl5.bench`** (#121, milestone P5).
+  - **Only comparable runs:** `analyze.trend` reads one entry's history on
+    one machine, at one label and thread count, from the `trend_results`
+    view only, so every row is a complete run whose check passed.
+  - **Series and breaks:** runs are grouped into series by their
+    comparability key, and into points by commit. Where the key changes
+    along the history (a compiler upgrade, a new machine state), that is a
+    series break: it is marked with the fields that changed, and nothing is
+    compared across it.
+  - **Confidence intervals:** 95%, from run-to-run noise on a log scale,
+    pooled over a series' repeated sessions. Without repeats, the noise
+    comes from successive points instead, and the summary says which.
+  - **Change points:** binary segmentation within each series. A step is
+    flagged when it is at least `k` standard errors of the measured noise
+    (default 4) and at least `min_effect` in size (default 2%). It is a
+    regression or an improvement by the metric's direction. With 5% noise,
+    10 commits and 3 runs per commit, pure noise raised a false change point
+    in at most 2 of 100 synthetic series, a 2% step was flagged in at most
+    10, and a 20% step in all 100.
+  - **Figure** (`plot.trend`): every run as a faint dot, each commit's mean
+    with its interval, level lines between change points, series breaks
+    dashed and labelled, change points coloured and labelled with the step.
+  - **CLI:** `mtl5-bench trend ENTRY --machine M` prints a summary and the
+    change points and draws the figure. `--fail-on-regression` exits 3 when
+    a regression is found.
+  - **Entry names:** an entry can be named without its area everywhere:
+    `gemm/f64` matches `blas3/gemm/f64/...`.
+  - On MTL5's data, histories are 1 to 3 commits with two sessions each.
+    The Ventuno Q's `native-fast` history has a real series break at
+    `bf315e4` (`build_config`), and no change points are found.
+
 - **Cross-machine analysis in `mtl5.bench`** (#121, milestone P4).
   - **Which runs a machine contributes:** each machine's comparable runs,
     its latest commit's sessions at one thread count. The default is the
