@@ -259,6 +259,18 @@ class TestEdges:
         assert o.status == "rejected"
         assert o.reasons[0].startswith("sidecar says compiler_version='gcc 99', column")
 
+    def test_a_sidecar_key_whose_column_is_absent(self, tree):
+        # An interleave CSV without the compiler_version column: the sidecar's
+        # value stands rather than meeting an empty column.
+        table = fm.parse_csv((tree / INTERLEAVE).read_text())
+        cols = [c for c in table.header if c != "compiler_version"]
+        lines = [",".join(cols)] + [",".join(r[c] for c in cols) for r in table.rows]
+        (tree / INTERLEAVE).write_text("\n".join(lines) + "\n")
+        side = tree / (INTERLEAVE + ".sysinfo")
+        side.write_text(side.read_text() + "compiler_version=13.3.0\n")
+        _, report = _ingest(tree)
+        assert _status(report, INTERLEAVE).status == "ingested"
+
     def test_pool_size_not_an_integer(self, tree):
         # interleave_rows is exempt from pool_size, but a bad value is still bad.
         side = tree / (INTERLEAVE + ".sysinfo")
@@ -544,6 +556,17 @@ class TestGitTime:
         _, report = bench.ingest(root)
         assert _status(report, self.REL).status == "ingested"
         assert _status(report, "@@notes.csv").status == "deferred"
+
+    @pytest.mark.skipif(os.name == "nt", reason="'\"' is not allowed in Windows file names")
+    def test_a_file_name_git_would_quote(self, tmp_path):
+        root = self._tree(tmp_path)
+        rel = 'arduino-ventuno-q/run"1.csv'
+        shutil.copy(root / self.REL, root / rel)
+        (root / (rel + ".sysinfo")).write_text(_complete_sidecar())
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "add")
+        _, report = bench.ingest(root)
+        assert _status(report, rel).status == "ingested"
 
     def test_switched_off(self, tmp_path):
         root = self._tree(tmp_path)

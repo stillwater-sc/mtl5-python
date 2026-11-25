@@ -570,7 +570,9 @@ def _parse_table_run(
             if alias in fields and key not in fields:
                 fields[key] = fields[alias]
     for key, column in fmt.from_columns.items():
-        values = {row.get(column, "") for row in table.rows}
+        if column not in table.header:
+            continue  # an older variant without the column: the sidecar stands
+        values = {row[column] for row in table.rows}
         if len(values) > 1:
             raise _Rejected(f"column {column!r} has {len(values)} different values")
         if values:
@@ -811,8 +813,6 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
         out = subprocess.run(
             [
                 "git",
-                "-c",
-                "core.quotepath=off",
                 "-C",
                 str(root),
                 "log",
@@ -820,7 +820,9 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
                 # A rename is not an add of the new name unless renames are off.
                 "--no-renames",
                 "--relative",
-                # A NUL starts each commit's line: no file name can hold one.
+                # -z: names are NUL-terminated and never quoted, and each
+                # commit is "\0<time>\0\n" followed by its names.
+                "-z",
                 "--format=%x00%ct",
                 "--name-only",
                 "--",
@@ -834,15 +836,24 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
         return {}
     times: dict[str, datetime] = {}
     when = None
-    for line in out.splitlines():
-        if line.startswith("\x00"):
+    after_time = False
+    previous = ""
+    for token in out.split("\x00"):
+        if previous == "" and token.isdigit():
+            # A name is never empty, so an empty token separates records and
+            # the token after it is a commit time.
             try:
-                when = datetime.fromtimestamp(int(line[1:]), timezone.utc).replace(tzinfo=None)
-            except (ValueError, OverflowError, OSError):
+                when = datetime.fromtimestamp(int(token), timezone.utc).replace(tzinfo=None)
+            except (OverflowError, OSError, ValueError):
                 when = None
-        elif line and when is not None:
-            # git log runs newest first, so the last assignment is the first add.
-            times[line] = when
+            after_time = True
+        elif token:
+            name = token[1:] if after_time and token.startswith("\n") else token
+            after_time = False
+            if when is not None:
+                # git log runs newest first, so the last assignment is the first add.
+                times[name] = when
+        previous = token
     return times
 
 
