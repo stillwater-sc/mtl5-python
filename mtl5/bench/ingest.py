@@ -804,9 +804,30 @@ def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | Non
     return "other", "ignored", ["not a recognised benchmark file"]
 
 
+# Variables that point git at a repository other than the one -C finds.
+_GIT_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+)
+
+
+def _git_env() -> dict[str, str]:
+    """The environment without repository-location variables, so that
+    ``git -C root`` discovers root's own repository."""
+    return {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
+
+
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, check=True, timeout=120
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        check=True,
+        timeout=120,
+        env=_git_env(),
     ).stdout.decode("utf-8", "surrogateescape")
 
 
@@ -852,6 +873,7 @@ def _git_add_times(root: Path) -> tuple[dict[str, datetime], str | None]:
             capture_output=True,
             check=True,
             timeout=120,
+            env=_git_env(),
         ).stdout.decode("utf-8", "surrogateescape")
     except subprocess.TimeoutExpired:
         return {}, "git timed out"

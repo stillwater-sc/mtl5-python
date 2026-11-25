@@ -569,6 +569,21 @@ class TestGitTime:
         _, report = bench.ingest(root)
         assert _status(report, rel).status == "ingested"
 
+    def test_a_foreign_git_dir_in_the_environment_is_ignored(self, tmp_path, monkeypatch):
+        root = self._tree(tmp_path)
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "add")
+        # Another repository with the same path, committed at another time.
+        other = tmp_path / "other"
+        shutil.copytree(root, other, ignore=shutil.ignore_patterns(".git"))
+        _git(other, "init", "-q")
+        _git(other, "add", ".")
+        _git(other, "commit", "-q", "-m", "other", date="2020-01-01T00:00:00Z")
+        monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+        con, _ = bench.ingest(root)
+        ts = _scalar(con, "SELECT run_timestamp FROM runs WHERE path = ?", [self.REL])
+        assert ts.isoformat() == "2026-11-20T10:00:00"
+
     def test_switched_off(self, tmp_path):
         root = self._tree(tmp_path)
         _git(root, "add", ".")
