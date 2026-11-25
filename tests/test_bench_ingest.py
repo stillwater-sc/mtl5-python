@@ -222,6 +222,13 @@ class TestIncomplete:
         assert verdicts[0] == verdicts[1]
         assert verdicts[0][0] == "incomplete"
 
+    def test_sidecar_without_machine_state(self, tree):
+        # Older sidecars (18 of MTL5's 134 runs) predate these keys.
+        _edit_sidecar(tree, I7_A, clock_policy=None, bench_cpus=None)
+        con, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == ["sidecar lacks clock_policy, bench_cpus"]
+        assert I7_A not in _trend_paths(con)
+
     def test_empty_commit_and_host(self, tree):
         _edit_sidecar(tree, I7_A, git_commit="", preflight_host=" ", cxx_flags="")
         _, report = bench.ingest(tree)
@@ -325,6 +332,14 @@ class TestRejected:
     def test_non_object_json(self, tree):
         (tree / I7_A).write_text("[]")
         assert self._rejected(tree) == "the JSON is not an object"
+
+    def test_lone_surrogate_in_the_schema(self, tree):
+        text = (tree / I7_A).read_text().replace('"mtl5-bench/1"', '"\\ud800"', 1)
+        (tree / I7_A).write_text(text)
+        con, report = bench.ingest(tree)
+        o = _status(report, I7_A)
+        assert (o.kind, o.status) == ("json", "rejected")
+        assert _scalar(con, "SELECT count(*) FROM runs") == 2
 
     def test_lone_surrogate(self, tree):
         (tree / (I7_A + ".sysinfo")).unlink()
@@ -459,9 +474,76 @@ class TestHistory:
 
     def test_rebuild_refuses_to_delete_a_non_database(self, tree):
         target = tree / I7_A
-        with pytest.raises(ValueError, match="not a DuckDB database"):
+        with pytest.raises(ValueError, match="not an mtl5 benchmark database"):
             bench.ingest(tree, target, rebuild=True)
         assert target.read_bytes() == (FIXTURES / I7_A).read_bytes()
+
+    def test_rebuild_refuses_to_delete_another_duckdb_database(self, tree, tmp_path):
+        other = tmp_path / "other.duckdb"
+        c = duckdb.connect(str(other))
+        c.execute("CREATE TABLE important (x INTEGER)")
+        c.close()
+        with pytest.raises(ValueError, match="not an mtl5 benchmark database"):
+            bench.connect(other, rebuild=True)
+        c = duckdb.connect(str(other))
+        assert c.execute("SELECT count(*) FROM important").fetchone() == (0,)
+        c.close()
+
+    def test_rebuild_leaves_a_stray_wal_alone(self, tmp_path):
+        wal = tmp_path / "b.duckdb.wal"
+        wal.write_bytes(b"not ours")
+        with pytest.raises(ValueError, match="no database beside it"):
+            bench.connect(tmp_path / "b.duckdb", rebuild=True)
+        assert wal.read_bytes() == b"not ours"
+
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs POSIX permissions that bind the caller",
+    )
+    def test_a_failed_first_ingest_does_not_bind_the_root(self, tree, tmp_path):
+        con = bench.connect()
+        locked = tree / "jetson-orin"
+        locked.chmod(0)
+        try:
+            with pytest.raises(PermissionError):
+                bench.ingest(tree, con)
+        finally:
+            locked.chmod(0o755)
+        other = tmp_path / "other"
+        shutil.copytree(FIXTURES / "i7-12700k", other / "i7-12700k")
+        _, report = bench.ingest(other, con)
+        assert report.counts() == {"ingested": 2, "paired": 2}
+
+    def test_an_empty_root_binds_on_success(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        con, report = bench.ingest(empty)
+        assert report.outcomes == []
+        with pytest.raises(ValueError, match="ingested from"):
+            bench.ingest(tmp_path, con)
+
+    def test_concurrent_ingest_is_refused(self, tree, tmp_path, monkeypatch):
+        ing = sys.modules["mtl5.bench.ingest"]
+        db = tmp_path / "b.duckdb"
+        con = bench.connect(db)
+        real_walk = ing._walk
+        nested = []
+
+        def walk_and_race(root, exclude):
+            if not nested:
+                nested.append(True)
+                # Another ingest on the same database commits mid-scan.
+                bench.ingest(tree, con.cursor())
+            return real_walk(root, exclude)
+
+        monkeypatch.setattr(ing, "_walk", walk_and_race)
+        with pytest.raises(RuntimeError, match="changed during this ingest"):
+            bench.ingest(tree, con)
+        monkeypatch.setattr(ing, "_walk", real_walk)
+        # The nested ingest's rows are intact, and a rerun appends nothing.
+        _, report = bench.ingest(tree, con)
+        assert report.new_rows == 0
+        con.close()
 
     def test_rebuild_needs_a_path(self, tree):
         con, _ = bench.ingest(tree)

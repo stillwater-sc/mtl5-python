@@ -122,30 +122,59 @@ def _duckdb():
     return duckdb
 
 
-def _is_duckdb_file(path: Path) -> bool:
-    """True when path starts with DuckDB's file header ('DUCK' at byte 8)."""
+def _is_bench_database(duckdb, path: Path) -> bool:
+    """True when path is a DuckDB file with this package's meta table.
+
+    The header check comes first so that a file that is not DuckDB is never
+    handed to DuckDB; then a read-only open checks for the schema_version
+    row, which every version of this schema writes.
+    """
     if not path.is_file():
         return False
     with path.open("rb") as f:
-        head = f.read(12)
-    return head[8:12] == b"DUCK"
+        if f.read(12)[8:12] != b"DUCK":
+            return False
+    try:
+        probe = duckdb.connect(str(path), read_only=True)
+    except duckdb.Error:
+        return False
+    try:
+        row = probe.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'meta'"
+        ).fetchone()
+        if not row[0]:
+            return False
+        return (
+            probe.execute("SELECT count(*) FROM meta WHERE key = 'schema_version'").fetchone()[0]
+            > 0
+        )
+    except duckdb.Error:
+        return False
+    finally:
+        probe.close()
 
 
 def connect(db: str | os.PathLike = ":memory:", *, rebuild: bool = False):
     """Open (or create) a benchmark database and return the DuckDB connection.
 
     ``rebuild=True`` deletes an existing database file first, and refuses to
-    delete a file that is not a DuckDB database. A database
+    delete one that is not a benchmark database written by this package. A
+    database
     written by another schema version raises, since it is a cache and is
     rebuilt rather than migrated.
     """
     duckdb = _duckdb()
     path = str(db)
     if rebuild and path != ":memory:":
-        target = Path(path)
-        if target.exists() and not _is_duckdb_file(target):
-            raise ValueError(f"{path} is not a DuckDB database; --rebuild deletes only one")
-        for p in (target, Path(path + ".wal")):
+        target, wal = Path(path), Path(path + ".wal")
+        if target.exists():
+            if not _is_bench_database(duckdb, target):
+                raise ValueError(
+                    f"{path} is not an mtl5 benchmark database; --rebuild deletes only one"
+                )
+        elif wal.exists():
+            raise ValueError(f"{wal} has no database beside it; remove it by hand")
+        for p in (target, wal):
             if p.exists():
                 p.unlink()
     con = duckdb.connect(path)
@@ -562,13 +591,14 @@ def ingest(
 
 def _ingest(root_path: Path, con) -> IngestReport:
     row = con.execute("SELECT value FROM meta WHERE key = 'root'").fetchone()
-    if row is None:
-        con.execute("INSERT INTO meta VALUES ('root', ?)", [str(root_path)])
-    elif row[0] != str(root_path):
+    if row is not None and row[0] != str(root_path):
         raise ValueError(
             f"this database was ingested from {row[0]}, not {root_path}; "
             "use another database or rebuild it"
         )
+    # The generation this scan starts from. _write commits only if it is
+    # still current, so two ingests on one database cannot interleave.
+    generation = _generation(con)
 
     current = {
         path: (content_hash, kind, status, reasons, run_id)
@@ -675,14 +705,15 @@ def _ingest(root_path: Path, con) -> IngestReport:
             sidecar_text = None if sidecar is None else sidecar.decode("utf-8")
         except UnicodeDecodeError:
             record(
-                FileOutcome(rel, str(doc.get("schema")), "rejected", ["sidecar is not UTF-8"]),
+                FileOutcome(rel, "json", "rejected", ["sidecar is not UTF-8"]),
                 content_hash,
             )
             continue
         try:
             run = _parse_run(rel, run_id, doc, sidecar_text)
         except _Rejected as exc:
-            record(FileOutcome(rel, str(doc.get("schema")), "rejected", [str(exc)]), content_hash)
+            # kind is fixed: the schema value may be the invalid text itself.
+            record(FileOutcome(rel, "json", "rejected", [str(exc)]), content_hash)
             continue
 
         status = "ingested" if run.tier == "complete" else "incomplete"
@@ -707,7 +738,7 @@ def _ingest(root_path: Path, con) -> IngestReport:
             )
             outcomes.append(o)
 
-    _write(con, file_rows, runs)
+    _write(con, file_rows, runs, root=str(root_path), bind_root=row is None, generation=generation)
     return IngestReport(str(root_path), outcomes)
 
 
@@ -731,12 +762,35 @@ def _insert_columns(con, table: str, rows: list[dict], *, ignore: bool = False) 
     )
 
 
-def _write(con, file_rows: list[dict], runs: list[_Run]) -> None:
-    if not file_rows:
+def _generation(con) -> int:
+    row = con.execute("SELECT value FROM meta WHERE key = 'generation'").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _write(
+    con,
+    file_rows: list[dict],
+    runs: list[_Run],
+    *,
+    root: str,
+    bind_root: bool,
+    generation: int,
+) -> None:
+    if not file_rows and not bind_root:
         return
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     con.execute("BEGIN TRANSACTION")
     try:
+        # Claim the next generation. A concurrent ingest that committed since
+        # this scan read the database makes the claim fail; one committing at
+        # the same time conflicts on the same meta row, and DuckDB aborts one.
+        if _generation(con) != generation:
+            raise RuntimeError("the database changed during this ingest; run it again")
+        con.execute("INSERT OR REPLACE INTO meta VALUES ('generation', ?)", [str(generation + 1)])
+        if bind_root:
+            # Bound with the first successful write, so a failed first ingest
+            # leaves the database free to take another root.
+            con.execute("INSERT INTO meta VALUES ('root', ?)", [root])
         for m in {r.machine_row["fingerprint"]: r.machine_row for r in runs}.values():
             con.execute(
                 "INSERT OR IGNORE INTO machines VALUES (?, ?, ?, ?, ?, ?, ?)",

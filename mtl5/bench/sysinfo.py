@@ -57,10 +57,14 @@ REQUIRED_KEYS = (
     "os_name",
     # threads
     "pool_size",
-    # machine state
+    # machine state: everything state_class() reads, so a missing one cannot
+    # turn into a '?' that two different states share
     "governor",
     "turbo",
     "power_mode",
+    "clock_policy",
+    "cpu_affinity",
+    "bench_cpus",
     "preflight_gates",
 )
 

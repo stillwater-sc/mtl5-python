@@ -22,8 +22,10 @@ against, and semantic-release manages only the **patch** component.
     database is a cache of the committed files, rebuilt with `--rebuild`.
   - **Every file is accounted for.** Each gets a row saying whether it was
     ingested, ingested as incomplete, rejected with a reason, or set aside
-    (CSV for P2, reports, figures). On MTL5's current tree that is 866 files,
-    134 runs and 16,122 results, with no rejections.
+    (CSV for P2, reports, figures). On MTL5's current tree that is 866 files
+    and 134 runs, with no rejections. 116 runs (14,196 results, 4,768
+    series) have complete provenance. The other 18, from 2026-11-08 and
+    -09, predate the `clock_policy` and `bench_cpus` sidecar keys.
   - **Provenance tiers.** A run with no sidecar, a missing required sidecar
     key, a dirty build, or a directory name that is not a UTC timestamp is
     ingested as `incomplete` and kept out of the `trend_results` view, as is
@@ -38,6 +40,8 @@ against, and semantic-release manages only the **patch** component.
     unchanged tree adds nothing. A changed file is a new row that supersedes
     the old one, and a deleted file gets a `removed` row. A directory that
     cannot be read aborts the ingest rather than looking like deleted files.
+  - `--rebuild` deletes only a database this package wrote, and two ingests
+    on one database cannot interleave.
   - New `bench` extra (`duckdb>=1.2`, `pandas>=2.0`), and CI installs it. The
     1.2 floor was tested: DuckDB 1.1.0 segfaults reopening a database the
     ingest wrote.
