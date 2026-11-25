@@ -1363,6 +1363,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.5 (2026-11-25)
+
+### Bug Fixes
+
+- **bench**: Trend points follow the runs; adjacent steps; zero noise (#121 P5)
+  ([#145](https://github.com/stillwater-sc/mtl5-python/pull/145),
+  [`7c9f396`](https://github.com/stillwater-sc/mtl5-python/commit/7c9f396078b42ac6910d3318ca7d3f6c45cb4df8))
+
+### Features
+
+- **bench**: Trends with series breaks, intervals and change points (#121 P5)
+  ([#145](https://github.com/stillwater-sc/mtl5-python/pull/145),
+  [`7c9f396`](https://github.com/stillwater-sc/mtl5-python/commit/7c9f396078b42ac6910d3318ca7d3f6c45cb4df8))
+
+
 ## v5.25.4 (2026-11-25)
 
 ### Bug Fixes
