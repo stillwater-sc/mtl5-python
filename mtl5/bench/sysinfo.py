@@ -9,7 +9,6 @@ parses it and reduces it to the fields the comparability key is built from.
 from __future__ import annotations
 
 import hashlib
-import re
 
 __all__ = [
     "REQUIRED_KEYS",
@@ -121,8 +120,9 @@ def machine_fingerprint(fields: dict[str, str]) -> str:
 def state_class(fields: dict[str, str]) -> str:
     """The machine state a run was taken in, as a readable string.
 
-    Governor, turbo, power mode, the CPUs the benchmark was allowed and
-    pinned to, and whether the preflight gates were enforced. Thermals and
+    Governor, turbo, power mode, the clock policy (the frequency range, or a
+    Jetson's nvpmodel mode), the CPUs the benchmark was allowed and pinned to,
+    and whether the preflight gates were enforced. Thermals and
     load average are not part of it: they are recorded per run as
     measurements, not as the class a run belongs to.
     """
@@ -130,6 +130,7 @@ def state_class(fields: dict[str, str]) -> str:
         f"governor {fields.get('governor', '?')}",
         f"turbo {fields.get('turbo', '?')}",
         f"power {fields.get('power_mode', '?')}",
+        f"clocks {fields.get('clock_policy', '?')}",
         f"affinity {fields.get('cpu_affinity', '?')}",
         f"bench_cpus {fields.get('bench_cpus', '?')}",
         f"gates {fields.get('preflight_gates', '?')}",
@@ -144,7 +145,9 @@ def build_config(fields: dict[str, str]) -> str:
     changes the generated code is in: compiler and version, language
     standard, build type, flags, target ISA, SIMD backend, and the OS.
     """
-    flags = re.sub(r"\s+", " ", fields.get("cxx_flags", "")).strip()
+    # Only the outer whitespace goes: inside, -DMSG='"a  b"' and -DMSG='"a b"'
+    # are different builds.
+    flags = fields.get("cxx_flags", "").strip()
     parts = [
         f"{fields.get('compiler', '?')} {fields.get('compiler_version', '?')}",
         f"c++{fields.get('cpp_standard', '?')}",

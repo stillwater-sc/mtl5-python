@@ -35,7 +35,8 @@ Views
     The runs that some current file row still points at.
 ``trend_results``
     The results trend queries may use: current runs in the ``complete`` tier
-    whose correctness check passed.
+    whose correctness check passed. A result with no check is left out too:
+    a timing nothing verified is not a measurement of the code.
 """
 
 from __future__ import annotations
@@ -71,7 +72,7 @@ CREATE TABLE IF NOT EXISTS machines (
     cpu_vendor         VARCHAR,
     cpu_brand          VARCHAR,
     cpu_arch           VARCHAR,
-    cpu_logical_cores  INTEGER,
+    cpu_logical_cores  BIGINT,
     host               VARCHAR
 );
 
@@ -87,7 +88,7 @@ CREATE TABLE IF NOT EXISTS runs (
     machine_fingerprint  VARCHAR,
     label                VARCHAR,
     class                VARCHAR,
-    threads              INTEGER,
+    threads              BIGINT,
     backend              VARCHAR,
     build_config         VARCHAR,
     state_class          VARCHAR,
@@ -112,7 +113,7 @@ CREATE TABLE IF NOT EXISTS probes (
 
 CREATE TABLE IF NOT EXISTS entry_definitions (
     entry_id            VARCHAR NOT NULL,
-    definition_version  INTEGER NOT NULL,
+    definition_version  BIGINT NOT NULL,
     area                VARCHAR,
     op                  VARCHAR,
     dtype               VARCHAR,
@@ -123,7 +124,7 @@ CREATE TABLE IF NOT EXISTS entry_definitions (
 CREATE TABLE IF NOT EXISTS results (
     run_id              VARCHAR NOT NULL,
     entry_id            VARCHAR NOT NULL,   -- area/op/dtype/shape
-    definition_version  INTEGER NOT NULL,
+    definition_version  BIGINT NOT NULL,
     series_key          VARCHAR NOT NULL,
     area                VARCHAR,
     op                  VARCHAR,
@@ -131,7 +132,7 @@ CREATE TABLE IF NOT EXISTS results (
     shape               VARCHAR,
     median_s            DOUBLE,
     min_s               DOUBLE,
-    samples             INTEGER,
+    samples             BIGINT,
     flops               DOUBLE,
     bytes               DOUBLE,
     gflops              DOUBLE,
@@ -171,5 +172,5 @@ CREATE OR REPLACE VIEW trend_results AS
            r.state_class, r.class
     FROM results res
     JOIN current_runs r USING (run_id)
-    WHERE r.tier = 'complete' AND res.check_ok IS NOT FALSE;
+    WHERE r.tier = 'complete' AND res.check_ok IS TRUE;
 """

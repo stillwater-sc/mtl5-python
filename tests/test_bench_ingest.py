@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -205,6 +206,18 @@ class TestIncomplete:
         _, report = bench.ingest(tree)
         assert _status(report, I7_A).reasons == ["sidecar pool_size=4 but probes.threads=1"]
 
+    def test_pool_size_not_an_integer(self, tree):
+        _edit_sidecar(tree, I7_A, pool_size="unknown")
+        _, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == ["sidecar pool_size='unknown' is not an integer"]
+
+    def test_timestamp_directory_with_a_digit_missing(self, tree):
+        dest = tree / "i7-12700k" / "mtl5_bench" / "20261112T00485Z"
+        (tree / I7_B).parent.rename(dest)
+        _, report = bench.ingest(tree)
+        o = _status(report, "i7-12700k/mtl5_bench/20261112T00485Z/native-t1.json")
+        assert o.status == "incomplete" and "not a UTC timestamp" in o.reasons[0]
+
     def test_run_directory_without_a_timestamp(self, tree):
         dest = tree / "i7-12700k" / "mtl5_bench" / "latest"
         dest.mkdir()
@@ -259,6 +272,29 @@ class TestRejected:
         del doc["probes"]["threads"]
         _dump(tree, I7_A, doc)
         assert self._rejected(tree) == "probes.threads is missing or not an integer"
+
+    def test_huge_integer_median(self, tree):
+        # 400 digits overflows a double; 5000 also exceeds Python 3.11+'s
+        # integer-string limit inside json.loads. Either way, one rejection.
+        for digits in (400, 5000):
+            text = (tree / I7_A).read_text()
+            first = _load(tree, I7_A)["results"][0]["median_s"]
+            (tree / I7_A).write_text(
+                text.replace(f'"median_s": {first}', '"median_s": 1' + "0" * digits, 1)
+            )
+            reason = self._rejected(tree)
+            assert reason == "results[0] has no finite median_s" or reason.startswith(
+                "invalid JSON"
+            )
+            shutil.copy(FIXTURES / I7_A, tree / I7_A)
+
+    def test_out_of_range_optional_integer_is_dropped(self, tree):
+        doc = _load(tree, I7_A)
+        doc["results"][0]["samples"] = 2**70
+        _dump(tree, I7_A, doc)
+        con, report = bench.ingest(tree)
+        assert _status(report, I7_A).status == "ingested"
+        assert _scalar(con, "SELECT count(*) FROM results WHERE samples IS NULL") == 1
 
     def test_orphan_sidecar(self, tree):
         (tree / I7_A).unlink()
@@ -327,15 +363,103 @@ class TestHistory:
         assert _scalar(con, "SELECT count(*) FROM runs") == 3
 
     def test_same_content_at_two_paths_is_one_run(self, tree):
-        # Sorted after i7-12700k/, so the copy is the one seen second.
-        dest = tree / "z-copy" / "20261111T190041Z"
-        dest.mkdir(parents=True)
+        # Same machine directory and timestamp directory, so the same
+        # provenance; z-copy sorts after mtl5_bench, so the copy is seen second.
+        copy = "i7-12700k/z-copy/20261111T190041Z/native-t1.json"
+        (tree / copy).parent.mkdir(parents=True)
         for suffix in ("", ".sysinfo"):
-            shutil.copy(tree / (I7_A + suffix), dest / ("native-t1.json" + suffix))
+            shutil.copy(tree / (I7_A + suffix), tree / (copy + suffix))
         con, report = bench.ingest(tree)
-        o = _status(report, "z-copy/20261111T190041Z/native-t1.json")
+        o = _status(report, copy)
         assert o.status == "duplicate" and o.reasons == [f"same content as {I7_A}"]
         assert _scalar(con, "SELECT count(*) FROM runs") == 3
+
+    def test_moving_a_run_out_of_its_timestamp_directory(self, tree):
+        con, _ = bench.ingest(tree)
+        moved = "i7-12700k/mtl5_bench/scratch/native-t1.json"
+        (tree / moved).parent.mkdir()
+        for suffix in ("", ".sysinfo"):
+            shutil.move(tree / (I7_A + suffix), tree / (moved + suffix))
+        con, report = bench.ingest(tree, con)
+        assert _status(report, I7_A).status == "removed"
+        o = _status(report, moved)
+        assert o.status == "incomplete" and "not a UTC timestamp" in o.reasons[0]
+        assert _trend_paths(con) == {I7_B, JETSON}
+
+    def test_sidecar_status_follows_its_data_file(self, tree, tmp_path):
+        con, _ = bench.ingest(tree)
+        side = I7_A + ".sysinfo"
+        shutil.move(tree / I7_A, tmp_path / "x.json")
+        con, report = bench.ingest(tree, con)
+        assert _status(report, side).status == "rejected"
+        shutil.move(tmp_path / "x.json", tree / I7_A)
+        con, report = bench.ingest(tree, con)
+        assert _status(report, side).status == "paired"
+        assert _status(report, side).new
+
+    def test_adding_an_empty_sidecar_revalidates(self, tree):
+        side = tree / (I7_A + ".sysinfo")
+        side.unlink()
+        con, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == ["no .sysinfo sidecar"]
+        side.write_text("")
+        con, report = bench.ingest(tree, con)
+        o = _status(report, I7_A)
+        assert o.new and o.reasons[0].startswith("sidecar lacks benchmark, label")
+
+    def test_database_under_the_root_is_not_an_input(self, tree):
+        con, report = bench.ingest(tree, tree / "bench.duckdb")
+        assert not any(o.path.startswith("bench.duckdb") for o in report.outcomes)
+        con, report = bench.ingest(tree, con)
+        assert report.new_rows == 0
+        con.close()
+
+    def test_rebuild_needs_a_path(self, tree):
+        con, _ = bench.ingest(tree)
+        with pytest.raises(ValueError, match="database path"):
+            bench.ingest(tree, con, rebuild=True)
+
+    def test_an_owned_connection_is_closed_on_failure(self, tree, tmp_path, monkeypatch):
+        # The package re-exports ingest(), which shadows the submodule name.
+        ing = sys.modules["mtl5.bench.ingest"]
+        closed = []
+        real = ing.connect
+
+        def tracking(*a, **k):
+            con = real(*a, **k)
+            real_close = con.close
+
+            class Wrapper:
+                def __getattr__(self, name):
+                    return getattr(con, name)
+
+                def close(self):
+                    closed.append(True)
+                    real_close()
+
+            return Wrapper()
+
+        db = tmp_path / "b.duckdb"
+        bench.ingest(tree, db)[0].close()
+        monkeypatch.setattr(ing, "connect", tracking)
+        with pytest.raises(ValueError, match="ingested from"):
+            ing.ingest(tmp_path, db)
+        assert closed == [True]
+
+    @pytest.mark.skipif(
+        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="needs POSIX permissions that bind the caller",
+    )
+    def test_unreadable_directory_aborts_before_recording_removals(self, tree):
+        con, _ = bench.ingest(tree)
+        locked = tree / "jetson-orin"
+        locked.chmod(0)
+        try:
+            with pytest.raises(PermissionError):
+                bench.ingest(tree, con)
+        finally:
+            locked.chmod(0o755)
+        assert _scalar(con, "SELECT count(*) FROM files WHERE status = 'removed'") == 0
 
     def test_one_database_one_root(self, tree, tmp_path):
         con, _ = bench.ingest(tree)
@@ -379,6 +503,7 @@ class TestComparabilityKey:
             {"turbo": "disabled"},  # machine state
             {"blas_vendor": "OpenBLAS"},  # backend
             {"preflight_host": "sw-22"},  # another box with the same CPU
+            {"clock_policy": "nvpmodel 15W (mode 0)"},  # machine state
         ],
     )
     def test_a_key_field_starts_a_new_series(self, tree, change):
@@ -391,10 +516,16 @@ class TestComparabilityKey:
         keys = _config_keys(tree)
         assert keys[I7_A] == keys[I7_B]
 
-    def test_flag_whitespace_is_not_a_new_build(self, tree):
-        _edit_sidecar(tree, I7_B, cxx_flags="  -O3    -DNDEBUG ")
+    def test_outer_flag_whitespace_is_not_a_new_build(self, tree):
+        _edit_sidecar(tree, I7_B, cxx_flags="  -O3 -DNDEBUG   ")
         keys = _config_keys(tree)
         assert keys[I7_A] == keys[I7_B]
+
+    def test_inner_flag_whitespace_is_a_new_build(self):
+        # -DMSG='"a  b"' and -DMSG='"a b"' define different strings.
+        a = si.build_config({"cxx_flags": "-DMSG='\"a  b\"'"})
+        b = si.build_config({"cxx_flags": "-DMSG='\"a b\"'"})
+        assert a != b
 
     def test_host_domain_is_not_a_new_machine(self):
         a = {"cpu_brand": "Xeon", "preflight_host": "sw-13"}
@@ -415,6 +546,15 @@ class TestComparabilityKey:
         )
         assert n == 0
         assert _scalar(con, "SELECT max(definition_version) FROM entry_definitions") == 2
+
+    def test_unchecked_result_is_excluded_from_trends(self, tree):
+        doc = _load(tree, I7_A)
+        del doc["results"][0]["check"]
+        _dump(tree, I7_A, doc)
+        con, _ = bench.ingest(tree)
+        total = _scalar(con, "SELECT count(*) FROM results")
+        trend = _scalar(con, "SELECT count(*) FROM trend_results")
+        assert total - trend == 1
 
     def test_failed_check_is_excluded_from_trends(self, tree):
         doc = _load(tree, I7_A)

@@ -29,6 +29,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,6 +63,7 @@ _SIDECAR = ".sysinfo"
 _REPORT_SUFFIXES = {".md", ".txt", ".rst", ".log"}
 _FIGURE_SUFFIXES = {".png", ".svg", ".pdf", ".jpg", ".jpeg"}
 _TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+_TIMESTAMP_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z")
 # The fields the result columns are read from, and the JSON types accepted.
 _RESULT_FIELDS = ("area", "op", "dtype", "shape")
 
@@ -142,7 +144,8 @@ def connect(db: str | os.PathLike = ":memory:", *, rebuild: bool = False):
         con.close()
         raise RuntimeError(
             f"{path} has benchmark schema version {row[0]}, this mtl5 writes "
-            f"{SCHEMA_VERSION}; rebuild it (mtl5-bench ingest --rebuild)"
+            f"{SCHEMA_VERSION}; rerun the ingest with --rebuild "
+            f"(mtl5-bench ingest ROOT --db {path} --rebuild)"
         )
     return con
 
@@ -156,21 +159,28 @@ def _num(v: Any) -> float | None:
     if isinstance(v, bool) or v is None:
         return None
     if isinstance(v, (int, float)):
-        f = float(v)
+        try:
+            f = float(v)
+        except OverflowError:  # an int too large for a double
+            return None
         return f if math.isfinite(f) else None
     return None
 
 
+_INT64 = (-(2**63), 2**63 - 1)  # the BIGINT columns' range
+
+
 def _int(v: Any) -> int | None:
+    """An integer that fits a BIGINT column, else None."""
     if isinstance(v, bool):
         return None
-    if isinstance(v, int):
-        return v
     if isinstance(v, str):
         try:
-            return int(v)
+            v = int(v.strip())
         except ValueError:
             return None
+    if isinstance(v, int) and _INT64[0] <= v <= _INT64[1]:
+        return v
     return None
 
 
@@ -180,7 +190,8 @@ def _bool(v: Any) -> bool | None:
 
 def _run_timestamp(rel: str) -> datetime | None:
     parts = rel.split("/")
-    if len(parts) < 2:
+    # fullmatch first: strptime alone accepts 20261111T19041Z as 19:04:01.
+    if len(parts) < 2 or not _TIMESTAMP_RE.fullmatch(parts[-2]):
         return None
     try:
         # Stored as naive UTC (TIMESTAMP), which round-trips without pytz.
@@ -265,9 +276,12 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
                 raise _Rejected(f"sidecar says {key}={fields[key]!r}, the JSON {doc[key]!r}")
 
     threads = _int(doc["probes"]["threads"])
-    pool = _int(fields.get("pool_size"))
-    if pool is not None and pool != threads:
-        reasons.append(f"sidecar pool_size={pool} but probes.threads={threads}")
+    if "pool_size" in fields:
+        pool = _int(fields["pool_size"])
+        if pool is None:
+            reasons.append(f"sidecar pool_size={fields['pool_size']!r} is not an integer")
+        elif pool != threads:
+            reasons.append(f"sidecar pool_size={pool} but probes.threads={threads}")
     if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
         reasons.append("dirty build: the commit does not identify the code")
     timestamp = _run_timestamp(rel)
@@ -417,20 +431,38 @@ def _float_str(v: str | None) -> float | None:
 # --------------------------------------------------------------------------
 
 
-def _walk(root: Path) -> list[str]:
+def _raise(exc: OSError) -> None:
+    raise exc
+
+
+def _walk(root: Path, exclude: set[Path]) -> list[str]:
     """Every file under root, as sorted '/'-separated relative paths.
 
     Directories whose name starts with '.' (``.git``) and ``__pycache__`` are
-    not walked; dot-files are.
+    not walked; dot-files are. ``exclude`` holds resolved paths to leave out:
+    the database itself, when it lives under the root. A directory that
+    cannot be read raises instead of being skipped, since a skipped directory
+    would look like deleted files.
     """
     out = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=_raise):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d != "__pycache__")
         for name in sorted(filenames):
             full = Path(dirpath) / name
-            if full.is_file():
+            if full.is_file() and full.resolve() not in exclude:
                 out.append(full.relative_to(root).as_posix())
     return sorted(out)
+
+
+def _database_files(con) -> set[Path]:
+    """The files of the databases attached to con, and their WALs."""
+    out: set[Path] = set()
+    for (path,) in con.execute(
+        "SELECT path FROM duckdb_databases() WHERE coalesce(path, '') <> ''"
+    ).fetchall():
+        p = Path(path).resolve()
+        out |= {p, Path(str(p) + ".wal")}
+    return out
 
 
 def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | None:
@@ -453,6 +485,13 @@ def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | Non
     if name.startswith("."):
         return "manifest", "ignored", []
     return "other", "ignored", ["not a recognised benchmark file"]
+
+
+def _path_provenance(rel: str) -> tuple[bytes, bytes]:
+    parts = rel.split("/")
+    machine_dir = parts[0] if len(parts) > 1 else ""
+    stamp = parts[-2] if _run_timestamp(rel) is not None else ""
+    return machine_dir.encode(), stamp.encode()
 
 
 def _sha256(*chunks: bytes) -> str:
@@ -479,8 +518,19 @@ def ingest(
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         raise NotADirectoryError(f"{root} is not a directory")
-    con = connect(db, rebuild=rebuild) if not hasattr(db, "execute") else db
+    owned = not hasattr(db, "execute")
+    if not owned and rebuild:
+        raise ValueError("rebuild=True needs the database path, not an open connection")
+    con = connect(db, rebuild=rebuild) if owned else db
+    try:
+        return con, _ingest(root_path, con)
+    except BaseException:
+        if owned:
+            con.close()
+        raise
 
+
+def _ingest(root_path: Path, con) -> IngestReport:
     row = con.execute("SELECT value FROM meta WHERE key = 'root'").fetchone()
     if row is None:
         con.execute("INSERT INTO meta VALUES ('root', ?)", [str(root_path)])
@@ -503,7 +553,7 @@ def ingest(
         ).fetchall()
     }
 
-    paths = _walk(root_path)
+    paths = _walk(root_path, _database_files(con))
     path_set = set(paths)
     outcomes: list[FileOutcome] = []
     file_rows: list[dict] = []
@@ -511,7 +561,14 @@ def ingest(
 
     def record(o: FileOutcome, content_hash: str) -> None:
         prev = current.get(o.path)
-        if prev is not None and prev[0] == content_hash and prev[2] != "removed":
+        unchanged = (
+            prev is not None
+            and prev[0] == content_hash
+            and prev[2] != "removed"
+            # A sidecar's status depends on its data file, not its bytes.
+            and o.status in ("?", prev[2])
+        )
+        if unchanged:
             # Unchanged since the last ingest: report what is recorded.
             o.kind, o.status, o.reasons, o.run_id = prev[1], prev[2], list(prev[3] or []), prev[4]
             o.new = False
@@ -539,8 +596,12 @@ def ingest(
         data = full.read_bytes()
         sidecar_path = root_path / (rel + _SIDECAR)
         sidecar = sidecar_path.read_bytes() if (rel + _SIDECAR) in path_set else None
-        content_hash = _sha256(data, sidecar if sidecar is not None else b"")
-        run_id = content_hash[:32]
+        # The marker byte tells an absent sidecar from an empty one.
+        content_hash = _sha256(data, b"\x00" if sidecar is None else b"\x01" + sidecar)
+        # The run is the content plus the provenance its path carries (the
+        # machine directory and the timestamp directory), so a run moved to a
+        # path that changes its tier is a new run, not a duplicate.
+        run_id = _sha256(content_hash.encode(), *_path_provenance(rel))[:32]
 
         prev = current.get(rel)
         if prev is not None and prev[0] == content_hash and prev[2] != "removed":
@@ -549,7 +610,9 @@ def ingest(
 
         try:
             doc = json.loads(data)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (ValueError, RecursionError) as exc:
+            # ValueError covers JSONDecodeError, UnicodeDecodeError and the
+            # integer digit limit; RecursionError a pathologically nested file.
             record(FileOutcome(rel, "json", "rejected", [f"invalid JSON: {exc}"]), content_hash)
             continue
         if not isinstance(doc, dict) or "schema" not in doc:
@@ -610,7 +673,7 @@ def ingest(
             outcomes.append(o)
 
     _write(con, file_rows, runs)
-    return con, IngestReport(str(root_path), outcomes)
+    return IngestReport(str(root_path), outcomes)
 
 
 def _insert_columns(con, table: str, rows: list[dict], *, ignore: bool = False) -> None:

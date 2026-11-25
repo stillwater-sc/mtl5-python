@@ -26,16 +26,18 @@ against, and semantic-release manages only the **patch** component.
     134 runs and 16,122 results, with no rejections.
   - **Provenance tiers.** A run with no sidecar, a missing required sidecar
     key, a dirty build, or a directory name that is not a UTC timestamp is
-    ingested as `incomplete` and kept out of the `trend_results` view. A run
-    whose sidecar contradicts its JSON is rejected.
+    ingested as `incomplete` and kept out of the `trend_results` view, as is
+    any result without a passing correctness check. A run whose sidecar
+    contradicts its JSON is rejected.
   - **Comparability key.** Each result has a `series_key` built from the
-    physical machine, its state class, the backend, the build without the
-    commit, the thread count, the problem class, the entry and its definition
+    physical machine, its state class (governor, turbo, power mode, clock
+    policy, CPU set), the backend, the build without the commit, the thread count, the problem class, the entry and its definition
     version. Machines are fingerprinted from the hardware and host, not the
     `machine` label, which the data spells more than one way.
   - **Append-only.** Files are content-addressed, so re-ingesting an
     unchanged tree adds nothing. A changed file is a new row that supersedes
-    the old one, and a deleted file gets a `removed` row.
+    the old one, and a deleted file gets a `removed` row. A directory that
+    cannot be read aborts the ingest rather than looking like deleted files.
   - New `bench` extra (`duckdb>=1.2`, `pandas>=2.0`), and CI installs it. The
     1.2 floor was tested: DuckDB 1.1.0 segfaults reopening a database the
     ingest wrote.
