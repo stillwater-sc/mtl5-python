@@ -1332,6 +1332,35 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.4 (2026-11-25)
+
+### Bug Fixes
+
+- **bench**: Balance index and precision; named machines at a thread count (#121 P4)
+  ([#144](https://github.com/stillwater-sc/mtl5-python/pull/144),
+  [`d8675bf`](https://github.com/stillwater-sc/mtl5-python/commit/d8675bfa4cf7843b8a35679252b9ae94a0bd308e))
+
+- **bench**: Cross-machine edge cases from the local review (#121 P4)
+  ([#144](https://github.com/stillwater-sc/mtl5-python/pull/144),
+  [`d8675bf`](https://github.com/stillwater-sc/mtl5-python/commit/d8675bfa4cf7843b8a35679252b9ae94a0bd308e))
+
+### Features
+
+- **bench**: Cross-machine tables and figures (#121 P4)
+  ([#144](https://github.com/stillwater-sc/mtl5-python/pull/144),
+  [`d8675bf`](https://github.com/stillwater-sc/mtl5-python/commit/d8675bfa4cf7843b8a35679252b9ae94a0bd308e))
+
+### Testing
+
+- **bench**: Read the pinned Markdown tables as UTF-8 (#121 P4)
+  ([#144](https://github.com/stillwater-sc/mtl5-python/pull/144),
+  [`d8675bf`](https://github.com/stillwater-sc/mtl5-python/commit/d8675bfa4cf7843b8a35679252b9ae94a0bd308e))
+
+- **bench**: Run the figure tests outside the checkout
+  ([#143](https://github.com/stillwater-sc/mtl5-python/pull/143),
+  [`c2c71ce`](https://github.com/stillwater-sc/mtl5-python/commit/c2c71cea1ecbf5a0f8a080ef8e8305524515e497))
+
+
 ## v5.25.3 (2026-11-25)
 
 ### Bug Fixes
