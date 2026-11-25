@@ -383,7 +383,11 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
             reasons.append(f"sidecar pool_size={fields['pool_size']!r} is not an integer")
         elif pool != threads:
             reasons.append(f"sidecar pool_size={pool} but probes.threads={threads}")
-    vendor = fields.get("blas_vendor") or _str(doc["probes"].get("blas_vendor")) or ""
+    side_vendor = fields.get("blas_vendor") or ""
+    probe_vendor = _str(doc["probes"].get("blas_vendor")) or ""
+    if side_vendor and probe_vendor and side_vendor != probe_vendor:
+        raise _Rejected(f"sidecar says blas_vendor={side_vendor!r}, the probes {probe_vendor!r}")
+    vendor = side_vendor or probe_vendor
     if doc["label"] == "blas" and not vendor:
         # Without the vendor, OpenBLAS and MKL runs would share one series.
         reasons.append("a blas run with no blas_vendor in the sidecar or the probes")

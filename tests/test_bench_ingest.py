@@ -393,6 +393,13 @@ class TestRejected:
         _dump(tree, I7_A, doc)
         assert self._rejected(tree) == f"results[2].{key} is negative"
 
+    def test_sidecar_and_probes_disagree_on_the_blas_vendor(self, tree):
+        doc = _load(tree, I7_A)
+        doc["probes"]["blas_vendor"] = "mkl"
+        _dump(tree, I7_A, doc)
+        _edit_sidecar(tree, I7_A, blas_vendor="openblas")
+        assert self._rejected(tree) == "sidecar says blas_vendor='openblas', the probes 'mkl'"
+
     def test_orphan_sidecar(self, tree):
         (tree / I7_A).unlink()
         _, report = bench.ingest(tree)
