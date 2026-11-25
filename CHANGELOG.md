@@ -1307,6 +1307,57 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.3 (2026-11-25)
+
+### Bug Fixes
+
+- **bench**: A figure keeps a copy of its frame (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+- **bench**: Dirty trees, problem class, formats and legend tags (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+- **bench**: Keep vendors, runs and text apart in the figures (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+- **bench**: Refuse mixed points in rate_vs_size; keep empty scaling frames (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+- **bench**: The analyses refuse a database of another schema version (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+- **bench**: Thread scaling compares only clean, committed runs (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+- **bench**: Thread scaling needs a recorded commit (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+### Documentation
+
+- **changelog**: P3 scaling and rate rules
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+### Features
+
+- **bench**: House style and core figures from pinned DataFrames (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+### Testing
+
+- **bench**: Check out benchmark fixtures byte for byte (#121 P3)
+  ([#142](https://github.com/stillwater-sc/mtl5-python/pull/142),
+  [`cf79106`](https://github.com/stillwater-sc/mtl5-python/commit/cf79106e801aab5135dcea8f16526e860ca837e0))
+
+
 ## v5.25.2 (2026-11-25)
 
 ### Bug Fixes
