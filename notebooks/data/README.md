@@ -15,3 +15,23 @@ example on MATLAB's `colamd` page.
 
 Reference: I. S. Duff, R. G. Grimes and J. G. Lewis, "Sparse matrix test
 problems", *ACM Transactions on Mathematical Software* 15(1), 1989, 1–14.
+
+## `mtl5-bench/`: a sample of MTL5's benchmark data
+
+Read by `benchmark_analysis.ipynb`. It's a subset of MTL5's committed
+`benchmarks/data`, in MTL5's own layout, and the files are byte-for-byte copies
+from stillwater-sc/mtl5 at `1dcc9a0`. The files are unchanged there since
+`20feb69`. Each result file comes with its `.sysinfo` sidecar. The sample is
+chosen so every figure of the notebook has its data:
+
+| Files | For |
+|---|---|
+| `i7-12700k/mtl5_bench/20261112T004852Z/native-t{1,8}.json`, `…/20261111T190041Z/native-t8.json` | the capability card, the roofline and thread scaling; two 8-thread sessions at one commit for the cross-machine part |
+| `jetson-orin/mtl5_bench/2026111{1T190610Z,1T193624Z}/native-t6.json` | two 6-thread sessions at `bfa1c28` |
+| `arduino-ventuno-q/mtl5_bench/20261111T{185721Z,191603Z}/native-t4.json` | two 4-thread sessions at `bfa1c28` |
+| `arduino-ventuno-q/mtl5_bench/*/native-fast-t1.json` (six sessions) | a trend over three commits (`bfa1c28`, `967d20a`, `bf315e4`), two sessions each, with a real series break: from `bf315e4` the build names its target (`-march=armv8.2-a+dotprod…`) |
+| `blas_sweep_blis.csv` | rate against problem size; a `bench_all` sweep whose sidecar predates the provenance rules, so it's in the incomplete tier |
+
+The notebook reads a full MTL5 checkout instead when `MTL5_BENCH_DATA` names its
+`benchmarks/data` directory. To refresh the sample, copy the same paths from a
+newer MTL5 checkout and update the commit above.

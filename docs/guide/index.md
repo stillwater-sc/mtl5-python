@@ -24,3 +24,10 @@ scipy-interop
 
 ../notebooks/generators
 ```
+
+```{toctree}
+:maxdepth: 1
+:caption: Benchmark data
+
+../notebooks/benchmark_analysis
+```

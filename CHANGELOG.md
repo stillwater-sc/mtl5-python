@@ -15,6 +15,22 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Benchmark analysis notebook** (#121, milestone P8).
+  - `notebooks/benchmark_analysis.ipynb`, on the site under the user guide's
+    "Benchmark data", takes a sample of MTL5's committed benchmark data
+    through `mtl5.bench` end to end: ingest and the provenance tiers; a
+    machine's capability card, roofline and thread scaling; cross-machine
+    tables, the machine balance and a comparison; a trend report with
+    confidence intervals, a real series break and change-point detection;
+    and publication output, with a figure redrawn byte for byte from its
+    saved CSV. It also lists the command-line equivalent of each step.
+  - The sample, `notebooks/data/mtl5-bench`, is 28 files copied byte for byte
+    from MTL5 at `1dcc9a0`, in MTL5's layout, chosen so every figure has its
+    data (`notebooks/data/README.md`). Set `MTL5_BENCH_DATA` to analyse a
+    full checkout instead.
+  - The `notebooks` and `docs` extras now include DuckDB and pandas, which
+    the notebook needs.
+
 - **Trends in `mtl5.bench`** (#121, milestone P5).
   - **Only comparable runs:** `analyze.trend` reads one entry's history on
     one machine, at one label and thread count, from the `trend_results`
