@@ -259,6 +259,15 @@ class TestEdges:
         assert o.status == "rejected"
         assert o.reasons[0].startswith("sidecar says compiler_version='gcc 99', column")
 
+    def test_pool_size_not_an_integer(self, tree):
+        # interleave_rows is exempt from pool_size, but a bad value is still bad.
+        side = tree / (INTERLEAVE + ".sysinfo")
+        side.write_text(side.read_text() + "pool_size=invalid\n")
+        _, report = _ingest(tree)
+        assert _status(report, INTERLEAVE).reasons == [
+            "sidecar pool_size='invalid' is not an integer"
+        ]
+
     def test_status_gates_a_scoreboard_value(self, tree):
         rel = "i7-12700k/superlu/20261117T202641Z/x.csv"
         (tree / rel).parent.mkdir(parents=True)
@@ -476,6 +485,16 @@ class TestGitTime:
         assert _status(report, moved).status == "ingested"
         ts = _scalar(con, "SELECT run_timestamp FROM runs WHERE path = ?", [moved])
         assert ts.isoformat() == "2026-11-21T10:00:00"
+
+    def test_a_file_name_that_looks_like_metadata(self, tmp_path):
+        root = self._tree(tmp_path)
+        (root / "@@notes.csv").write_text("alpha\n1\n")
+        (root / "1700000000").write_text("x\n")
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "add")
+        _, report = bench.ingest(root)
+        assert _status(report, self.REL).status == "ingested"
+        assert _status(report, "@@notes.csv").status == "deferred"
 
     def test_switched_off(self, tmp_path):
         root = self._tree(tmp_path)

@@ -581,6 +581,8 @@ def _parse_table_run(
     if sidecar_text is not None:
         required = [k for k in si.REQUIRED_KEYS if k not in fmt.exempt]
         reasons += _sidecar_gaps(fields, required)
+    if "pool_size" in fields and _int(fields["pool_size"]) is None:
+        reasons.append(f"sidecar pool_size={fields['pool_size']!r} is not an integer")
     if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
         reasons.append("dirty build: the commit does not identify the code")
 
@@ -810,7 +812,8 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
                 # A rename is not an add of the new name unless renames are off.
                 "--no-renames",
                 "--relative",
-                "--format=@@%ct",
+                # A NUL starts each commit's line: no file name can hold one.
+                "--format=%x00%ct",
                 "--name-only",
                 "--",
                 ".",
@@ -824,8 +827,11 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
     times: dict[str, datetime] = {}
     when = None
     for line in out.splitlines():
-        if line.startswith("@@"):
-            when = datetime.fromtimestamp(int(line[2:]), timezone.utc).replace(tzinfo=None)
+        if line.startswith("\x00"):
+            try:
+                when = datetime.fromtimestamp(int(line[1:]), timezone.utc).replace(tzinfo=None)
+            except (ValueError, OverflowError, OSError):
+                when = None
         elif line and when is not None:
             # git log runs newest first, so the last assignment is the first add.
             times[line] = when
