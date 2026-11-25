@@ -1267,6 +1267,45 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.2 (2026-11-25)
+
+### Bug Fixes
+
+- **bench**: Fill missing bench_blas fields; reject a column contradicting the sidecar
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+- **bench**: NUL-framed git log metadata; a bad pool_size in a legacy run
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+- **bench**: Read git names NUL-separated; skip an absent column's sidecar check
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+- **bench**: Run git without inherited repository-location variables
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+- **bench**: Say why git gave no run time; no git times from a shallow clone
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+- **bench**: Scoreboard series by file; blas vendor in legacy runs; all-failed bench_blas
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+### Features
+
+- **bench**: Ingest MTL5's CSV formats and bench_blas.py JSON
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+- **bench**: Ingest MTL5's CSV formats and bench_blas.py JSON (#121 P2)
+  ([#141](https://github.com/stillwater-sc/mtl5-python/pull/141),
+  [`5b6fa93`](https://github.com/stillwater-sc/mtl5-python/commit/5b6fa939982895c4664a99e0e89c3cfc1821ca1f))
+
+
 ## v5.25.1 (2026-11-25)
 
 ### Bug Fixes
