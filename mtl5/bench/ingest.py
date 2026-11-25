@@ -384,7 +384,8 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
         elif pool != threads:
             reasons.append(f"sidecar pool_size={pool} but probes.threads={threads}")
     side_vendor = fields.get("blas_vendor") or ""
-    probe_vendor = _str(doc["probes"].get("blas_vendor")) or ""
+    # Stripped like every sidecar value, so whitespace is no vendor.
+    probe_vendor = (_str(doc["probes"].get("blas_vendor")) or "").strip()
     if side_vendor and probe_vendor and side_vendor != probe_vendor:
         raise _Rejected(f"sidecar says blas_vendor={side_vendor!r}, the probes {probe_vendor!r}")
     vendor = side_vendor or probe_vendor

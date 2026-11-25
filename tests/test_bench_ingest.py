@@ -236,8 +236,12 @@ class TestIncomplete:
         _dump(tree, rel, doc)
         _edit_sidecar(tree, rel, label="blas", blas_vendor="")
 
-    def test_blas_run_without_a_vendor(self, tree):
+    @pytest.mark.parametrize("probe", ["", "   "])
+    def test_blas_run_without_a_vendor(self, tree, probe):
         self._as_blas(tree, I7_A)
+        doc = _load(tree, I7_A)
+        doc["probes"]["blas_vendor"] = probe
+        _dump(tree, I7_A, doc)
         _, report = bench.ingest(tree)
         assert _status(report, I7_A).reasons == [
             "a blas run with no blas_vendor in the sidecar or the probes"
