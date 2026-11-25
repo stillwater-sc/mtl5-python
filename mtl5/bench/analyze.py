@@ -45,6 +45,7 @@ _RUN_COLUMNS = """
     r.machine_dir,
     r.machine_fingerprint,
     r.label,
+    r.class,
     r.threads,
     r.backend,
     r.build_config,
@@ -270,7 +271,8 @@ def thread_scaling(
     Only runs with a recorded commit and a clean tree are compared. The
     reference is the latest multi-threaded run. The runs compared are the
     latest run for each thread count among runs of the same physical machine,
-    label, backend (with the BLAS vendor), commit, build configuration and
+    label, problem class, backend (with the BLAS vendor), commit, build
+    configuration and
     machine state (less the CPUs it ran on) as the reference, so only the
     thread count differs. ``entries`` keeps the entries whose id is, or starts
     with, one of the given prefixes
@@ -310,6 +312,7 @@ def thread_scaling(
         key = [
             "machine_fingerprint",
             "label",
+            "class",
             "backend",
             "build_config",
             "_state",

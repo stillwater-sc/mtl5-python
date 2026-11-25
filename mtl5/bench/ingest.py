@@ -359,6 +359,20 @@ class _Run:
     measurements: list[dict] = field(default_factory=list)
 
 
+def _dirty(fields: dict[str, str]) -> bool | None:
+    """Whether the build or the tree it was built from was dirty.
+
+    ``git_dirty`` is the build's own record and ``tree_git_dirty`` the
+    preflight's look at the checkout. Either one set means the commit does
+    not identify the code, so the stored ``git_dirty`` is both. None when
+    the sidecar records neither.
+    """
+    keys = [k for k in ("git_dirty", "tree_git_dirty") if k in fields]
+    if not keys:
+        return None
+    return any(fields[k] != "0" for k in keys)
+
+
 def _sidecar_gaps(fields: dict[str, str], required) -> list[str]:
     """The reasons a sidecar's required keys are missing or empty."""
     reasons = []
@@ -404,7 +418,7 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
     if doc["label"] == "blas" and not vendor:
         # Without the vendor, OpenBLAS and MKL runs would share one series.
         reasons.append("a blas run with no blas_vendor in the sidecar or the probes")
-    if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
+    if _dirty(fields):
         reasons.append("dirty build: the commit does not identify the code")
     timestamp = _run_timestamp(rel)
     if timestamp is None:
@@ -449,7 +463,7 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
         "state_class": state,
         "config_key": config_key,
         "git_commit": fields.get("git_commit"),
-        "git_dirty": None if "git_dirty" not in fields else fields["git_dirty"] != "0",
+        "git_dirty": _dirty(fields),
         "os_version": fields.get("os_version"),
         "blas_vendor": vendor or None,
         "thermal_before_c": _float_str(fields.get("thermal_before_c")),
@@ -589,7 +603,7 @@ def _parse_table_run(
     if fields.get("label") == "blas" and not fields.get("blas_vendor"):
         # As for mtl5_bench: without the vendor, OpenBLAS and MKL share a series.
         reasons.append("a blas run with no blas_vendor in the sidecar")
-    if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
+    if _dirty(fields):
         reasons.append("dirty build: the commit does not identify the code")
 
     timestamp, time_source = _run_timestamp(rel), "directory"
@@ -645,7 +659,7 @@ def _parse_table_run(
         "state_class": state,
         "config_key": config_key,
         "git_commit": fields.get("git_commit"),
-        "git_dirty": None if "git_dirty" not in fields else fields["git_dirty"] != "0",
+        "git_dirty": _dirty(fields),
         "os_version": fields.get("os_version"),
         "blas_vendor": vendor or None,
         "thermal_before_c": _float_str(fields.get("thermal_before_c")),

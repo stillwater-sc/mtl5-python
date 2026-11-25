@@ -37,6 +37,7 @@ __all__ = [
     "WIDTH_DOUBLE",
     "FORMATS",
     "rc_params",
+    "check_formats",
     "house_style",
     "series_style",
     "save",
@@ -140,18 +141,32 @@ _METADATA = {
 }
 
 
+def check_formats(formats: Iterable[str]) -> None:
+    """Raise ValueError unless every format is one :func:`save` writes.
+
+    :func:`save` checks the whole list before it writes a file, so a bad
+    format leaves no partial output.
+    """
+    bad = [f for f in formats if f not in _METADATA]
+    if bad:
+        raise ValueError(
+            f"unsupported format{'s' if len(bad) > 1 else ''} {', '.join(map(repr, bad))}; "
+            f"use {', '.join(sorted(_METADATA))}"
+        )
+
+
 def save(fig, stem: str | os.PathLike, formats: Iterable[str] = FORMATS) -> list[Path]:
     """Write ``fig`` as ``stem.<format>`` for each format; return the paths.
 
     The files carry no timestamp, so the same figure gives the same bytes.
     """
+    formats = list(formats)
+    check_formats(formats)
     stem = Path(stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     paths = []
     with house_style():
         for fmt in formats:
-            if fmt not in _METADATA:
-                raise ValueError(f"unsupported format {fmt!r}; use one of {sorted(_METADATA)}")
             path = stem.with_name(f"{stem.name}.{fmt}")
             fig.savefig(path, format=fmt, metadata=_METADATA[fmt])
             paths.append(path)

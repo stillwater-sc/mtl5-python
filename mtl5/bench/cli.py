@@ -45,8 +45,15 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
 
 def _cmd_figure(args: argparse.Namespace) -> int:
     from . import analyze, plot
+    from .style import check_formats
 
     tiers = ("complete", "incomplete") if args.include_incomplete else ("complete",)
+    formats = [f.strip() for f in args.format.split(",") if f.strip()]
+    try:
+        check_formats(formats)
+    except ValueError as exc:
+        print(f"mtl5-bench: {exc}", file=sys.stderr)
+        return 2
     db = args.db
     if not Path(db).exists():
         print(f"mtl5-bench: no database {db}; run 'mtl5-bench ingest' first", file=sys.stderr)
@@ -101,7 +108,12 @@ def _cmd_figure(args: argparse.Namespace) -> int:
         print(f"mtl5-bench: {exc}", file=sys.stderr)
         return 1
     out = args.out or f"{args.kind}-{args.machine or 'all'}"
-    for path in fig.save(out, args.format.split(","), data=not args.no_data):
+    try:
+        paths = fig.save(out, formats, data=not args.no_data)
+    except (OSError, ValueError) as exc:
+        print(f"mtl5-bench: {exc}", file=sys.stderr)
+        return 1
+    for path in paths:
         print(path)
     return 0
 

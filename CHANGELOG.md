@@ -40,10 +40,14 @@ against, and semantic-release manages only the **patch** component.
   - **Run selection.** Incomplete runs are read only on request
     (`tiers=`, or `--include-incomplete`).
   - **Thread scaling** compares the latest multi-threaded run with a 1-thread
-    run of the same backend (BLAS vendor included), commit, build and machine
-    state. Only runs with a recorded commit and a clean tree qualify. Pinning
+    run of the same problem class, backend (BLAS vendor included), commit,
+    build and machine state. Only runs with a recorded commit and a clean tree qualify. Pinning
     is left out of the state: a 1- and an 8-thread run differ in their CPUs
     by design.
+  - **Dirty trees:** the stored `git_dirty` is set when either the build
+    (`git_dirty`) or the preflight's checkout (`tree_git_dirty`) was dirty,
+    as the tier rule already was. The schema moves to version 3, so a
+    version 2 database asks to be rebuilt.
   - **Rate against size** draws one line per run. Rows of one point that
     differ in a column the format does not model are refused, not averaged.
   - **Layout.** The layout is fixed once when a figure is built. Left to

@@ -446,6 +446,44 @@ def test_scaling_does_not_compare_dirty_builds(tmp_path):
     con.close()
 
 
+def test_scaling_does_not_compare_a_dirty_tree(tmp_path):
+    # git_dirty=0 with tree_git_dirty=1 was stored as clean, so with
+    # incomplete runs read, a dirty-tree run could be the baseline.
+    root = _copy_fixture(tmp_path)
+    _edit_sysinfo(root / RUN_DIR / "native-t1.json.sysinfo", tree_git_dirty="1")
+    con, _ = ingest(root, time_from_git=False)
+    dirty = con.execute("SELECT git_dirty FROM runs WHERE path LIKE '%native-t1.json'").fetchone()[
+        0
+    ]
+    assert dirty is True
+    with pytest.raises(LookupError, match="1-thread run"):
+        analyze.thread_scaling(con, "i7-12700k", tiers=INCOMPLETE)
+    con.close()
+
+
+def test_scaling_stays_within_the_problem_class(tmp_path):
+    # A newer 1-thread run of another class was taken as the baseline of a
+    # medium-class 8-thread run.
+    import json
+
+    root = _copy_fixture(tmp_path)
+    later = root / "i7-12700k/mtl5_bench/20261113T000000Z"
+    later.mkdir(parents=True)
+    doc = json.loads((root / RUN_DIR / "native-t1.json").read_text())
+    doc["class"] = "small"
+    (later / "native-t1.json").write_text(json.dumps(doc))
+    side = (root / RUN_DIR / "native-t1.json.sysinfo").read_text()
+    (later / "native-t1.json.sysinfo").write_text(side.replace("class=medium", "class=small"))
+    con, _ = ingest(root, time_from_git=False)
+    medium_t1 = con.execute(
+        f"SELECT run_id FROM runs WHERE path = '{RUN_DIR}/native-t1.json'"
+    ).fetchone()[0]
+    df = analyze.thread_scaling(con, "i7-12700k")
+    con.close()
+    assert set(df.loc[df["threads"] == 1, "run_id"]) == {medium_t1}
+    assert set(df["class"]) == {"medium"}
+
+
 def test_scaling_does_not_pair_blas_vendors(tmp_path):
     # Every vendor's runs are labelled "blas": only the backend tells a
     # 1-thread OpenBLAS run from an 8-thread MKL one.
@@ -541,9 +579,8 @@ def test_rate_reduces_repeated_samples_to_their_median(tmp_path):
     con.close()
 
 
-def test_rate_keeps_two_runs_of_one_backend_apart(tmp_path):
-    # Two runs of one backend were merged into one median per size: rates of
-    # 10 and 30 plotted as 20, which neither run measured.
+def _two_blis_runs(tmp_path, **sidecar):
+    """The fixture with a second BLIS sweep at 3x the rates, as two runs."""
     root = _copy_fixture(tmp_path)
     src = root / "blas_sweep_blis.csv"
     other = root / "blas_sweep_blis_rebuilt.csv"
@@ -554,12 +591,20 @@ def test_rate_keeps_two_runs_of_one_backend_apart(tmp_path):
         f[8] = str(float(f[8]) * 3)
         rows.append(",".join(f))
     other.write_text("\n".join(rows) + "\n")
-    (root / "blas_sweep_blis_rebuilt.csv.sysinfo").write_text(
-        (root / "blas_sweep_blis.csv.sysinfo").read_text()
-    )
+    text = (root / "blas_sweep_blis.csv.sysinfo").read_text()
+    text += "".join(f"{k}={v}\n" for k, v in sidecar.items())
+    for name in ("blas_sweep_blis.csv.sysinfo", "blas_sweep_blis_rebuilt.csv.sysinfo"):
+        (root / name).write_text(text)
     con, _ = ingest(root, time_from_git=False)
     df = analyze.rate_vs_size(con, operations=["gemm"], tiers=INCOMPLETE)
     con.close()
+    return df
+
+
+def test_rate_keeps_two_runs_of_one_backend_apart(tmp_path):
+    # Two runs of one backend were merged into one median per size: rates of
+    # 10 and 30 plotted as 20, which neither run measured.
+    df = _two_blis_runs(tmp_path)
     fig = plot.rate_vs_size(df)
     lines = _lines(fig)
     assert len(lines) == 2
@@ -567,6 +612,14 @@ def test_rate_keeps_two_runs_of_one_backend_apart(tmp_path):
         rows = df[df["run_id"] == run].sort_values("size")
         label = f"gemm (blis), run {run[:7]}"
         assert list(lines[label].get_ydata()) == list(rows["value"])
+
+
+def test_rate_labels_runs_of_one_commit_apart(tmp_path):
+    # Two runs at one commit both took the commit as their legend tag, so the
+    # figure had two lines with one label.
+    df = _two_blis_runs(tmp_path, git_commit="abc1234567")
+    lines = _lines(plot.rate_vs_size(df))
+    assert set(lines) == {f"gemm (blis), abc1234 ({run[:7]})" for run in df["run_id"].unique()}
 
 
 def test_rate_refuses_rows_that_are_different_points(tmp_path):
@@ -666,6 +719,15 @@ def test_cli_rate_points_at_include_incomplete(db, tmp_path, capsys):
     assert "--include-incomplete" in capsys.readouterr().err
     args = ["figure", "rate", "--db", db, "--operation", "gemm", "--out", out]
     assert main([*args, "--include-incomplete", "--format", "svg"]) == 0
+
+
+def test_cli_checks_every_format_before_writing(db, tmp_path, capsys):
+    # svg was written, then jpg raised an uncaught ValueError.
+    out = tmp_path / "card"
+    args = ["figure", "card", "--db", db, "--machine", "i7-12700k", "--out", str(out)]
+    assert main([*args, "--format", "svg,jpg"]) == 2
+    assert "unsupported format 'jpg'" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_cli_needs_a_database(tmp_path, capsys):

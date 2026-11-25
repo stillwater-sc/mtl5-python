@@ -462,9 +462,19 @@ def rate_vs_size(df, *, max_series: int = 12) -> BenchFigure:
     )
     _check_series(len(keys), max_series, "series (machine, operation, backend, run)")
     several = len({k[0] for k in keys}) > 1
-    runs_per = {}
-    for m, op, b, _ in keys:
-        runs_per[(m, op, b)] = runs_per.get((m, op, b), 0) + 1
+    # Runs of one (machine, operation, backend) are told apart in the legend
+    # by their commit or date, and by their id where those collide.
+    tags: dict[tuple, str] = {}
+    by_series: dict[tuple, list[str]] = {}
+    for m, op, b, run in keys:
+        by_series.setdefault((m, op, b), []).append(run)
+    for series, runs in by_series.items():
+        if len(runs) < 2:
+            continue
+        short = {run: _run_tag(df[df["run_id"] == run].iloc[0]) for run in runs}
+        for run in runs:
+            clash = sum(t == short[run] for t in short.values()) > 1
+            tags[(*series, run)] = f"{short[run]} ({str(run)[:7]})" if clash else short[run]
     units = sorted(df["unit"].dropna().unique())
     metric = df["metric"].iloc[0] if "metric" in df else "rate"
     with style.house_style():
@@ -475,8 +485,8 @@ def rate_vs_size(df, *, max_series: int = 12) -> BenchFigure:
             pts = pts[(pts["operation"] == op) & (pts["backend"] == backend)]
             pts = pts.groupby("size", as_index=False)["value"].median().sort_values("size")
             label = f"{op} ({backend})" + (f", {machine}" if several else "")
-            if runs_per[(machine, op, backend)] > 1:
-                label += f", {_run_tag(df[df['run_id'] == run].iloc[0])}"
+            if (machine, op, backend, run) in tags:
+                label += f", {tags[(machine, op, backend, run)]}"
             ax.plot(pd.to_numeric(pts["size"]), pts["value"], label=label, **_line_style(i))
         ax.set_xscale("log", base=2)
         ax.set_xlabel("problem size n")
