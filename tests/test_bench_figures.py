@@ -730,6 +730,46 @@ def test_cli_checks_every_format_before_writing(db, tmp_path, capsys):
     assert list(tmp_path.iterdir()) == []
 
 
+def _old_database(tmp_path) -> str:
+    path = tmp_path / "old.duckdb"
+    con, _ = ingest(DATA, path, time_from_git=False)
+    con.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
+    con.close()
+    return str(path)
+
+
+@pytest.mark.parametrize("kind", sorted(FRAMES))
+def test_an_older_database_is_refused(tmp_path, kind):
+    # Version 2 stored git_dirty without tree_git_dirty. Ingest refused the old
+    # database, but the analyses read it and its stale clean flags.
+    with pytest.raises(ValueError, match="rebuild"):
+        FRAMES[kind](_old_database(tmp_path))
+
+
+def test_an_older_connection_is_refused(tmp_path):
+    import duckdb
+
+    con = duckdb.connect(_old_database(tmp_path), read_only=True)
+    with pytest.raises(ValueError, match="schema version 2"):
+        analyze.thread_scaling(con, "i7-12700k")
+    con.close()
+
+
+def test_a_foreign_database_is_refused(tmp_path):
+    import duckdb
+
+    path = str(tmp_path / "other.duckdb")
+    duckdb.connect(path).close()
+    with pytest.raises(ValueError, match="not an mtl5.bench database"):
+        analyze.capability(path, "i7-12700k")
+
+
+def test_cli_reports_an_older_database(tmp_path, capsys):
+    db = _old_database(tmp_path)
+    assert main(["figure", "card", "--db", db, "--machine", "i7-12700k"]) == 1
+    assert "--rebuild" in capsys.readouterr().err
+
+
 def test_cli_needs_a_database(tmp_path, capsys):
     db = str(tmp_path / "none.duckdb")
     assert main(["figure", "card", "--db", db, "--machine", "m"]) == 2

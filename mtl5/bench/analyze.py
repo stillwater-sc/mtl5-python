@@ -9,6 +9,9 @@ Every frame carries the provenance columns (:data:`PROVENANCE_COLUMNS`): the
 run, its machine, its commit, its time and its provenance tier. The figures'
 provenance footers are computed from them.
 
+A database of another schema version is refused with ``ValueError``: it is
+a cache, rebuilt with ``mtl5-bench ingest --rebuild``.
+
 Which runs are read
 -------------------
 Only current runs are read, and by default only runs in the ``complete``
@@ -91,9 +94,43 @@ def _connection(db: Any):
     return db, False
 
 
+def _check_schema(con, db: Any) -> None:
+    """Refuse a database of another schema version, or not a benchmark one.
+
+    The database is a cache, and a column can change its meaning between
+    versions (in version 3, ``git_dirty`` came to cover ``tree_git_dirty``),
+    so an older database would answer with stale values.
+    """
+    from .schema import SCHEMA_VERSION
+
+    name = os.fspath(db) if isinstance(db, (str, os.PathLike)) else "the database"
+    try:
+        meta = dict(
+            con.execute(
+                "SELECT key, value FROM meta WHERE key IN ('application', 'schema_version')"
+            ).fetchall()
+        )
+    except Exception as exc:  # duckdb.CatalogException: no meta table
+        raise ValueError(f"{name} is not an mtl5.bench database") from exc
+    if meta.get("application") != "mtl5.bench":
+        raise ValueError(f"{name} is not an mtl5.bench database")
+    if meta.get("schema_version") != str(SCHEMA_VERSION):
+        raise ValueError(
+            f"{name} has benchmark schema version {meta.get('schema_version')}, this "
+            f"mtl5.bench reads version {SCHEMA_VERSION}; rebuild it with "
+            "'mtl5-bench ingest ROOT --db ... --rebuild'"
+        )
+
+
 class _Db:
     def __init__(self, db: Any):
         self.con, self.owned = _connection(db)
+        try:
+            _check_schema(self.con, db)
+        except BaseException:
+            if self.owned:
+                self.con.close()
+            raise
 
     def __enter__(self):
         return self.con
