@@ -251,6 +251,14 @@ class TestEdges:
             o.status == "rejected" and "'compiler_version' has 2 different values" in o.reasons[0]
         )
 
+    def test_a_column_contradicting_the_sidecar(self, tree):
+        side = tree / (INTERLEAVE + ".sysinfo")
+        side.write_text(side.read_text() + "compiler_version=gcc 99\n")
+        _, report = _ingest(tree)
+        o = _status(report, INTERLEAVE)
+        assert o.status == "rejected"
+        assert o.reasons[0].startswith("sidecar says compiler_version='gcc 99', column")
+
     def test_status_gates_a_scoreboard_value(self, tree):
         rel = "i7-12700k/superlu/20261117T202641Z/x.csv"
         (tree / rel).parent.mkdir(parents=True)
@@ -372,6 +380,17 @@ class TestBenchBlas:
             ("posit32", "gflops", False, None),
             ("posit32", "seconds_per_op", False, None),
         ]
+
+    def test_a_failed_result_without_metric_keys(self, tree):
+        doc = _bench_blas_doc()
+        for key in ("seconds_per_op", "gflops"):
+            del doc["results"][1][key]
+        self._write(tree, doc)
+        con, report = _ingest(tree)
+        assert _status(report, self.REL).status == "ingested"
+        rid = _run_id(con, self.REL)
+        n = "SELECT count(*) FROM measurements WHERE run_id = ? AND NOT valid"
+        assert _scalar(con, n, [rid]) == 2
 
     def test_without_a_sidecar(self, tree):
         self._write(tree, _bench_blas_doc(), sidecar=False)

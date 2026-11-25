@@ -573,8 +573,11 @@ def _parse_table_run(
         values = {row.get(column, "") for row in table.rows}
         if len(values) > 1:
             raise _Rejected(f"column {column!r} has {len(values)} different values")
-        if values and key not in fields:
-            fields[key] = values.pop()
+        if values:
+            value = values.pop()
+            if key in fields and fields[key] != value:
+                raise _Rejected(f"sidecar says {key}={fields[key]!r}, column {column!r} {value!r}")
+            fields[key] = value
     if sidecar_text is not None:
         required = [k for k in si.REQUIRED_KEYS if k not in fmt.exempt]
         reasons += _sidecar_gaps(fields, required)
@@ -705,6 +708,11 @@ def _bench_blas_table(doc: dict) -> fm.ParsedTable:
                 raise _Rejected(f"bench_blas JSON: results[{i}].{k} is not a scalar")
             row[k] = "" if v is None else str(v).lower() if isinstance(v, bool) else str(v)
         rows.append(row)
+    # A failed result omits the metrics a passing one has: every row gets
+    # every column, so a missing value is an empty field, as in a CSV.
+    for row in rows:
+        for key in header:
+            row.setdefault(key, "")
     return fm.ParsedTable(header, rows, [])
 
 
