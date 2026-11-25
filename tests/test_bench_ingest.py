@@ -229,6 +229,32 @@ class TestIncomplete:
         assert _status(report, I7_A).reasons == ["sidecar lacks clock_policy, bench_cpus"]
         assert I7_A not in _trend_paths(con)
 
+    def _as_blas(self, tree, rel):
+        doc = _load(tree, rel)
+        doc["label"] = "blas"
+        doc["probes"]["blas_vendor"] = ""
+        _dump(tree, rel, doc)
+        _edit_sidecar(tree, rel, label="blas", blas_vendor="")
+
+    def test_blas_run_without_a_vendor(self, tree):
+        self._as_blas(tree, I7_A)
+        _, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == [
+            "a blas run with no blas_vendor in the sidecar or the probes"
+        ]
+
+    def test_blas_vendor_from_the_probes_is_part_of_the_key(self, tree):
+        for rel, vendor in ((I7_A, "openblas"), (I7_B, "mkl")):
+            self._as_blas(tree, rel)
+            doc = _load(tree, rel)
+            doc["probes"]["blas_vendor"] = vendor
+            _dump(tree, rel, doc)
+        con, report = bench.ingest(tree)
+        assert _status(report, I7_A).status == "ingested"
+        keys = dict(con.execute("SELECT path, config_key FROM runs").fetchall())
+        assert keys[I7_A] != keys[I7_B]
+        assert _scalar(con, "SELECT backend FROM runs WHERE path = ?", [I7_B]) == "blas (mkl)"
+
     def test_empty_commit_and_host(self, tree):
         _edit_sidecar(tree, I7_A, git_commit="", preflight_host=" ", cxx_flags="")
         _, report = bench.ingest(tree)
@@ -360,6 +386,13 @@ class TestRejected:
         _dump(tree, I7_A, doc)
         assert self._rejected(tree) == "skipped[0].reason is not a string"
 
+    @pytest.mark.parametrize("key", ["median_s", "min_s"])
+    def test_negative_timing(self, tree, key):
+        doc = _load(tree, I7_A)
+        doc["results"][2][key] = -1.0
+        _dump(tree, I7_A, doc)
+        assert self._rejected(tree) == f"results[2].{key} is negative"
+
     def test_orphan_sidecar(self, tree):
         (tree / I7_A).unlink()
         _, report = bench.ingest(tree)
@@ -410,6 +443,23 @@ class TestOtherFiles:
         (tree / "run-\\xff.json").unlink()
         con, report = bench.ingest(tree, con)
         assert [o.path for o in report.outcomes if o.status == "removed"] == ["run-\\xff.json"]
+
+    def test_a_stat_error_aborts_the_walk(self, tree, monkeypatch):
+        # Python 3.14's is_file() returns False on PermissionError; stat()
+        # raises on every version, and the walk must not skip the file.
+        real_stat = Path.stat
+
+        def stat(self, *a, **k):
+            if self.name == "native-t1.json" and "jetson-orin" in self.parts:
+                raise PermissionError(13, "Permission denied", str(self))
+            return real_stat(self, *a, **k)
+
+        con, _ = bench.ingest(tree)
+        monkeypatch.setattr(Path, "stat", stat)
+        with pytest.raises(PermissionError):
+            bench.ingest(tree, con)
+        monkeypatch.undo()
+        assert _scalar(con, "SELECT count(*) FROM files WHERE status = 'removed'") == 0
 
     def test_hidden_directories_are_not_walked(self, tree):
         (tree / ".git").mkdir()

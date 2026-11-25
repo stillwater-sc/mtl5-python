@@ -30,6 +30,7 @@ import json
 import math
 import os
 import re
+import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -259,6 +260,10 @@ def _int(v: Any) -> int | None:
     return None
 
 
+def _str(v: Any) -> str | None:
+    return v if isinstance(v, str) else None
+
+
 def _bool(v: Any) -> bool | None:
     return v if isinstance(v, bool) else None
 
@@ -304,6 +309,10 @@ def _validate_json(doc: Any) -> None:
                 raise _Rejected(f"results[{i}] has no string {key!r}")
         if _num(r.get("median_s")) is None:
             raise _Rejected(f"results[{i}] has no finite median_s")
+        for key in ("median_s", "min_s"):
+            value = _num(r.get(key))
+            if value is not None and value < 0:
+                raise _Rejected(f"results[{i}].{key} is negative")
         eid = _entry_id(r)
         if eid in seen:
             raise _Rejected(f"results[{i}] repeats entry {eid!r}")
@@ -374,6 +383,10 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
             reasons.append(f"sidecar pool_size={fields['pool_size']!r} is not an integer")
         elif pool != threads:
             reasons.append(f"sidecar pool_size={pool} but probes.threads={threads}")
+    vendor = fields.get("blas_vendor") or _str(doc["probes"].get("blas_vendor")) or ""
+    if doc["label"] == "blas" and not vendor:
+        # Without the vendor, OpenBLAS and MKL runs would share one series.
+        reasons.append("a blas run with no blas_vendor in the sidecar or the probes")
     if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
         reasons.append("dirty build: the commit does not identify the code")
     timestamp = _run_timestamp(rel)
@@ -383,7 +396,7 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
     tier = "incomplete" if reasons else "complete"
 
     fingerprint = si.machine_fingerprint(fields)
-    backend = si.backend(doc["label"], fields)
+    backend = si.backend(doc["label"], {"blas_vendor": vendor})
     build = si.build_config(fields)
     state = si.state_class(fields)
     config_key = si.short_hash(
@@ -420,7 +433,7 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
         "git_commit": fields.get("git_commit"),
         "git_dirty": None if "git_dirty" not in fields else fields["git_dirty"] != "0",
         "os_version": fields.get("os_version"),
-        "blas_vendor": fields.get("blas_vendor") or None,
+        "blas_vendor": vendor or None,
         "thermal_before_c": _float_str(fields.get("thermal_before_c")),
         "thermal_after_c": _float_str(fields.get("thermal_after_c")),
         "loadavg_1m": _float_str(fields.get("loadavg_1m")),
@@ -541,7 +554,13 @@ def _walk(root: Path, exclude: set[Path]) -> list[str]:
         dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d != "__pycache__")
         for name in sorted(filenames):
             full = Path(dirpath) / name
-            if full.is_file() and full.resolve() not in exclude:
+            try:
+                # stat() raises on a permission error, where is_file() would
+                # (on Python 3.14+) say False and the file would look removed.
+                mode = full.stat().st_mode
+            except FileNotFoundError:  # a dangling symlink, or removed mid-scan
+                continue
+            if stat.S_ISREG(mode) and full.resolve() not in exclude:
                 out.append(full.relative_to(root).as_posix())
     return sorted(out)
 
