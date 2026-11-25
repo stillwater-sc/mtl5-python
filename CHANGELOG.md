@@ -15,6 +15,29 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Legacy benchmark formats in `mtl5.bench`** (#121, milestone P2).
+  - MTL5's CSV harnesses and `bench_blas.py --json` are ingested alongside
+    `mtl5_bench`. Each dialect is a declarative `Format` in
+    `mtl5.bench.formats`: its signature columns, parameters, metrics with
+    units, repeat column, status gates and sidecar exemptions. Formats are
+    matched by header, not file name, and a header no format matches is
+    `deferred` with the header in the reason.
+  - Values go to a long `measurements` table (one row per file row and
+    metric, parameters as JSON) and a `trend_measurements` view.
+  - A file outside a timestamp directory takes its run time from the git
+    commit that added it (`time_source = 'git'`); renames count as adds.
+    Committing a file later re-evaluates it.
+  - The shell harnesses' sidecar spellings (`host`, `cpu`, `commit`) are
+    read as aliases, and `.sidecar-exempt` marks grandfathered files.
+  - **On MTL5's tree at `20feb69`:** all 164 CSVs match a format, with
+    none deferred or rejected, giving 53,116 measurements. Only the 22
+    interleave runs reach the complete tier (5,544 measurements, 924 series).
+    The other CSV harnesses never recorded `clock_policy` and `bench_cpus`,
+    or lack a sidecar, so their runs are ingested but kept out of trends.
+    The 8 n_c model sweeps hold predictions only and are `ignored`.
+  - The database schema moves to version 2 (`measurements`, `time_source`);
+    a version 1 database asks to be rebuilt.
+
 - **Benchmark data ingestion: `mtl5.bench` and `mtl5-bench ingest`** (#121,
   milestone P1).
   - It reads MTL5's `mtl5_bench` results (`mtl5-bench/1` JSON plus the

@@ -156,3 +156,18 @@ wraps {func}`mtl5.bench.ingest`.
    IngestReport
    FileOutcome
 ```
+
+The CSV dialects MTL5's older harnesses write, and `bench_blas.py`'s JSON, are
+described in `mtl5.bench.formats`. Their values land in the `measurements`
+table, one row per file row and metric.
+
+```{eval-rst}
+.. currentmodule:: mtl5.bench.formats
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   Format
+   FORMATS
+```

@@ -421,12 +421,14 @@ class TestOtherFiles:
         (tree / "bench_blas.json").write_text('{"meta": {}, "results": []}')
         _, report = bench.ingest(tree)
         got = {o.path: (o.kind, o.status) for o in report.outcomes}
-        assert got["blas_sweep_mkl.csv"] == ("csv", "deferred")
         assert got["blas_sweep_mkl.csv.sysinfo"] == ("sidecar", "paired")
         assert got["i7-12700k/mtl5_bench/20261111T190041Z/summary.md"] == ("report", "ignored")
         assert got["gemm.png"] == ("figure", "ignored")
         assert got[".sidecar-exempt"] == ("manifest", "ignored")
-        assert got["bench_blas.json"] == ("json", "deferred")
+        # P2 reads both: a header no format matches stays deferred, and a
+        # bench_blas.py document is ingested (incomplete: no sidecar).
+        assert got["blas_sweep_mkl.csv"] == ("csv", "deferred")
+        assert got["bench_blas.json"] == ("bench_blas/1", "incomplete")
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX byte file names")
     def test_a_non_utf8_file_name_is_accounted_for(self, tree):
