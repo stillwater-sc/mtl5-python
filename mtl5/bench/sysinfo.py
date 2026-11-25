@@ -134,7 +134,7 @@ def machine_fingerprint(fields: dict[str, str]) -> str:
     return short_hash(machine_identity(fields))
 
 
-def state_class(fields: dict[str, str]) -> str:
+def state_class(fields: dict[str, str], *, placement: bool = True) -> str:
     """The machine state a run was taken in, as a readable string.
 
     Governor, turbo, power mode, the clock policy (the frequency range, or a
@@ -142,16 +142,23 @@ def state_class(fields: dict[str, str]) -> str:
     and whether the preflight gates were enforced. Thermals and
     load average are not part of it: they are recorded per run as
     measurements, not as the class a run belongs to.
+
+    ``placement=False`` leaves out the CPUs (``cpu_affinity`` and
+    ``bench_cpus``), which change with the thread count: it is the state two
+    runs must share to be compared across thread counts.
     """
     parts = [
         f"governor {fields.get('governor', '?')}",
         f"turbo {fields.get('turbo', '?')}",
         f"power {fields.get('power_mode', '?')}",
         f"clocks {fields.get('clock_policy', '?')}",
-        f"affinity {fields.get('cpu_affinity', '?')}",
-        f"bench_cpus {fields.get('bench_cpus', '?')}",
-        f"gates {fields.get('preflight_gates', '?')}",
     ]
+    if placement:
+        parts += [
+            f"affinity {fields.get('cpu_affinity', '?')}",
+            f"bench_cpus {fields.get('bench_cpus', '?')}",
+        ]
+    parts.append(f"gates {fields.get('preflight_gates', '?')}")
     return " | ".join(parts)
 
 

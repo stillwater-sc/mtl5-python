@@ -49,9 +49,10 @@ from __future__ import annotations
 
 __all__ = ["SCHEMA_VERSION", "DDL"]
 
-#: Bumped when a table changes shape. A database with another version is
+#: Bumped when a table changes shape or a column its meaning (3: git_dirty
+#: covers tree_git_dirty too). A database with another version is
 #: rebuilt rather than migrated: it is a cache of the files.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -101,7 +102,7 @@ CREATE TABLE IF NOT EXISTS runs (
     state_class          VARCHAR,
     config_key           VARCHAR,              -- hash of everything but the entry and the commit
     git_commit           VARCHAR,
-    git_dirty            BOOLEAN,
+    git_dirty            BOOLEAN,              -- the build or its tree (tree_git_dirty) was dirty
     os_version           VARCHAR,
     blas_vendor          VARCHAR,
     thermal_before_c     DOUBLE,

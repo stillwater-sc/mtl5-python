@@ -1,0 +1,7 @@
+# Benchmark fixtures are data, not text: a run's id is the SHA-256 of its
+# files' bytes, so they must check out byte for byte on every platform.
+# Without this, Git on Windows converts them to CRLF and every run id moves.
+tests/data/bench/** -text
+tests/data/bench_legacy/** -text
+tests/data/bench_figures/** -text
+tests/data/bench_figures_expected/** -text
