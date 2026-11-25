@@ -154,7 +154,7 @@ def _machine_list(value: str | None) -> list[str] | None:
 
 
 def _compare_frame(analyze, args, tiers):
-    return analyze.cross_machine(
+    df = analyze.cross_machine(
         args.db,
         args.entry or SCALING_ENTRIES,
         metric=args.metric,
@@ -163,6 +163,9 @@ def _compare_frame(analyze, args, tiers):
         machines=_machine_list(args.machines),
         tiers=tiers,
     )
+    if df.empty:
+        raise LookupError("no results match the entries on these machines")
+    return df
 
 
 def _cmd_table(args: argparse.Namespace) -> int:
@@ -184,8 +187,6 @@ def _cmd_table(args: argparse.Namespace) -> int:
             table = tables.machine_table(df)
         else:
             df = _compare_frame(analyze, args, tiers)
-            if df.empty:
-                raise LookupError("no results match the entries on these machines")
             table = tables.compare_table(df, spread=args.spread and args.format == "md")
     except (LookupError, ValueError) as exc:
         print(f"mtl5-bench: {exc}", file=sys.stderr)
@@ -196,7 +197,8 @@ def _cmd_table(args: argparse.Namespace) -> int:
         text = table.to_csv(index=False)
     if args.out:
         try:
-            Path(args.out).write_text(text)
+            # UTF-8 everywhere: the provenance line has non-ASCII separators.
+            Path(args.out).write_text(text, encoding="utf-8")
         except OSError as exc:
             print(f"mtl5-bench: {exc}", file=sys.stderr)
             return 1
@@ -333,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_table)
 
     args = parser.parse_args(argv)
+    if args.command == "figure" and args.kind in ("balance", "compare") and args.machine:
+        parser.error(f"figure {args.kind} compares machines: select them with --machines")
     if (
         args.command == "figure"
         and args.kind not in ("rate", "balance", "compare")

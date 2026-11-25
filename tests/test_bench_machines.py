@@ -333,6 +333,38 @@ def test_cross_machine_figures_have_the_provenance_footer(kind):
     assert plot.provenance(frame) in [t.get_text() for t in fig.figure.texts]
 
 
+def test_compare_flags_need_no_pandas_2_1(monkeypatch):
+    # DataFrame.map is pandas 2.1; the bench extra allows 2.0.
+    df = _pinned("compare")
+
+    def missing(*args, **kwargs):
+        raise AttributeError("DataFrame.map is pandas 2.1")
+
+    monkeypatch.setattr(pd.DataFrame, "map", missing, raising=False)
+    fig = plot.cross_machine(df)
+    hollow = [ln for ln in fig.figure.axes[0].get_lines() if ln.get_markerfacecolor() == "white"]
+    assert hollow
+
+
+def test_balance_leaves_out_runs_without_probes():
+    # A missing or zero probe gave NaN or 0 axis limits, and log2 of them raised.
+    df = _pinned("machines")
+    df.loc[df["machine"] == "jetson-orin", "bandwidth_gbytes_per_s"] = None
+    df.loc[df["machine"] == "arduino-ventuno-q", "fma_peak_f64_gflops"] = 0
+    fig = plot.machine_balance(df)
+    ax = fig.figure.axes[0]
+    assert [c.get_label() for c in ax.containers] == ["i7-12700k (8 threads)"]
+    assert "no probes: arduino-ventuno-q, jetson-orin" in ax.get_title(loc="left")
+    assert len(fig.data) == len(df)  # the figure keeps the whole frame
+    df["bandwidth_gbytes_per_s"] = None
+    with pytest.raises(ValueError, match="nothing to plot"):
+        plot.machine_balance(df)
+
+
+def test_compare_table_keeps_its_unit():
+    assert tables.compare_table(_pinned("compare")).attrs["unit"] == "GFLOP/s"
+
+
 # --- command line --------------------------------------------------------------------------------
 
 
@@ -352,9 +384,36 @@ def test_cli_table_compare_csv_to_a_file(db, tmp_path, capsys):
     assert len(table.columns) == 4
 
 
-def test_cli_table_with_no_matching_entries(db, capsys):
-    assert main(["table", "compare", "--db", db, "--entry", "nothing/here"]) == 1
+@pytest.mark.parametrize("command", ["table", "figure"])
+def test_cli_compare_with_no_matching_entries(db, capsys, command):
+    # figure compare said "the frame has no metric" instead of the cause.
+    assert main([command, "compare", "--db", db, "--entry", "nothing/here"]) == 1
     assert "no results match" in capsys.readouterr().err
+
+
+def test_cli_writes_tables_as_utf8(db, tmp_path, monkeypatch):
+    # The provenance line has "·". Written in the locale's encoding, it raised
+    # on an ASCII locale and gave different bytes on others. The encoding is
+    # checked as passed, since the interpreter's locale cannot be changed here.
+    calls = []
+    write = Path.write_text
+
+    def recording(self, data, *args, **kwargs):
+        calls.append(kwargs.get("encoding", args[0] if args else None))
+        return write(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", recording)
+    out = tmp_path / "t.md"
+    assert main(["table", "machines", "--db", db, "--out", str(out)]) == 0
+    assert calls == ["utf-8"]
+    assert "·" in out.read_bytes().decode("utf-8")
+
+
+@pytest.mark.parametrize("kind", ["balance", "compare"])
+def test_cli_cross_machine_figures_refuse_machine(db, kind):
+    # --machine was ignored: every machine plotted, into KIND-MACHINE.*.
+    with pytest.raises(SystemExit):
+        main(["figure", kind, "--db", db, "--machine", "i7-12700k"])
 
 
 def test_cli_figures_across_machines(db, tmp_path):

@@ -510,6 +510,11 @@ def _run_tag(row) -> str:
     return str(t.date()) if not pd.isna(t) else f"run {str(row['run_id'])[:7]}"
 
 
+def _true(v) -> bool:
+    """A flag as saved: True, or the text "True" after a CSV round trip."""
+    return v is True or str(v) == "True"
+
+
 def _machine_labels(df) -> dict[str, str]:
     """Each machine with the thread count(s) its runs used."""
     threads = df.groupby("machine")["threads"].agg(lambda t: sorted({int(x) for x in t}))
@@ -526,7 +531,8 @@ def machine_balance(df, *, precision: str = "f64", max_series: int = 12) -> Benc
     most its runs measured. The diagonals are constant arithmetic intensity:
     a machine on the ``4 FLOP/byte`` line needs a kernel to do 4 FLOP per
     byte moved before its FMA peak, not its memory, is the limit (its ridge
-    point).
+    point). Runs without a positive peak and bandwidth are left off the axes,
+    and a machine with no such run is named in the title.
     """
     import numpy as np
 
@@ -536,15 +542,27 @@ def machine_balance(df, *, precision: str = "f64", max_series: int = 12) -> Benc
     for col in (peak_col, "bandwidth_gbytes_per_s"):
         if col not in df:
             raise ValueError(f"the frame has no {col} column")
+    import pandas as pd
+
     df = df.copy()  # the figure keeps the frame it was drawn from
-    names = sorted(df["machine"].dropna().unique())
+    # Only runs with both probes, positive and finite, go on a log-log plot.
+    x_all = pd.to_numeric(df["bandwidth_gbytes_per_s"], errors="coerce")
+    y_all = pd.to_numeric(df[peak_col], errors="coerce")
+    usable = (x_all > 0) & (y_all > 0) & np.isfinite(x_all) & np.isfinite(y_all)
+    plotted = df[usable]
+    names = sorted(plotted["machine"].dropna().unique())
+    if not names:
+        raise ValueError(
+            f"nothing to plot: no run has a positive {peak_col} and bandwidth_gbytes_per_s"
+        )
     _check_series(len(names), max_series, "machines")
-    labels = _machine_labels(df)
+    dropped = sorted(set(df["machine"].dropna()) - set(names))
+    labels = _machine_labels(plotted)
     stats = {}
     for m in names:
-        g = df[df["machine"] == m]
-        x = g["bandwidth_gbytes_per_s"].astype(float)
-        y = g[peak_col].astype(float)
+        g = plotted[plotted["machine"] == m]
+        x = x_all[g.index]
+        y = y_all[g.index]
         stats[m] = (x.median(), x.min(), x.max(), y.median(), y.min(), y.max())
     xs = [v for s_ in stats.values() for v in s_[:3]]
     ys = [v for s_ in stats.values() for v in s_[3:]]
@@ -600,7 +618,10 @@ def machine_balance(df, *, precision: str = "f64", max_series: int = 12) -> Benc
         ax.set_xlabel("memory bandwidth (GB/s)")
         ax.set_ylabel(f"{precision} FMA peak (GFLOP/s)")
         ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5))
-        ax.set_title(f"machine balance · {precision}", loc="left")
+        title = f"machine balance · {precision}"
+        if dropped:
+            title += f" · no probes: {', '.join(dropped)}"
+        ax.set_title(title, loc="left")
         _finish(fig, df)
     return BenchFigure("balance", fig, df)
 
@@ -628,13 +649,13 @@ def cross_machine(df, *, max_series: int = 12, max_entries: int = 30) -> BenchFi
     entry_labels = _entry_labels(entries)
     stats = df.groupby(["entry_id", "machine"])["value"].agg(["median", "min", "max", "count"])
     flags = [c for c in ("cache_resident", "suspect_model") if c in df]
-    flagged = (
-        df.assign(_f=df[flags].map(lambda v: v is True or str(v) == "True").any(axis=1))
-        .groupby(["entry_id", "machine"])["_f"]
-        .any()
-        if flags
-        else None
-    )
+    flagged = None
+    if flags:
+        # Series.map, column by column: DataFrame.map needs pandas 2.1.
+        hit = df[flags[0]].map(_true)
+        for col in flags[1:]:
+            hit = hit | df[col].map(_true)
+        flagged = df.assign(_f=hit.astype(bool)).groupby(["entry_id", "machine"])["_f"].any()
     n = len(names)
     step = min(0.8 / n, 0.14)
     with style.house_style():

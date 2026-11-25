@@ -88,7 +88,6 @@ def compare_table(df, *, spread: bool = False):
     ``spread``, each cell is the text ``median (min–max)`` wherever a machine
     has more than one run, instead of the number.
     """
-    import pandas as pd
 
     threads = df.groupby("machine")["threads"].agg(lambda t: sorted({int(x) for x in t}))
     heading = {m: f"{m} ({'/'.join(map(str, t))} thr)" for m, t in threads.items()}
@@ -115,7 +114,7 @@ def compare_table(df, *, spread: bool = False):
     table = table.reset_index()
     unit = _text(df["unit"]) if "unit" in df else None
     table.attrs["unit"] = unit
-    return pd.DataFrame(table)
+    return table
 
 
 def _g(v: Any, digits: int = 3) -> str:
