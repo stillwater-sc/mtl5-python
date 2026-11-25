@@ -7,3 +7,4 @@ tests/data/bench_figures/** -text
 tests/data/bench_figures_expected/** -text
 tests/data/bench_machines/** -text
 tests/data/bench_machines_expected/** -text
+notebooks/data/mtl5-bench/** -text
