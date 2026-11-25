@@ -15,6 +15,37 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Benchmark data ingestion: `mtl5.bench` and `mtl5-bench ingest`** (#121,
+  milestone P1).
+  - It reads MTL5's `mtl5_bench` results (`mtl5-bench/1` JSON plus the
+    `.sysinfo` sidecar) from `benchmarks/data` into a DuckDB database. The
+    database is a cache of the committed files, rebuilt with `--rebuild`.
+  - **Every file is accounted for.** Each gets a row saying whether it was
+    ingested, ingested as incomplete, rejected with a reason, or set aside
+    (CSV for P2, reports, figures). On MTL5's current tree that is 866 files
+    and 134 runs, with no rejections. 116 runs (14,196 results, 4,768
+    series) have complete provenance. The other 18, from 2026-11-08 and
+    -09, predate the `clock_policy` and `bench_cpus` sidecar keys.
+  - **Provenance tiers.** A run with no sidecar, a missing required sidecar
+    key, a dirty build, or a directory name that is not a UTC timestamp is
+    ingested as `incomplete` and kept out of the `trend_results` view, as is
+    any result without a passing correctness check. A run whose sidecar
+    contradicts its JSON is rejected.
+  - **Comparability key.** Each result has a `series_key` built from the
+    physical machine, its state class (governor, turbo, power mode, clock
+    policy, CPU set), the backend, the build without the commit, the thread count, the problem class, the entry and its definition
+    version. Machines are fingerprinted from the hardware and host, not the
+    `machine` label, which the data spells more than one way.
+  - **Append-only.** Files are content-addressed, so re-ingesting an
+    unchanged tree adds nothing. A changed file is a new row that supersedes
+    the old one, and a deleted file gets a `removed` row. A directory that
+    cannot be read aborts the ingest rather than looking like deleted files.
+  - `--rebuild` deletes only a database this package wrote, and two ingests
+    on one database cannot interleave.
+  - New `bench` extra (`duckdb>=1.2`, `pandas>=2.0`), and CI installs it. The
+    1.2 floor was tested: DuckDB 1.1.0 segfaults reopening a database the
+    ingest wrote.
+
 - **Nested dissection ordering: `ordering="nd"`** (MTL5 5.25.0, MTL5 #920).
   - It is accepted by every factorization that takes an ordering: `splu`,
     `supernodal_lu`, `cholesky`, `ldlt`, `supernodal_ldlt` and `qr`. It is
