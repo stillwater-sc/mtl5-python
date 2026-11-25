@@ -40,8 +40,12 @@ against, and semantic-release manages only the **patch** component.
   - **Run selection.** Incomplete runs are read only on request
     (`tiers=`, or `--include-incomplete`).
   - **Thread scaling** compares the latest multi-threaded run with a 1-thread
-    run of the same commit, build and machine state. Pinning is left out of
-    the state: a 1- and an 8-thread run differ in their CPUs by design.
+    run of the same backend (BLAS vendor included), commit, build and machine
+    state. Only runs with a recorded commit and a clean tree qualify. Pinning
+    is left out of the state: a 1- and an 8-thread run differ in their CPUs
+    by design.
+  - **Rate against size** draws one line per run. Rows of one point that
+    differ in a column the format does not model are refused, not averaged.
   - **Layout.** The layout is fixed once when a figure is built. Left to
     constrained layout, writing a PNG before an SVG moved the SVG's axes.
   - **CLI:** `mtl5-bench figure {card,roofline,scaling,rate}`. The `bench`
