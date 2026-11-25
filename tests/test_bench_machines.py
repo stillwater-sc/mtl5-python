@@ -82,9 +82,10 @@ def _edit_sysinfo(path: Path, **fields: str) -> None:
 
 
 def _repin(name: str, text: str) -> None:
+    # Pinned text is UTF-8 on every platform: the provenance line has "·".
     if os.environ.get("MTL5_BENCH_REPIN"):
         PINNED.mkdir(exist_ok=True)
-        (PINNED / name).write_text(text)
+        (PINNED / name).write_text(text, encoding="utf-8")
 
 
 # --- pinned frames and tables -----------------------------------------------------
@@ -101,14 +102,14 @@ def test_machine_table_reproduces_the_pinned_markdown():
     df = _pinned("machines")
     text = tables.to_markdown(tables.machine_table(df), footer=plot.provenance(df))
     _repin("machines.md", text)
-    assert text == (PINNED / "machines.md").read_text()
+    assert text == (PINNED / "machines.md").read_text(encoding="utf-8")
 
 
 def test_compare_table_reproduces_the_pinned_markdown():
     df = _pinned("compare")
     text = tables.to_markdown(tables.compare_table(df, spread=True), footer=plot.provenance(df))
     _repin("compare.md", text)
-    assert text == (PINNED / "compare.md").read_text()
+    assert text == (PINNED / "compare.md").read_text(encoding="utf-8")
 
 
 # --- which runs a machine contributes ---------------------------------------------
