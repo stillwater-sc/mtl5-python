@@ -72,7 +72,9 @@ jobs:
       - name: Install package
         # matplotlib comes from the notebooks extra; tests/test_notebooks.py
         # executes every notebook so the docs cannot rot, and skips without it.
-        run: pip install ".[dev,notebooks]" -v
+        # The bench extra (duckdb, pandas) is what tests/test_bench_ingest.py
+        # needs; it skips without it.
+        run: pip install ".[dev,notebooks,bench]" -v
 
       - name: Run tests
         run: pytest -v
@@ -112,7 +114,7 @@ jobs:
           python-version: "3.12"
       - name: Install with all optional dependencies
         run: |
-          pip install ".[dev,notebooks]" -v
+          pip install ".[dev,notebooks,bench]" -v
           pip install pandas scikit-learn universal_dtypes
           # torch and jax are large; install CPU-only variants
           pip install torch --index-url https://download.pytorch.org/whl/cpu

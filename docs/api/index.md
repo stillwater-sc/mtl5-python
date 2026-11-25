@@ -136,3 +136,23 @@ suffixes.
    spy_magnitude
    spy_density
 ```
+
+## Benchmark data
+
+Ingestion of MTL5's benchmark results into a DuckDB database, with the
+provenance that decides which measurements are comparable (#121). It needs the
+`bench` extra: `pip install 'mtl5[bench]'`. The `mtl5-bench ingest` command
+wraps {func}`mtl5.bench.ingest`.
+
+```{eval-rst}
+.. currentmodule:: mtl5.bench
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   ingest
+   connect
+   IngestReport
+   FileOutcome
+```

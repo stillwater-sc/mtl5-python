@@ -125,7 +125,10 @@ def test_all_matches_the_public_surface():
         name
         for name in vars(mtl5)
         if not name.startswith("_")
-        and name not in {"pandas_ext", "sparse"}  # submodules, imported for effect
+        # Submodules: pandas_ext and sparse are imported for effect; bench is
+        # set on the package only once something imports mtl5.bench, as
+        # tests/test_bench_ingest.py does before this test runs.
+        and name not in {"pandas_ext", "sparse", "bench"}
     }
 
     missing = sorted(public - exported)

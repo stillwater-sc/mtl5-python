@@ -1,0 +1,460 @@
+"""Benchmark ingestion and provenance (mtl5.bench, #121 milestone P1).
+
+The fixtures under tests/data/bench are three unmodified mtl5_bench runs
+copied from stillwater-sc/mtl5 benchmarks/data: two native-t1 runs on the
+i7-12700K a day apart (one series), and one on the Jetson Orin. The
+negative cases edit copies of them in a temporary directory.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from pathlib import Path
+
+import pytest
+
+duckdb = pytest.importorskip("duckdb")
+
+from mtl5 import bench  # noqa: E402
+from mtl5.bench import sysinfo as si  # noqa: E402
+from mtl5.bench.cli import main as cli_main  # noqa: E402
+
+FIXTURES = Path(__file__).parent / "data" / "bench"
+I7_A = "i7-12700k/mtl5_bench/20261111T190041Z/native-t1.json"
+I7_B = "i7-12700k/mtl5_bench/20261112T004852Z/native-t1.json"
+JETSON = "jetson-orin/mtl5_bench/20261113T131507Z/native-t1.json"
+
+
+@pytest.fixture
+def tree(tmp_path: Path) -> Path:
+    root = tmp_path / "data"
+    shutil.copytree(FIXTURES, root)
+    return root
+
+
+def _load(root: Path, rel: str) -> dict:
+    return json.loads((root / rel).read_text())
+
+
+def _dump(root: Path, rel: str, doc: dict) -> None:
+    (root / rel).write_text(json.dumps(doc))
+
+
+def _edit_sidecar(root: Path, rel: str, **changes: str | None) -> None:
+    """Set (or, with None, delete) sidecar keys."""
+    path = root / (rel + ".sysinfo")
+    fields, _ = si.parse_sysinfo(path.read_text())
+    for k, v in changes.items():
+        if v is None:
+            fields.pop(k, None)
+        else:
+            fields[k] = v
+    path.write_text("".join(f"{k}={v}\n" for k, v in fields.items()))
+
+
+def _entries(root: Path, rel: str) -> set[tuple[str, ...]]:
+    return {
+        tuple(r[k] for k in ("area", "op", "dtype", "shape")) for r in _load(root, rel)["results"]
+    }
+
+
+def _status(report: bench.IngestReport, rel: str) -> bench.FileOutcome:
+    (o,) = [o for o in report.outcomes if o.path == rel]
+    return o
+
+
+def _scalar(con, sql: str, params=None):
+    return con.execute(sql, params or []).fetchone()[0]
+
+
+# --------------------------------------------------------------------------
+# The committed fixtures
+# --------------------------------------------------------------------------
+
+
+class TestFixtures:
+    def test_every_file_is_accounted_for(self, tree):
+        con, report = bench.ingest(tree)
+        on_disk = sorted(p.relative_to(tree).as_posix() for p in tree.rglob("*") if p.is_file())
+        assert sorted(o.path for o in report.outcomes) == on_disk
+        assert report.counts() == {"ingested": 3, "paired": 3}
+        assert _scalar(con, "SELECT count(*) FROM files") == 6
+
+    def test_results_match_the_json(self, tree):
+        con, _ = bench.ingest(tree)
+        for rel in (I7_A, I7_B, JETSON):
+            doc = _load(tree, rel)
+            run_id = _scalar(con, "SELECT run_id FROM runs WHERE path = ?", [rel])
+            assert _scalar(con, "SELECT count(*) FROM results WHERE run_id = ?", [run_id]) == len(
+                doc["results"]
+            )
+            assert _scalar(con, "SELECT count(*) FROM probes WHERE run_id = ?", [run_id]) == len(
+                doc["probes"]
+            )
+            first = doc["results"][0]
+            gflops = _scalar(
+                con,
+                "SELECT gflops FROM results WHERE run_id = ? AND entry_id = ?",
+                [run_id, "/".join(first[k] for k in ("area", "op", "dtype", "shape"))],
+            )
+            assert gflops == pytest.approx(first["gflops"])
+
+    def test_one_machine_one_day_apart_is_one_series(self, tree):
+        con, _ = bench.ingest(tree)
+        keys = dict(con.execute("SELECT path, config_key FROM runs").fetchall())
+        assert keys[I7_A] == keys[I7_B]
+        assert keys[JETSON] != keys[I7_A]
+        # Every entry the two i7 runs share is one series with two points.
+        n = _scalar(
+            con,
+            """SELECT count(*) FROM (
+                 SELECT series_key FROM trend_results WHERE machine = 'i7-12700k'
+                 GROUP BY series_key HAVING count(*) = 2)""",
+        )
+        shared = _entries(tree, I7_A) & _entries(tree, I7_B)
+        assert n == len(shared) > 0
+
+    def test_machines_are_fingerprinted_by_hardware(self, tree):
+        con, _ = bench.ingest(tree)
+        rows = con.execute("SELECT cpu_brand, host FROM machines ORDER BY host").fetchall()
+        assert rows == [
+            ("ARMv8 Processor rev 1 (v8l)", "branes-jetson"),
+            ("12th Gen Intel(R) Core(TM) i7-12700K", "sw-21"),
+        ]
+
+    def test_run_timestamp_comes_from_the_directory(self, tree):
+        con, _ = bench.ingest(tree)
+        ts = _scalar(con, "SELECT run_timestamp FROM runs WHERE path = ?", [I7_A])
+        assert ts.isoformat() == "2026-11-11T19:00:41"
+
+    def test_reingest_appends_nothing(self, tree):
+        con, first = bench.ingest(tree)
+        before = [
+            _scalar(con, f"SELECT count(*) FROM {t}")
+            for t in ("files", "runs", "results", "probes")
+        ]
+        con, second = bench.ingest(tree, con)
+        after = [
+            _scalar(con, f"SELECT count(*) FROM {t}")
+            for t in ("files", "runs", "results", "probes")
+        ]
+        assert second.new_rows == 0 and first.new_rows == 6
+        assert after == before
+        assert second.counts() == first.counts()
+
+    def test_database_file_round_trip_and_rebuild(self, tree, tmp_path):
+        db = tmp_path / "bench.duckdb"
+        con, _ = bench.ingest(tree, db)
+        con.close()
+        con, report = bench.ingest(tree, db)
+        assert report.new_rows == 0
+        con.close()
+        con, report = bench.ingest(tree, db, rebuild=True)
+        assert report.new_rows == 6
+        con.close()
+
+
+# --------------------------------------------------------------------------
+# Provenance tiers
+# --------------------------------------------------------------------------
+
+
+def _trend_paths(con) -> set[str]:
+    return {
+        p
+        for (p,) in con.execute(
+            "SELECT DISTINCT r.path FROM trend_results t JOIN runs r USING (run_id)"
+        ).fetchall()
+    }
+
+
+class TestIncomplete:
+    def test_no_sidecar(self, tree):
+        (tree / (I7_A + ".sysinfo")).unlink()
+        con, report = bench.ingest(tree)
+        o = _status(report, I7_A)
+        assert o.status == "incomplete" and o.reasons == ["no .sysinfo sidecar"]
+        assert I7_A not in _trend_paths(con)
+        assert _scalar(con, "SELECT tier FROM runs WHERE path = ?", [I7_A]) == "incomplete"
+
+    def test_sidecar_missing_a_required_key(self, tree):
+        _edit_sidecar(tree, I7_A, compiler_version=None, governor=None)
+        _, report = bench.ingest(tree)
+        o = _status(report, I7_A)
+        assert o.status == "incomplete"
+        assert o.reasons == ["sidecar lacks compiler_version, governor"]
+
+    def test_dirty_build(self, tree):
+        _edit_sidecar(tree, I7_A, git_dirty="1")
+        con, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == [
+            "dirty build: the commit does not identify the code"
+        ]
+        assert _scalar(con, "SELECT git_dirty FROM runs WHERE path = ?", [I7_A]) is True
+
+    def test_conflicting_duplicate_sidecar_key(self, tree):
+        path = tree / (I7_A + ".sysinfo")
+        path.write_text(path.read_text() + "turbo=disabled\n")
+        _, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == ["sidecar key 'turbo' has conflicting values"]
+
+    def test_thread_count_disagreement(self, tree):
+        _edit_sidecar(tree, I7_A, pool_size="4")
+        _, report = bench.ingest(tree)
+        assert _status(report, I7_A).reasons == ["sidecar pool_size=4 but probes.threads=1"]
+
+    def test_run_directory_without_a_timestamp(self, tree):
+        dest = tree / "i7-12700k" / "mtl5_bench" / "latest"
+        dest.mkdir()
+        for suffix in ("", ".sysinfo"):
+            shutil.move(tree / (I7_B + suffix), dest / ("native-t1.json" + suffix))
+        con, report = bench.ingest(tree)
+        o = _status(report, "i7-12700k/mtl5_bench/latest/native-t1.json")
+        assert o.status == "incomplete"
+        assert "not a UTC timestamp" in o.reasons[0]
+
+
+class TestRejected:
+    def _rejected(self, tree, rel=I7_A):
+        con, report = bench.ingest(tree)
+        o = _status(report, rel)
+        assert o.status == "rejected"
+        assert _scalar(con, "SELECT count(*) FROM runs WHERE path = ?", [rel]) == 0
+        return o.reasons[0]
+
+    def test_invalid_json(self, tree):
+        (tree / I7_A).write_text("{not json")
+        assert self._rejected(tree).startswith("invalid JSON")
+
+    def test_other_schema(self, tree):
+        doc = _load(tree, I7_A)
+        doc["schema"] = "mtl5-bench/2"
+        _dump(tree, I7_A, doc)
+        assert self._rejected(tree) == "schema is 'mtl5-bench/2', not 'mtl5-bench/1'"
+
+    def test_sidecar_contradicts_json(self, tree):
+        _edit_sidecar(tree, I7_A, machine="ryzen-7-2700x")
+        assert self._rejected(tree) == "sidecar says machine='ryzen-7-2700x', the JSON 'i7-12700k'"
+
+    def test_sidecar_of_another_benchmark(self, tree):
+        _edit_sidecar(tree, I7_A, benchmark="bench_all")
+        assert "not mtl5_bench" in self._rejected(tree)
+
+    def test_missing_result_field(self, tree):
+        doc = _load(tree, I7_A)
+        del doc["results"][3]["median_s"]
+        _dump(tree, I7_A, doc)
+        assert self._rejected(tree) == "results[3] has no finite median_s"
+
+    def test_repeated_entry(self, tree):
+        doc = _load(tree, I7_A)
+        doc["results"].append(dict(doc["results"][0]))
+        _dump(tree, I7_A, doc)
+        assert "repeats entry" in self._rejected(tree)
+
+    def test_probe_threads_missing(self, tree):
+        doc = _load(tree, I7_A)
+        del doc["probes"]["threads"]
+        _dump(tree, I7_A, doc)
+        assert self._rejected(tree) == "probes.threads is missing or not an integer"
+
+    def test_orphan_sidecar(self, tree):
+        (tree / I7_A).unlink()
+        _, report = bench.ingest(tree)
+        o = _status(report, I7_A + ".sysinfo")
+        assert o.status == "rejected" and "without its data file" in o.reasons[0]
+
+
+class TestOtherFiles:
+    def test_csv_report_figure_and_manifest(self, tree):
+        (tree / "blas_sweep_mkl.csv").write_text("n,gflops\n")
+        (tree / "blas_sweep_mkl.csv.sysinfo").write_text("machine=x\n")
+        (tree / "i7-12700k" / "mtl5_bench" / "20261111T190041Z" / "summary.md").write_text("# s\n")
+        (tree / "gemm.png").write_bytes(b"\x89PNG")
+        (tree / ".sidecar-exempt").write_text("# none\n")
+        (tree / "bench_blas.json").write_text('{"results": []}')
+        _, report = bench.ingest(tree)
+        got = {o.path: (o.kind, o.status) for o in report.outcomes}
+        assert got["blas_sweep_mkl.csv"] == ("csv", "deferred")
+        assert got["blas_sweep_mkl.csv.sysinfo"] == ("sidecar", "paired")
+        assert got["i7-12700k/mtl5_bench/20261111T190041Z/summary.md"] == ("report", "ignored")
+        assert got["gemm.png"] == ("figure", "ignored")
+        assert got[".sidecar-exempt"] == ("manifest", "ignored")
+        assert got["bench_blas.json"] == ("json", "deferred")
+
+    def test_hidden_directories_are_not_walked(self, tree):
+        (tree / ".git").mkdir()
+        (tree / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        _, report = bench.ingest(tree)
+        assert not any(o.path.startswith(".git/") for o in report.outcomes)
+
+
+# --------------------------------------------------------------------------
+# Append-only history
+# --------------------------------------------------------------------------
+
+
+class TestHistory:
+    def test_changed_file_supersedes_its_run(self, tree):
+        con, _ = bench.ingest(tree)
+        old = _scalar(con, "SELECT run_id FROM runs WHERE path = ?", [I7_A])
+        doc = _load(tree, I7_A)
+        doc["results"][0]["gflops"] = 1.0
+        _dump(tree, I7_A, doc)
+        con, report = bench.ingest(tree, con)
+        assert report.new_rows == 1
+        assert _scalar(con, "SELECT count(*) FROM files WHERE path = ?", [I7_A]) == 2
+        current = {r for (r,) in con.execute("SELECT run_id FROM current_runs").fetchall()}
+        assert old not in current
+        assert _scalar(con, "SELECT count(*) FROM runs WHERE path = ?", [I7_A]) == 2
+
+    def test_removed_and_restored(self, tree, tmp_path):
+        con, _ = bench.ingest(tree)
+        keep = tmp_path / "keep"
+        keep.mkdir()
+        for suffix in ("", ".sysinfo"):
+            shutil.move(tree / (I7_A + suffix), keep / ("x" + suffix))
+        con, report = bench.ingest(tree, con)
+        assert _status(report, I7_A).status == "removed"
+        assert _scalar(con, "SELECT count(*) FROM current_runs") == 2
+        for suffix in ("", ".sysinfo"):
+            shutil.move(keep / ("x" + suffix), tree / (I7_A + suffix))
+        con, report = bench.ingest(tree, con)
+        assert _status(report, I7_A).status == "ingested"
+        assert _scalar(con, "SELECT count(*) FROM current_runs") == 3
+        assert _scalar(con, "SELECT count(*) FROM runs") == 3
+
+    def test_same_content_at_two_paths_is_one_run(self, tree):
+        # Sorted after i7-12700k/, so the copy is the one seen second.
+        dest = tree / "z-copy" / "20261111T190041Z"
+        dest.mkdir(parents=True)
+        for suffix in ("", ".sysinfo"):
+            shutil.copy(tree / (I7_A + suffix), dest / ("native-t1.json" + suffix))
+        con, report = bench.ingest(tree)
+        o = _status(report, "z-copy/20261111T190041Z/native-t1.json")
+        assert o.status == "duplicate" and o.reasons == [f"same content as {I7_A}"]
+        assert _scalar(con, "SELECT count(*) FROM runs") == 3
+
+    def test_one_database_one_root(self, tree, tmp_path):
+        con, _ = bench.ingest(tree)
+        other = tmp_path / "other"
+        other.mkdir()
+        with pytest.raises(ValueError, match="ingested from"):
+            bench.ingest(other, con)
+
+    def test_schema_version_mismatch(self, tree, tmp_path):
+        db = tmp_path / "old.duckdb"
+        con = bench.connect(db)
+        con.execute("UPDATE meta SET value = '0' WHERE key = 'schema_version'")
+        con.close()
+        with pytest.raises(RuntimeError, match="rebuild"):
+            bench.connect(db)
+        bench.connect(db, rebuild=True).close()
+
+
+# --------------------------------------------------------------------------
+# The comparability key
+# --------------------------------------------------------------------------
+
+
+def _config_keys(tree) -> dict[str, str]:
+    con, _ = bench.ingest(tree)
+    return dict(con.execute("SELECT path, config_key FROM runs").fetchall())
+
+
+class TestComparabilityKey:
+    def test_commit_is_the_trend_axis_not_the_key(self, tree):
+        _edit_sidecar(tree, I7_B, git_commit="0123456789ab")
+        keys = _config_keys(tree)
+        assert keys[I7_A] == keys[I7_B]
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"compiler_version": "15.3.0"},  # build
+            {"cxx_flags": "-O2"},  # build
+            {"governor": "powersave"},  # machine state
+            {"turbo": "disabled"},  # machine state
+            {"blas_vendor": "OpenBLAS"},  # backend
+            {"preflight_host": "sw-22"},  # another box with the same CPU
+        ],
+    )
+    def test_a_key_field_starts_a_new_series(self, tree, change):
+        _edit_sidecar(tree, I7_B, **change)
+        keys = _config_keys(tree)
+        assert keys[I7_A] != keys[I7_B]
+
+    def test_thermals_and_load_are_measurements_not_key(self, tree):
+        _edit_sidecar(tree, I7_B, thermal_before_c="60.0", loadavg_1m="3.5")
+        keys = _config_keys(tree)
+        assert keys[I7_A] == keys[I7_B]
+
+    def test_flag_whitespace_is_not_a_new_build(self, tree):
+        _edit_sidecar(tree, I7_B, cxx_flags="  -O3    -DNDEBUG ")
+        keys = _config_keys(tree)
+        assert keys[I7_A] == keys[I7_B]
+
+    def test_host_domain_is_not_a_new_machine(self):
+        a = {"cpu_brand": "Xeon", "preflight_host": "sw-13"}
+        b = {"cpu_brand": "Xeon", "preflight_host": "SW-13.stillwater-sc.com"}
+        assert si.machine_fingerprint(a) == si.machine_fingerprint(b)
+
+    def test_definition_version_splits_a_series(self, tree):
+        doc = _load(tree, I7_B)
+        for r in doc["results"]:
+            r["version"] = 2
+        _dump(tree, I7_B, doc)
+        con, _ = bench.ingest(tree)
+        n = _scalar(
+            con,
+            """SELECT count(*) FROM (
+                 SELECT series_key FROM trend_results WHERE machine = 'i7-12700k'
+                 GROUP BY series_key HAVING count(*) = 2)""",
+        )
+        assert n == 0
+        assert _scalar(con, "SELECT max(definition_version) FROM entry_definitions") == 2
+
+    def test_failed_check_is_excluded_from_trends(self, tree):
+        doc = _load(tree, I7_A)
+        doc["results"][0]["check"]["ok"] = False
+        _dump(tree, I7_A, doc)
+        con, _ = bench.ingest(tree)
+        total = _scalar(con, "SELECT count(*) FROM results")
+        trend = _scalar(con, "SELECT count(*) FROM trend_results")
+        assert total - trend == 1
+
+
+# --------------------------------------------------------------------------
+# Command line, and an optional full MTL5 checkout
+# --------------------------------------------------------------------------
+
+
+def test_cli_ingest(tree, tmp_path, capsys):
+    db = tmp_path / "cli.duckdb"
+    (tree / (I7_A + ".sysinfo")).unlink()
+    assert cli_main(["ingest", str(tree), "--db", str(db)]) == 0
+    out = capsys.readouterr().out
+    assert "5 files, 5 new rows" in out
+    assert f"incomplete {I7_A}: no .sysinfo sidecar" in out
+    assert "trend-eligible: 2 runs" in out
+
+
+@pytest.mark.skipif(
+    not os.environ.get("MTL5_BENCH_DATA"),
+    reason="set MTL5_BENCH_DATA to an MTL5 checkout's benchmarks/data",
+)
+def test_full_mtl5_checkout():
+    root = Path(os.environ["MTL5_BENCH_DATA"])
+    con, report = bench.ingest(root)
+    on_disk = {
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file()
+        and not any(part.startswith(".") for part in p.relative_to(root).parts[:-1])
+        and "__pycache__" not in p.parts
+    }
+    assert {o.path for o in report.outcomes} == on_disk
+    assert not [o for o in report.outcomes if o.status == "rejected"]
+    assert _scalar(con, "SELECT count(*) FROM runs WHERE tier = 'complete'") > 0
