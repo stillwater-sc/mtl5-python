@@ -378,6 +378,20 @@ class TestOtherFiles:
         assert got[".sidecar-exempt"] == ("manifest", "ignored")
         assert got["bench_blas.json"] == ("json", "deferred")
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX byte file names")
+    def test_a_non_utf8_file_name_is_accounted_for(self, tree):
+        name = os.fsdecode(b"run-\xff.json")
+        try:
+            (tree / name).write_text("{}")
+        except (OSError, UnicodeEncodeError):
+            pytest.skip("this file system refuses non-UTF-8 names")
+        con, report = bench.ingest(tree)
+        (o,) = [o for o in report.outcomes if o.path.startswith("run-")]
+        assert (o.path, o.status) == ("run-\\xff.json", "rejected")
+        assert report.counts()["ingested"] == 3
+        con, report = bench.ingest(tree, con)
+        assert report.new_rows == 0
+
     def test_hidden_directories_are_not_walked(self, tree):
         (tree / ".git").mkdir()
         (tree / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
@@ -488,6 +502,38 @@ class TestHistory:
         c = duckdb.connect(str(other))
         assert c.execute("SELECT count(*) FROM important").fetchone() == (0,)
         c.close()
+
+    def test_rebuild_refuses_a_lookalike_meta_table(self, tmp_path):
+        other = tmp_path / "other.duckdb"
+        c = duckdb.connect(str(other))
+        c.execute("CREATE TABLE meta (key VARCHAR, value VARCHAR)")
+        c.execute("INSERT INTO meta VALUES ('schema_version', '1')")
+        c.close()
+        with pytest.raises(ValueError, match="not an mtl5 benchmark database"):
+            bench.connect(other, rebuild=True)
+        assert other.exists()
+
+    def test_another_applications_database_is_not_opened_for_writing(self, tmp_path):
+        other = tmp_path / "other.duckdb"
+        c = duckdb.connect(str(other))
+        c.execute("CREATE TABLE meta (key VARCHAR, value VARCHAR)")
+        c.close()
+        with pytest.raises(RuntimeError, match="did not create"):
+            bench.connect(other)
+        # The failed connect closed its connection: a read-only open works.
+        duckdb.connect(str(other), read_only=True).close()
+
+    def test_old_schema_reports_the_version_not_a_binder_error(self, tmp_path):
+        db = tmp_path / "old.duckdb"
+        c = duckdb.connect(str(db))
+        c.execute("CREATE TABLE meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
+        c.execute("INSERT INTO meta VALUES ('application', 'mtl5.bench'), ('schema_version', '0')")
+        # A table without the columns the current views select.
+        c.execute("CREATE TABLE runs (run_id VARCHAR)")
+        c.close()
+        with pytest.raises(RuntimeError, match="schema version 0"):
+            bench.connect(db)
+        bench.connect(db, rebuild=True).close()
 
     def test_rebuild_leaves_a_stray_wal_alone(self, tmp_path):
         wal = tmp_path / "b.duckdb.wal"

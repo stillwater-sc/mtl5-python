@@ -59,6 +59,7 @@ INGEST_STATUSES = {
 }
 
 _SCHEMA = "mtl5-bench/1"
+_APPLICATION = "mtl5.bench"  # the meta marker that says this package created a database
 _SIDECAR = ".sysinfo"
 _REPORT_SUFFIXES = {".md", ".txt", ".rst", ".log"}
 _FIGURE_SUFFIXES = {".png", ".svg", ".pdf", ".jpg", ".jpeg"}
@@ -123,11 +124,12 @@ def _duckdb():
 
 
 def _is_bench_database(duckdb, path: Path) -> bool:
-    """True when path is a DuckDB file with this package's meta table.
+    """True when path is a DuckDB file this package created.
 
     The header check comes first so that a file that is not DuckDB is never
-    handed to DuckDB; then a read-only open checks for the schema_version
-    row, which every version of this schema writes.
+    handed to DuckDB; then a read-only open looks for the ``application``
+    marker every version of this schema writes into ``meta``. Another
+    application's DuckDB file, even one with a ``meta`` table, lacks it.
     """
     if not path.is_file():
         return False
@@ -144,10 +146,8 @@ def _is_bench_database(duckdb, path: Path) -> bool:
         ).fetchone()
         if not row[0]:
             return False
-        return (
-            probe.execute("SELECT count(*) FROM meta WHERE key = 'schema_version'").fetchone()[0]
-            > 0
-        )
+        marker = probe.execute("SELECT value FROM meta WHERE key = 'application'").fetchone()
+        return marker is not None and marker[0] == _APPLICATION
     except duckdb.Error:
         return False
     finally:
@@ -158,10 +158,10 @@ def connect(db: str | os.PathLike = ":memory:", *, rebuild: bool = False):
     """Open (or create) a benchmark database and return the DuckDB connection.
 
     ``rebuild=True`` deletes an existing database file first, and refuses to
-    delete one that is not a benchmark database written by this package. A
-    database
-    written by another schema version raises, since it is a cache and is
-    rebuilt rather than migrated.
+    delete one this package did not create. A database written by another
+    schema version raises, since it is a cache and is rebuilt rather than
+    migrated; the version is read before the schema is applied, because the
+    views would not bind against another version's tables.
     """
     duckdb = _duckdb()
     path = str(db)
@@ -178,18 +178,35 @@ def connect(db: str | os.PathLike = ":memory:", *, rebuild: bool = False):
             if p.exists():
                 p.unlink()
     con = duckdb.connect(path)
-    con.execute(DDL)
-    row = con.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-    if row is None:
-        con.execute("INSERT INTO meta VALUES ('schema_version', ?)", [str(SCHEMA_VERSION)])
-    elif row[0] != str(SCHEMA_VERSION):
+    try:
+        _initialize(con, path)
+    except BaseException:
         con.close()
-        raise RuntimeError(
-            f"{path} has benchmark schema version {row[0]}, this mtl5 writes "
-            f"{SCHEMA_VERSION}; rerun the ingest with --rebuild "
-            f"(mtl5-bench ingest ROOT --db {path} --rebuild)"
-        )
+        raise
     return con
+
+
+def _initialize(con, path: str) -> None:
+    has_meta = con.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'meta'"
+    ).fetchone()[0]
+    if has_meta:
+        meta = dict(con.execute("SELECT key, value FROM meta").fetchall())
+        if meta.get("application") != _APPLICATION:
+            raise RuntimeError(f"{path} is a DuckDB database this package did not create")
+        if meta.get("schema_version") != str(SCHEMA_VERSION):
+            raise RuntimeError(
+                f"{path} has benchmark schema version {meta.get('schema_version')}, this "
+                f"mtl5 writes {SCHEMA_VERSION}; rerun the ingest with --rebuild "
+                f"(mtl5-bench ingest ROOT --db {path} --rebuild)"
+            )
+        con.execute(DDL)
+        return
+    con.execute(DDL)
+    con.execute(
+        "INSERT INTO meta VALUES ('application', ?), ('schema_version', ?)",
+        [_APPLICATION, str(SCHEMA_VERSION)],
+    )
 
 
 # --------------------------------------------------------------------------
@@ -546,6 +563,14 @@ def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | Non
     return "other", "ignored", ["not a recognised benchmark file"]
 
 
+def _is_utf8(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _path_provenance(rel: str) -> tuple[bytes, bytes]:
     parts = rel.split("/")
     machine_dir = parts[0] if len(parts) > 1 else ""
@@ -647,6 +672,16 @@ def _ingest(root_path: Path, con) -> IngestReport:
 
     for rel in paths:
         full = root_path / rel
+        if not _is_utf8(rel):
+            # Python carries the undecodable bytes as surrogates, which
+            # neither a hash input nor a VARCHAR accepts. The file is
+            # accounted for under an escaped name instead of aborting.
+            shown = os.fsencode(rel).decode("utf-8", "backslashreplace")
+            record(
+                FileOutcome(shown, "other", "rejected", ["the file name is not UTF-8"]),
+                _sha256(os.fsencode(rel), full.read_bytes()),
+            )
+            continue
         classified = _classify(rel, path_set)
         if classified is not None:
             kind, status, reasons = classified
@@ -723,8 +758,10 @@ def _ingest(root_path: Path, con) -> IngestReport:
         runs.append(run)
         known_runs[run_id] = (rel, run.tier, list(run.reasons))
 
+    # Compare recorded names, which escape a non-UTF-8 name the same way twice.
+    seen = {o.path for o in outcomes}
     for path, (content_hash, kind, status, _reasons, _run) in sorted(current.items()):
-        if path not in path_set and status != "removed":
+        if path not in seen and status != "removed":
             o = FileOutcome(path, kind, "removed", ["no longer under the ingest root"])
             file_rows.append(
                 {
