@@ -38,8 +38,12 @@ that frame alone, in the house style of :mod:`mtl5.bench.style`::
     df = analyze.thread_scaling("bench.duckdb", "i7-12700k", entries=["blas3/gemm"])
     plot.thread_scaling(df).save("scaling")   # scaling.pdf/.svg/.png and .csv
 
+Across machines, :func:`mtl5.bench.analyze.machines` and
+:func:`~mtl5.bench.analyze.cross_machine` take each machine's latest commit's
+sessions, and :mod:`mtl5.bench.tables` reduces them to comparison tables.
+
 The submodules ``sysinfo``, ``schema``, ``formats``, ``ingest``, ``analyze``,
-``plot`` and ``style`` hold the details. Only the standard library is
+``plot``, ``tables`` and ``style`` hold the details. Only the standard library is
 imported here; DuckDB, pandas and matplotlib are imported when a function
 needs them.
 """

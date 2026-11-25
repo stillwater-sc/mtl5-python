@@ -15,6 +15,31 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Cross-machine analysis in `mtl5.bench`** (#121, milestone P4).
+  - **Which runs a machine contributes:** each machine's comparable runs,
+    its latest commit's sessions at one thread count. The default is the
+    most threads the machine has a run of (`threads="max"`). MTL5 takes two
+    sessions per commit, so most machines contribute two runs, and every
+    number comes with its spread.
+  - **Analyses:** `analyze.machines` (CPU, build, probes and the f64 ridge
+    point per run) and `analyze.cross_machine` (chosen entries by
+    `gflops`, `roofline_pct`, `gbytes_per_s` or `median_s`). Both keep only
+    runs with a recorded commit and a clean tree.
+  - **Tables** (`mtl5.bench.tables`): a machine table and an entries ×
+    machines comparison, each the median of a machine's runs. They are
+    written as Markdown, with the provenance line, or as CSV.
+  - **Figures:**
+    - machine balance: FMA peak against bandwidth, with constant-intensity
+      diagonals;
+    - a cross-machine dot plot with min–max bars across sessions. Results
+      MTL5 flagged as cache-resident or with a suspect work model are
+      hollow, which is why some sit above 100% of the roofline.
+  - **CLI:** `mtl5-bench table {machines,compare}` and
+    `mtl5-bench figure {balance,compare}`. `--threads` also takes `max`,
+    and `--machines` selects machines.
+  - Numbers in figures and tables are no longer written with an exponent
+    when large: 1202, not `1.2e+03`.
+
 - **Benchmark figures in `mtl5.bench`** (#121, milestone P3).
   - Four core figures:
     - a capability card: CPU, build, FMA peaks, bandwidths and the roofline

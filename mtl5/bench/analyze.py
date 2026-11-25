@@ -32,7 +32,10 @@ from collections.abc import Sequence
 from typing import Any
 
 __all__ = [
+    "METRICS",
     "PROVENANCE_COLUMNS",
+    "machines",
+    "cross_machine",
     "capability",
     "roofline",
     "thread_scaling",
@@ -283,6 +286,15 @@ def roofline(
     return df
 
 
+def _named_code(runs):
+    """The runs that name their code: a recorded commit and a clean tree."""
+    import pandas as pd
+
+    known = runs["git_commit"].map(lambda c: isinstance(c, str) and bool(c.strip()))
+    clean = runs["git_dirty"].map(lambda d: d is not None and d is not pd.NA and d == 0)
+    return runs[known & clean.astype(bool)]
+
+
 def _state_without_placement(con, run_id: str) -> str:
     from .sysinfo import state_class
 
@@ -319,18 +331,13 @@ def thread_scaling(
     ``speedup = median_s(1 thread) / median_s`` and
     ``efficiency = speedup / threads``.
     """
-    import pandas as pd
-
     with _Db(db) as con:
         runs = _runs(con, machine, label=label, tiers=tiers)
         if runs.empty:
             _one_run(con, machine, label=label, threads=None, run_id=None, tiers=tiers)
-        # Only runs that name their code: a recorded commit and a clean tree.
         # Two runs with no commit, or two dirty builds of one commit, may run
         # different code, and their ratio would not be a speedup.
-        known = runs["git_commit"].map(lambda c: isinstance(c, str) and bool(c.strip()))
-        clean = runs["git_dirty"].map(lambda d: d is not None and d is not pd.NA and d == 0)
-        runs = runs[known & clean.astype(bool)]
+        runs = _named_code(runs)
         multi = runs[runs["threads"] > 1]
         if multi.empty:
             raise LookupError(
@@ -464,3 +471,184 @@ def rate_vs_size(
     # The CSV's backend column names the series; the run's backend is the file's.
     df = df.drop(columns=["backend"]).rename(columns={"series_backend": "backend"})
     return df.reset_index(drop=True)
+
+
+# --- across machines ------------------------------------------------------------
+
+#: The result columns :func:`cross_machine` can compare, and their units.
+METRICS = {
+    "gflops": "GFLOP/s",
+    "roofline_pct": "% of roofline",
+    "gbytes_per_s": "GB/s",
+    "median_s": "s",
+}
+
+# What a machine's runs must share to be one measurement of it: everything but
+# the session. The thread count is chosen per machine before this.
+_SESSION_KEY = (
+    "machine_fingerprint",
+    "label",
+    "class",
+    "backend",
+    "build_config",
+    "state_class",
+    "git_commit",
+    "threads",
+)
+
+
+def _threads_arg(threads: int | str) -> int | str:
+    if threads == "max":
+        return threads
+    try:
+        n = int(threads)
+    except (TypeError, ValueError):
+        raise ValueError(f"threads must be 'max' or a positive integer, not {threads!r}") from None
+    if n < 1:
+        raise ValueError(f"threads must be 'max' or a positive integer, not {threads!r}")
+    return n
+
+
+def _sessions(
+    con,
+    *,
+    label: str | None,
+    threads: int | str,
+    machines: Sequence[str] | None,
+    tiers: Sequence[str],
+):
+    """Each machine's comparable runs: its latest commit's sessions.
+
+    For each physical machine, the thread count is ``threads``, or with
+    ``"max"`` the most the machine has a run of. The reference is the latest
+    such run; the machine's runs are those that share its configuration and
+    commit (:data:`_SESSION_KEY`), so they differ only in the session. MTL5's
+    method takes two sessions per commit, so most machines have two.
+    """
+    threads = _threads_arg(threads)
+    runs = _named_code(_runs(con, None, label=label, tiers=tiers))
+    if machines is not None:
+        wanted = set(machines)
+        hit = runs[["machine", "machine_dir", "machine_fingerprint"]].isin(wanted).any(axis=1)
+        missing = wanted - set(runs.loc[hit, ["machine", "machine_dir", "machine_fingerprint"]]
+                               .stack().dropna())  # fmt: skip
+        if missing:
+            raise LookupError(
+                f"no {'/'.join(tiers)} mtl5-bench run of {', '.join(sorted(missing))}; "
+                f"machines: {', '.join(_machines(con, tiers)) or 'none'}"
+            )
+        runs = runs[hit]
+    if threads == "max":
+        most = runs.groupby("machine_fingerprint")["threads"].transform("max")
+        runs = runs[runs["threads"] == most]
+    else:
+        runs = runs[runs["threads"] == threads]
+    if runs.empty:
+        raise LookupError(
+            f"no {'/'.join(tiers)} mtl5-bench run with label={label!r}, threads={threads} "
+            "and a recorded commit and a clean tree"
+        )
+    # As strings, so a missing value matches a missing value.
+    key = runs[list(_SESSION_KEY)].astype(str)
+    keep = []
+    for _, group in runs.groupby("machine_fingerprint", sort=True):
+        ref = group.sort_values(
+            ["run_timestamp", "run_id"], ascending=[False, True], na_position="last"
+        ).index[0]
+        keep.extend(group.index[(key.loc[group.index] == key.loc[ref]).all(axis=1)])
+    out = runs.loc[keep]
+    return out.sort_values(["machine", "run_timestamp", "run_id"]).reset_index(drop=True)
+
+
+def machines(
+    db,
+    *,
+    label: str | None = "native",
+    threads: int | str = "max",
+    machines: Sequence[str] | None = None,
+    tiers: Sequence[str] = ("complete",),
+):
+    """Every machine's description and probes, one row per run.
+
+    A machine contributes its comparable runs (the latest commit's sessions,
+    at ``threads``, or its most threads with ``"max"``). Each row has the
+    machine's CPU and build, the run's probes as columns (FMA peaks,
+    bandwidths, the last-level cache) and ``ridge_f64``, the f64 FMA peak
+    over the bandwidth: the arithmetic intensity, in FLOP/byte, where a
+    kernel stops being bandwidth-bound. ``machines`` keeps the named ones.
+    """
+    with _Db(db) as con:
+        runs = _sessions(con, label=label, threads=threads, machines=machines, tiers=tiers)
+        hw = con.execute(
+            "SELECT fingerprint AS machine_fingerprint, cpu_vendor, cpu_brand, cpu_arch, "
+            "cpu_logical_cores FROM machines"
+        ).df()
+        sysinfo = {
+            rid: dict(m or {})
+            for rid, m in con.execute(
+                "SELECT run_id, sysinfo FROM runs WHERE list_contains(?::VARCHAR[], run_id)",
+                [list(runs["run_id"])],
+            ).fetchall()
+        }
+        probes = _probes(con, list(runs["run_id"]))
+    df = runs.merge(hw, on="machine_fingerprint", how="left")
+    for key in _CARD_SYSINFO:
+        df[key] = [sysinfo[r].get(key) for r in df["run_id"]]
+    for name in sorted(probes.columns):
+        if name != "threads":
+            df[name] = [probes.at[r, name] for r in df["run_id"]]
+    peak = df.get("fma_peak_f64_gflops")
+    bw = df.get("bandwidth_gbytes_per_s")
+    if peak is not None and bw is not None:
+        df["ridge_f64"] = [
+            p / b if _positive(p) and _positive(b) else None for p, b in zip(peak, bw)
+        ]
+    return df
+
+
+def _positive(v) -> bool:
+    try:
+        return float(v) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def cross_machine(
+    db,
+    entries: Sequence[str],
+    *,
+    metric: str = "gflops",
+    label: str | None = "native",
+    threads: int | str = "max",
+    machines: Sequence[str] | None = None,
+    tiers: Sequence[str] = ("complete",),
+):
+    """Entries compared across machines, one row per (run, entry).
+
+    Each machine contributes its comparable runs, as in :func:`machines`.
+    ``entries`` keeps the entries whose id is, or starts with, one of the
+    given prefixes. ``value`` is the result's ``metric``
+    (:data:`METRICS`); results whose check did not pass are left out, and an
+    entry a machine did not run is simply absent for it. ``cache_resident``
+    and ``suspect_model`` carry MTL5's own flags: a result above its roofline
+    is usually one of them.
+    """
+    if metric not in METRICS:
+        raise ValueError(f"unknown metric {metric!r}; use one of {', '.join(METRICS)}")
+    with _Db(db) as con:
+        runs = _sessions(con, label=label, threads=threads, machines=machines, tiers=tiers)
+        res = con.execute(
+            f"""
+            SELECT run_id, entry_id, area, op, dtype, shape, {metric} AS value,
+                   cache_resident, suspect_model
+            FROM results
+            WHERE list_contains(?::VARCHAR[], run_id) AND check_ok IS TRUE
+              AND {metric} IS NOT NULL
+            """,
+            [list(runs["run_id"])],
+        ).df()
+    res = res[res["entry_id"].map(lambda e: _matches(e, entries)).astype(bool)]
+    df = res.merge(runs, on="run_id")
+    df["metric"] = metric
+    df["unit"] = METRICS[metric]
+    return df.sort_values(["entry_id", "machine", "run_timestamp", "run_id"]).reset_index(drop=True)
