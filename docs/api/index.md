@@ -218,3 +218,42 @@ incomplete. `mtl5-bench figure {card,roofline,scaling,rate}` wraps both steps.
    house_style
    save
 ```
+
+### Across machines
+
+Each machine contributes its comparable runs: its latest commit's sessions
+(MTL5 takes two per commit) at one thread count, by default the most it has
+a run of. Tables and figures show each machine's median over those runs, with
+the spread beside it. `mtl5-bench table {machines,compare}` writes the tables
+as Markdown or CSV, and `mtl5-bench figure {balance,compare}` draws the
+figures.
+
+```{eval-rst}
+.. currentmodule:: mtl5.bench.analyze
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   machines
+   cross_machine
+
+.. currentmodule:: mtl5.bench.plot
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   machine_balance
+   cross_machine
+
+.. currentmodule:: mtl5.bench.tables
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   machine_table
+   compare_table
+   to_markdown
+```

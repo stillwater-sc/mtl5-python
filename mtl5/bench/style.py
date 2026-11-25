@@ -40,6 +40,7 @@ __all__ = [
     "check_formats",
     "house_style",
     "series_style",
+    "number",
     "save",
 ]
 
@@ -73,6 +74,19 @@ FORMATS: tuple[str, ...] = ("pdf", "svg", "png")
 
 # Text colour for secondary text: the provenance footer, annotations.
 MUTED = "#555555"
+
+
+def number(x: float, digits: int = 3) -> str:
+    """``x`` to ``digits`` significant digits, without an exponent for large values.
+
+    ``%g`` writes 1201 as ``1.2e+03``. Figure labels and tables read better
+    as ``1201``, so a value of ``10**digits`` or more is rounded to an
+    integer instead.
+    """
+    # Decide on the rounded value: 999.6 rounds to 1000, which %g writes 1e+03.
+    if abs(float(f"{x:.{digits}g}")) >= 10**digits:
+        return f"{x:.0f}"
+    return f"{x:.{digits}g}"
 
 
 def series_style(i: int) -> dict:
