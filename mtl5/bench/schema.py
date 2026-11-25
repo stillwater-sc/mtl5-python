@@ -23,6 +23,10 @@ Tables
     added upstream needs no schema change.
 ``results``
     One row per benchmark entry per run, with its series key.
+``measurements``
+    The legacy formats' values (MTL5's CSVs, ``bench_blas.py`` JSON), one row
+    per file row and metric, with the parameters as JSON. See
+    :mod:`mtl5.bench.formats`.
 ``skipped``
     The entries a run skipped, and why.
 ``entry_definitions``
@@ -37,6 +41,8 @@ Views
     The results trend queries may use: current runs in the ``complete`` tier
     whose correctness check passed. A result with no check is left out too:
     a timing nothing verified is not a measurement of the code.
+``trend_measurements``
+    The same for ``measurements``: current complete runs, valid values.
 """
 
 from __future__ import annotations
@@ -45,7 +51,7 @@ __all__ = ["SCHEMA_VERSION", "DDL"]
 
 #: Bumped when a table changes shape. A database with another version is
 #: rebuilt rather than migrated: it is a cache of the files.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -79,10 +85,11 @@ CREATE TABLE IF NOT EXISTS machines (
 CREATE TABLE IF NOT EXISTS runs (
     run_id               VARCHAR PRIMARY KEY,  -- the content hash of the data file and sidecar
     path                 VARCHAR NOT NULL,
-    schema               VARCHAR NOT NULL,
+    schema               VARCHAR NOT NULL,     -- mtl5-bench/1, or a legacy format (blocking_ab/1)
     tier                 VARCHAR NOT NULL,     -- complete or incomplete
     reasons              VARCHAR[],
-    run_timestamp        TIMESTAMP,            -- UTC, from the run directory name
+    run_timestamp        TIMESTAMP,            -- UTC
+    time_source          VARCHAR,              -- directory (its name) or git (the adding commit)
     machine              VARCHAR,              -- the label in the JSON
     machine_dir          VARCHAR,              -- the data directory it was committed under
     machine_fingerprint  VARCHAR,
@@ -150,6 +157,23 @@ CREATE TABLE IF NOT EXISTS results (
     PRIMARY KEY (run_id, entry_id)
 );
 
+CREATE TABLE IF NOT EXISTS measurements (
+    run_id      VARCHAR NOT NULL,
+    row_index   BIGINT NOT NULL,     -- 0-based data row of the file
+    metric      VARCHAR NOT NULL,    -- the measured column
+    format      VARCHAR NOT NULL,    -- e.g. blocking_ab/1
+    entry_id    VARCHAR NOT NULL,    -- format:param=value,...
+    series_key  VARCHAR NOT NULL,
+    params      VARCHAR NOT NULL,    -- the parameters as a JSON object
+    repeat      VARCHAR,             -- the repeat column's value (round, run), if any
+    sample      BIGINT NOT NULL,     -- 0-based occurrence of this entry in the file
+    unit        VARCHAR,
+    value       DOUBLE,
+    valid       BOOLEAN NOT NULL,    -- false when the row's status says the value means nothing
+    attributes  VARCHAR,             -- the row's other columns as a JSON object
+    PRIMARY KEY (run_id, row_index, metric)
+);
+
 CREATE TABLE IF NOT EXISTS skipped (
     run_id  VARCHAR NOT NULL,
     area    VARCHAR,
@@ -173,4 +197,11 @@ CREATE OR REPLACE VIEW trend_results AS
     FROM results res
     JOIN current_runs r USING (run_id)
     WHERE r.tier = 'complete' AND res.check_ok IS TRUE;
+
+CREATE OR REPLACE VIEW trend_measurements AS
+    SELECT m.*, r.run_timestamp, r.time_source, r.git_commit, r.machine_fingerprint,
+           r.machine_dir, r.label, r.backend, r.build_config, r.state_class
+    FROM measurements m
+    JOIN current_runs r USING (run_id)
+    WHERE r.tier = 'complete' AND m.valid AND m.value IS NOT NULL;
 """

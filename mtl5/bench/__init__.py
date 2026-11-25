@@ -24,7 +24,14 @@ parts of the key are stored on each run (``machine_fingerprint``,
 ``state_class``, ``backend``, ``build_config``, ``threads``), so a series break
 can say which one changed.
 
-The submodules ``sysinfo``, ``schema`` and ``ingest`` hold the details. Only
+Legacy formats (MTL5's CSVs, ``bench_blas.py`` JSON) go to the long
+``measurements`` table and the ``trend_measurements`` view instead, one row
+per file row and metric; :mod:`mtl5.bench.formats` describes each dialect.
+A legacy file outside a timestamp directory takes its run time from the git
+commit that added it.
+
+The submodules ``sysinfo``, ``schema``, ``formats`` and ``ingest`` hold the
+details. Only
 the standard library is imported here; DuckDB and pandas are imported when a
 function needs them.
 """

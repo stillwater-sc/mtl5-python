@@ -3,9 +3,10 @@
 ``ingest(root, db)`` walks ``root`` (normally ``<mtl5>/benchmarks/data``) and
 gives every file found there a row in the ``files`` table, so every file is
 accounted for: ingested, ingested as incomplete, rejected with a reason, or
-set aside with a reason (a report, a figure, a format a later milestone
-reads). This milestone reads ``mtl5-bench/1`` JSON, the output of
-``mtl5_bench``, with its ``.sysinfo`` sidecar.
+set aside with a reason (a report, a figure, a CSV header no format
+matches). It reads ``mtl5-bench/1`` JSON, the output of ``mtl5_bench``, and
+the legacy formats in :mod:`mtl5.bench.formats` (MTL5's CSVs and
+``bench_blas.py`` JSON), each with its ``.sysinfo`` sidecar.
 
 The rules that decide a run's provenance tier:
 
@@ -25,17 +26,20 @@ Re-ingesting an unchanged tree appends nothing. The database is a cache:
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
 import os
 import re
 import stat
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import formats as fm
 from . import sysinfo as si
 from .schema import DDL, SCHEMA_VERSION
 
@@ -54,8 +58,8 @@ INGEST_STATUSES = {
     "rejected": "a data file that could not be ingested",
     "duplicate": "the same content as a run already ingested from another path",
     "paired": "a .sysinfo sidecar, read with its data file",
-    "deferred": "a data format a later milestone ingests (CSV: P2)",
-    "ignored": "not benchmark data (a report, figure or manifest)",
+    "deferred": "a CSV whose header no format in mtl5.bench.formats matches",
+    "ignored": "not benchmark data (a report, figure, manifest or model-only table)",
     "removed": "a file a previous ingest saw that is no longer there",
 }
 
@@ -324,6 +328,11 @@ def _validate_json(doc: Any) -> None:
         for key in ("area", "op", "dtype", "reason"):
             if s.get(key) is not None and not isinstance(s[key], str):
                 raise _Rejected(f"skipped[{i}].{key} is not a string")
+    _check_text(doc)
+
+
+def _check_text(doc: Any) -> None:
+    """Reject a JSON document holding text that cannot be encoded."""
     try:
         # A lone surrogate (\ud800) decodes from JSON but cannot be encoded,
         # and every key and row is encoded on its way to a hash or DuckDB.
@@ -347,6 +356,19 @@ class _Run:
     results: list[dict]
     skipped: list[dict]
     entries: list[dict]
+    measurements: list[dict] = field(default_factory=list)
+
+
+def _sidecar_gaps(fields: dict[str, str], required) -> list[str]:
+    """The reasons a sidecar's required keys are missing or empty."""
+    reasons = []
+    missing = [k for k in required if k not in fields]
+    if missing:
+        reasons.append("sidecar lacks " + ", ".join(missing))
+    empty = [k for k in required if k in fields and not fields[k] and k not in si.EMPTY_ALLOWED]
+    if empty:
+        reasons.append("sidecar has empty " + ", ".join(empty))
+    return reasons
 
 
 def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Run:
@@ -359,17 +381,7 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
         reasons.append("no .sysinfo sidecar")
     else:
         fields, problems = si.parse_sysinfo(sidecar_text)
-        reasons += problems
-        missing = [k for k in si.REQUIRED_KEYS if k not in fields]
-        if missing:
-            reasons.append("sidecar lacks " + ", ".join(missing))
-        empty = [
-            k
-            for k in si.REQUIRED_KEYS
-            if k in fields and not fields[k] and k not in si.EMPTY_ALLOWED
-        ]
-        if empty:
-            reasons.append("sidecar has empty " + ", ".join(empty))
+        reasons += problems + _sidecar_gaps(fields, si.REQUIRED_KEYS)
         if "benchmark" in fields and fields["benchmark"] != "mtl5_bench":
             raise _Rejected(f"sidecar says benchmark={fields['benchmark']}, not mtl5_bench")
         for key in ("label", "machine", "class", "simd_backend"):
@@ -425,6 +437,7 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
         "tier": tier,
         "reasons": reasons,
         "run_timestamp": timestamp,
+        "time_source": "directory" if timestamp is not None else None,
         "machine": doc["machine"],
         "machine_dir": parts[0] if len(parts) > 1 else None,
         "machine_fingerprint": fingerprint,
@@ -526,6 +539,196 @@ def _parse_run(rel: str, run_id: str, doc: Any, sidecar_text: str | None) -> _Ru
     return _Run(run_id, tier, reasons, run_row, machine_row, probes, results, skipped, entries)
 
 
+def _parse_table_run(
+    rel: str,
+    run_id: str,
+    fmt: fm.Format,
+    table: fm.ParsedTable,
+    sidecar_text: str | None,
+    *,
+    git_time: datetime | None,
+    exempt_listed: bool,
+    git_problem: str | None = None,
+) -> _Run:
+    """Validate and flatten one legacy-format file (a CSV or bench_blas JSON).
+
+    The provenance rules are mtl5_bench's, with the format's exemptions,
+    aliases and columns applied to the sidecar first. A run directory's
+    timestamp gives the run time; failing that, the commit that added the
+    file does (``time_source`` says which). Raises _Rejected.
+    """
+    reasons: list[str] = []
+    if sidecar_text is None:
+        fields: dict[str, str] = {}
+        if exempt_listed:
+            reasons.append("no .sysinfo sidecar (grandfathered in .sidecar-exempt)")
+        else:
+            reasons.append("no .sysinfo sidecar")
+    else:
+        fields, problems = si.parse_sysinfo(sidecar_text)
+        reasons += problems
+        for alias, key in fmt.aliases.items():
+            if alias in fields and key not in fields:
+                fields[key] = fields[alias]
+    for key, column in fmt.from_columns.items():
+        if column not in table.header:
+            continue  # an older variant without the column: the sidecar stands
+        values = {row[column] for row in table.rows}
+        if len(values) > 1:
+            raise _Rejected(f"column {column!r} has {len(values)} different values")
+        if values:
+            value = values.pop()
+            if key in fields and fields[key] != value:
+                raise _Rejected(f"sidecar says {key}={fields[key]!r}, column {column!r} {value!r}")
+            fields[key] = value
+    if sidecar_text is not None:
+        required = [k for k in si.REQUIRED_KEYS if k not in fmt.exempt]
+        reasons += _sidecar_gaps(fields, required)
+    if "pool_size" in fields and _int(fields["pool_size"]) is None:
+        reasons.append(f"sidecar pool_size={fields['pool_size']!r} is not an integer")
+    if fields.get("label") == "blas" and not fields.get("blas_vendor"):
+        # As for mtl5_bench: without the vendor, OpenBLAS and MKL share a series.
+        reasons.append("a blas run with no blas_vendor in the sidecar")
+    if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
+        reasons.append("dirty build: the commit does not identify the code")
+
+    timestamp, time_source = _run_timestamp(rel), "directory"
+    if timestamp is None:
+        timestamp, time_source = git_time, "git"
+    if timestamp is None:
+        time_source = None
+        reasons.append(
+            "no run time: the directory name is not a UTC timestamp, "
+            f"and {git_problem or 'git has no commit adding the file'}"
+        )
+    if not table.rows:
+        reasons.append("the table has no data rows")
+
+    tier = "incomplete" if reasons else "complete"
+    label = fields.get("label") or rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    vendor = fields.get("blas_vendor", "")
+    fingerprint = si.machine_fingerprint(fields)
+    backend = si.backend(label, {"blas_vendor": vendor})
+    build = si.build_config(fields)
+    state = si.state_class(fields)
+    pool = fields.get("pool_size", "?")
+    config_key = si.short_hash(
+        "\n".join(
+            [
+                si.machine_identity(fields),
+                state,
+                backend,
+                build,
+                f"pool {pool}",
+                f"format {fmt.kind}",
+            ]
+        )
+    )
+
+    parts = rel.split("/")
+    run_row = {
+        "run_id": run_id,
+        "path": rel,
+        "schema": fmt.kind,
+        "tier": tier,
+        "reasons": reasons,
+        "run_timestamp": timestamp,
+        "time_source": time_source,
+        "machine": None,
+        "machine_dir": parts[0] if len(parts) > 1 else None,
+        "machine_fingerprint": fingerprint,
+        "label": label,
+        "class": None,
+        "threads": _int(fields.get("pool_size")),
+        "backend": backend,
+        "build_config": build,
+        "state_class": state,
+        "config_key": config_key,
+        "git_commit": fields.get("git_commit"),
+        "git_dirty": None if "git_dirty" not in fields else fields["git_dirty"] != "0",
+        "os_version": fields.get("os_version"),
+        "blas_vendor": vendor or None,
+        "thermal_before_c": _float_str(fields.get("thermal_before_c")),
+        "thermal_after_c": _float_str(fields.get("thermal_after_c")),
+        "loadavg_1m": _float_str(fields.get("loadavg_1m")),
+        "sysinfo": fields,
+    }
+    machine_row = {
+        "fingerprint": fingerprint,
+        "identity": si.machine_identity(fields),
+        "cpu_vendor": fields.get("cpu_vendor"),
+        "cpu_brand": fields.get("cpu_brand"),
+        "cpu_arch": fields.get("cpu_arch"),
+        "cpu_logical_cores": _int(fields.get("cpu_logical_cores")),
+        "host": fields.get("preflight_host", "").lower().split(".")[0] or None,
+    }
+
+    params_present = [p for p in fmt.params if p in table.header]
+    metrics_present = [m for m in fmt.metrics if m in table.header]
+    skip = set(params_present) | set(metrics_present) | ({fmt.repeat} if fmt.repeat else set())
+    seen: dict[str, int] = {}
+    measurements = []
+    stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    for i, row in enumerate(table.rows):
+        params = {p: row[p] for p in params_present}
+        if fmt.file_in_entry:
+            params = {"file": stem, **params}
+        entry_id = f"{fmt.name}:" + ",".join(f"{k}={v}" for k, v in params.items())
+        sample = seen.get(entry_id, 0)
+        seen[entry_id] = sample + 1
+        attributes = {k: v for k, v in row.items() if k not in skip}
+        for metric in metrics_present:
+            gate = fmt.valid_if.get(metric)
+            valid = gate is None or row.get(gate[0]) == gate[1]
+            measurements.append(
+                {
+                    "run_id": run_id,
+                    "row_index": i,
+                    "metric": metric,
+                    "format": fmt.kind,
+                    "entry_id": entry_id,
+                    "series_key": si.short_hash(f"{config_key}\n{entry_id}\n{metric}"),
+                    "params": json.dumps(params, sort_keys=True),
+                    "repeat": row.get(fmt.repeat) if fmt.repeat else None,
+                    "sample": sample,
+                    "unit": fmt.metrics[metric],
+                    "value": fm.number(row[metric]),
+                    "valid": valid,
+                    "attributes": json.dumps(attributes, sort_keys=True),
+                }
+            )
+    return _Run(run_id, tier, reasons, run_row, machine_row, [], [], [], [], measurements)
+
+
+def _bench_blas_table(doc: dict) -> fm.ParsedTable:
+    """bench_blas.py's results as a table of strings. Raises _Rejected."""
+    results = doc.get("results")
+    if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
+        raise _Rejected("bench_blas JSON: 'results' is not a list of objects")
+    # Seeded with the metrics, so a document whose every result failed (and
+    # so carries no metric keys) still records each result as invalid.
+    header: list[str] = list(fm.BENCH_BLAS.metrics)
+    rows = []
+    for i, r in enumerate(results):
+        for key in fm.BENCH_BLAS.signature:
+            if key not in r:
+                raise _Rejected(f"bench_blas JSON: results[{i}] has no {key!r}")
+        row = {}
+        for k, v in r.items():
+            if k not in header:
+                header.append(k)
+            if isinstance(v, (dict, list)):
+                raise _Rejected(f"bench_blas JSON: results[{i}].{k} is not a scalar")
+            row[k] = "" if v is None else str(v).lower() if isinstance(v, bool) else str(v)
+        rows.append(row)
+    # A failed result omits the metrics a passing one has: every row gets
+    # every column, so a missing value is an empty field, as in a CSV.
+    for row in rows:
+        for key in header:
+            row.setdefault(key, "")
+    return fm.ParsedTable(header, rows, [])
+
+
 def _float_str(v: str | None) -> float | None:
     if v is None:
         return None
@@ -590,10 +793,8 @@ def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | Non
         if data in all_paths:
             return "sidecar", "paired", []
         return "sidecar", "rejected", [f"sidecar without its data file {data.rsplit('/', 1)[-1]}"]
-    if suffix == ".json":
+    if suffix in (".json", ".csv"):
         return None
-    if suffix == ".csv":
-        return "csv", "deferred", ["CSV ingest is milestone P2 of #121"]
     if suffix in _REPORT_SUFFIXES:
         return "report", "ignored", []
     if suffix in _FIGURE_SUFFIXES:
@@ -601,6 +802,124 @@ def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | Non
     if name.startswith("."):
         return "manifest", "ignored", []
     return "other", "ignored", ["not a recognised benchmark file"]
+
+
+# Variables that point git at a repository other than the one -C finds.
+_GIT_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+)
+
+
+def _git_env() -> dict[str, str]:
+    """The environment without repository-location variables, so that
+    ``git -C root`` discovers root's own repository."""
+    return {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        check=True,
+        timeout=120,
+        env=_git_env(),
+    ).stdout.decode("utf-8", "surrogateescape")
+
+
+def _git_add_times(root: Path) -> tuple[dict[str, datetime], str | None]:
+    """When each file under root was first committed, as naive UTC.
+
+    Returns the times, keyed by paths relative to root as the walk produces
+    them, and why there are none when git cannot give them: git missing, root
+    not in a work tree, a failure or timeout, or a shallow clone, whose
+    grafted root commit would date every file to the same moment.
+    """
+    try:
+        if _git(root, "rev-parse", "--is-shallow-repository").strip() == "true":
+            return {}, "the clone is shallow, so git cannot date the file"
+    except FileNotFoundError:
+        return {}, "git is not installed"
+    except subprocess.TimeoutExpired:
+        return {}, "git timed out"
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", "replace").strip().splitlines()
+        return {}, f"git failed: {detail[0] if detail else 'exit ' + str(exc.returncode)}"
+    except OSError as exc:
+        return {}, f"git could not run: {exc}"
+    try:
+        out = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "log",
+                "--diff-filter=A",
+                # A rename is not an add of the new name unless renames are off.
+                "--no-renames",
+                "--relative",
+                # -z: names are NUL-terminated and never quoted, and each
+                # commit is "\0<time>\0\n" followed by its names.
+                "-z",
+                "--format=%x00%ct",
+                "--name-only",
+                "--",
+                ".",
+            ],
+            capture_output=True,
+            check=True,
+            timeout=120,
+            env=_git_env(),
+        ).stdout.decode("utf-8", "surrogateescape")
+    except subprocess.TimeoutExpired:
+        return {}, "git timed out"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {}, f"git log failed: {exc}"
+    times: dict[str, datetime] = {}
+    when = None
+    after_time = False
+    previous = ""
+    for token in out.split("\x00"):
+        if previous == "" and token.isdigit():
+            # A name is never empty, so an empty token separates records and
+            # the token after it is a commit time.
+            try:
+                when = datetime.fromtimestamp(int(token), timezone.utc).replace(tzinfo=None)
+            except (OverflowError, OSError, ValueError):
+                when = None
+            after_time = True
+        elif token:
+            name = token[1:] if after_time and token.startswith("\n") else token
+            after_time = False
+            if when is not None:
+                # git log runs newest first, so the last assignment is the first add.
+                times[name] = when
+        previous = token
+    return times, None
+
+
+def _sidecar_exempt(root: Path) -> set[str]:
+    """The paths MTL5's .sidecar-exempt grandfathers, relative to root.
+
+    The manifest lists paths from the repository root
+    (``benchmarks/data/...``); the part after ``benchmarks/data/`` is the
+    path under an ingest root of benchmarks/data.
+    """
+    manifest = root / ".sidecar-exempt"
+    if not manifest.is_file():
+        return set()
+    out = set()
+    for line in manifest.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        marker = "benchmarks/data/"
+        out.add(line.split(marker, 1)[1] if marker in line else line)
+    return out
 
 
 def _is_utf8(text: str) -> bool:
@@ -611,11 +930,14 @@ def _is_utf8(text: str) -> bool:
     return True
 
 
-def _path_provenance(rel: str) -> tuple[bytes, bytes]:
+def _path_provenance(rel: str) -> tuple[bytes, bytes, bytes]:
     parts = rel.split("/")
     machine_dir = parts[0] if len(parts) > 1 else ""
     stamp = parts[-2] if _run_timestamp(rel) is not None else ""
-    return machine_dir.encode(), stamp.encode()
+    # A CSV's name can be what it measured (klu_scoreboard, superlu_scoreboard),
+    # so the same bytes under two names are two runs.
+    name = parts[-1] if rel.lower().endswith(".csv") else ""
+    return machine_dir.encode(), stamp.encode(), name.encode()
 
 
 def _sha256(*chunks: bytes) -> str:
@@ -631,6 +953,7 @@ def ingest(
     db: Any = ":memory:",
     *,
     rebuild: bool = False,
+    time_from_git: bool = True,
 ) -> tuple[Any, IngestReport]:
     """Ingest every file under ``root`` into the database ``db``.
 
@@ -638,6 +961,12 @@ def ingest(
     Returns ``(connection, report)``. One database holds one ingest root: its
     paths are relative to it, and a file missing from the root is recorded as
     removed, so ingesting a different root into the same database raises.
+
+    A legacy-format file (a CSV, bench_blas.py JSON) outside a timestamp
+    directory takes its run time from the commit that added it, when ``root``
+    is in a git work tree and ``time_from_git`` is true; without one it is
+    incomplete. An ``mtl5-bench/1`` run always needs its timestamp directory:
+    mtl5_bench writes one, so a run outside it has been moved.
     """
     root_path = Path(root).resolve()
     if not root_path.is_dir():
@@ -647,14 +976,14 @@ def ingest(
         raise ValueError("rebuild=True needs the database path, not an open connection")
     con = connect(db, rebuild=rebuild) if owned else db
     try:
-        return con, _ingest(root_path, con)
+        return con, _ingest(root_path, con, time_from_git=time_from_git)
     except BaseException:
         if owned:
             con.close()
         raise
 
 
-def _ingest(root_path: Path, con) -> IngestReport:
+def _ingest(root_path: Path, con, *, time_from_git: bool = True) -> IngestReport:
     row = con.execute("SELECT value FROM meta WHERE key = 'root'").fetchone()
     if row is not None and row[0] != str(root_path):
         raise ValueError(
@@ -680,6 +1009,11 @@ def _ingest(root_path: Path, con) -> IngestReport:
 
     paths = _walk(root_path, _database_files(con))
     path_set = set(paths)
+    if time_from_git:
+        git_times, git_problem = _git_add_times(root_path)
+    else:
+        git_times, git_problem = {}, "git run times are switched off"
+    exempt_list = _sidecar_exempt(root_path)
     outcomes: list[FileOutcome] = []
     file_rows: list[dict] = []
     runs: list[_Run] = []
@@ -739,8 +1073,12 @@ def _ingest(root_path: Path, con) -> IngestReport:
         data = full.read_bytes()
         sidecar_path = root_path / (rel + _SIDECAR)
         sidecar = sidecar_path.read_bytes() if (rel + _SIDECAR) in path_set else None
+        # Without a timestamp directory, the commit that added the file is the
+        # run time, so committing it later must re-evaluate the run.
+        git_time = None if _run_timestamp(rel) is not None else git_times.get(rel)
+        stamp = git_time.isoformat().encode() if git_time is not None else b""
         # The marker byte tells an absent sidecar from an empty one.
-        content_hash = _sha256(data, b"\x00" if sidecar is None else b"\x01" + sidecar)
+        content_hash = _sha256(data, b"\x00" if sidecar is None else b"\x01" + sidecar, stamp)
         # The run is the content plus the provenance its path carries (the
         # machine directory and the timestamp directory), so a run moved to a
         # path that changes its tier is a new run, not a duplicate.
@@ -749,6 +1087,77 @@ def _ingest(root_path: Path, con) -> IngestReport:
         prev = current.get(rel)
         if prev is not None and prev[0] == content_hash and prev[2] != "removed":
             record(FileOutcome(rel, "?", "?"), content_hash)
+            continue
+
+        def finish(kind: str, parse, reject_kind: str | None = None) -> None:
+            """Record a data file as a run: a duplicate, a restore, or parsed."""
+            if run_id in known_runs:
+                first_path, tier, reasons = known_runs[run_id]
+                if first_path == rel:
+                    # Removed and restored unchanged: the run is already there.
+                    status = "ingested" if tier == "complete" else "incomplete"
+                    o = FileOutcome(rel, kind, status, reasons)
+                else:
+                    o = FileOutcome(rel, kind, "duplicate", [f"same content as {first_path}"])
+                o.run_id = run_id
+                record(o, content_hash)
+                return
+            try:
+                sidecar_text = None if sidecar is None else sidecar.decode("utf-8")
+            except UnicodeDecodeError:
+                o = FileOutcome(rel, reject_kind or kind, "rejected", ["sidecar is not UTF-8"])
+                record(o, content_hash)
+                return
+            try:
+                run = parse(sidecar_text)
+            except _Rejected as exc:
+                record(FileOutcome(rel, reject_kind or kind, "rejected", [str(exc)]), content_hash)
+                return
+            status = "ingested" if run.tier == "complete" else "incomplete"
+            o = FileOutcome(rel, kind, status, list(run.reasons))
+            o.run_id = run_id
+            record(o, content_hash)
+            runs.append(run)
+            known_runs[run_id] = (rel, run.tier, list(run.reasons))
+
+        def legacy(fmt: fm.Format, table: fm.ParsedTable) -> None:
+            finish(
+                fmt.kind,
+                lambda text: _parse_table_run(
+                    rel,
+                    run_id,
+                    fmt,
+                    table,
+                    text,
+                    git_time=git_time,
+                    exempt_listed=rel in exempt_list,
+                    git_problem=git_problem,
+                ),
+            )
+
+        if rel.lower().endswith(".csv"):
+            try:
+                table = fm.parse_csv(data.decode("utf-8-sig"))
+            except UnicodeDecodeError:
+                record(FileOutcome(rel, "csv", "rejected", ["the CSV is not UTF-8"]), content_hash)
+                continue
+            except (ValueError, csv.Error) as exc:
+                record(FileOutcome(rel, "csv", "rejected", [f"invalid CSV: {exc}"]), content_hash)
+                continue
+            fmt = fm.match_csv(table.header)
+            if fmt is None:
+                shown = ",".join(table.header)[:200]
+                record(
+                    FileOutcome(rel, "csv", "deferred", [f"no format matches the header {shown}"]),
+                    content_hash,
+                )
+            elif not fmt.metrics:
+                record(
+                    FileOutcome(rel, fmt.kind, "ignored", ["model output: no measured columns"]),
+                    content_hash,
+                )
+            else:
+                legacy(fmt, table)
             continue
 
         try:
@@ -766,45 +1175,23 @@ def _ingest(root_path: Path, con) -> IngestReport:
         if "schema" not in doc:
             if "meta" in doc and "probes" not in doc:
                 # bench_blas.py --json writes {"meta": ..., "results": ...}.
-                o = FileOutcome(rel, "json", "deferred", ["bench_blas.py JSON is milestone P2"])
+                try:
+                    _check_text(doc)
+                    table = _bench_blas_table(doc)
+                except _Rejected as exc:
+                    record(
+                        FileOutcome(rel, fm.BENCH_BLAS.kind, "rejected", [str(exc)]), content_hash
+                    )
+                    continue
+                legacy(fm.BENCH_BLAS, table)
             else:
-                o = FileOutcome(rel, "json", "rejected", ["missing field 'schema'"])
-            record(o, content_hash)
+                record(
+                    FileOutcome(rel, "json", "rejected", ["missing field 'schema'"]), content_hash
+                )
             continue
 
-        if run_id in known_runs:
-            first_path, tier, reasons = known_runs[run_id]
-            if first_path == rel:
-                # Removed and restored unchanged: the run is already there.
-                status = "ingested" if tier == "complete" else "incomplete"
-                o = FileOutcome(rel, _SCHEMA, status, reasons)
-            else:
-                o = FileOutcome(rel, _SCHEMA, "duplicate", [f"same content as {first_path}"])
-            o.run_id = run_id
-            record(o, content_hash)
-            continue
-
-        try:
-            sidecar_text = None if sidecar is None else sidecar.decode("utf-8")
-        except UnicodeDecodeError:
-            record(
-                FileOutcome(rel, "json", "rejected", ["sidecar is not UTF-8"]),
-                content_hash,
-            )
-            continue
-        try:
-            run = _parse_run(rel, run_id, doc, sidecar_text)
-        except _Rejected as exc:
-            # kind is fixed: the schema value may be the invalid text itself.
-            record(FileOutcome(rel, "json", "rejected", [str(exc)]), content_hash)
-            continue
-
-        status = "ingested" if run.tier == "complete" else "incomplete"
-        o = FileOutcome(rel, _SCHEMA, status, list(run.reasons))
-        o.run_id = run_id
-        record(o, content_hash)
-        runs.append(run)
-        known_runs[run_id] = (rel, run.tier, list(run.reasons))
+        # A rejection's kind is fixed: the schema value may be the invalid text.
+        finish(_SCHEMA, lambda text: _parse_run(rel, run_id, doc, text), reject_kind="json")
 
     # Compare recorded names, which escape a non-UTF-8 name the same way twice.
     seen = {o.path for o in outcomes}
@@ -906,6 +1293,7 @@ def _write(
         _insert_columns(con, "probes", [p for r in runs for p in r.probes])
         _insert_columns(con, "results", [x for r in runs for x in r.results])
         _insert_columns(con, "skipped", [s for r in runs for s in r.skipped])
+        _insert_columns(con, "measurements", [m for r in runs for m in r.measurements])
         entries = {(e["entry_id"], e["definition_version"]): e for r in runs for e in r.entries}
         _insert_columns(con, "entry_definitions", list(entries.values()), ignore=True)
         for f in file_rows:

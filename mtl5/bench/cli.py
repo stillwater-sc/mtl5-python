@@ -9,7 +9,9 @@ from .ingest import ingest
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
-    con, report = ingest(args.root, args.db, rebuild=args.rebuild)
+    con, report = ingest(
+        args.root, args.db, rebuild=args.rebuild, time_from_git=not args.no_git_time
+    )
     try:
         print(report)
         problems = report.problems()
@@ -26,10 +28,15 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         n_runs, n_results, n_series = con.execute(
             "SELECT count(DISTINCT run_id), count(*), count(DISTINCT series_key) FROM trend_results"
         ).fetchone()
+        m_runs, m_values, m_series = con.execute(
+            "SELECT count(DISTINCT run_id), count(*), count(DISTINCT series_key) "
+            "FROM trend_measurements"
+        ).fetchone()
         print(
             f"\ntrend-eligible: {n_runs} runs, {n_results} results, {n_series} series "
             f"(database: {args.db})"
         )
+        print(f"trend-eligible legacy: {m_runs} runs, {m_values} measurements, {m_series} series")
     finally:
         con.close()
     return 0
@@ -47,14 +54,20 @@ def main(argv: list[str] | None = None) -> int:
         help="ingest a benchmark data tree into a DuckDB database",
         description=(
             "Walk ROOT (normally <mtl5 checkout>/benchmarks/data) and account for "
-            "every file: mtl5-bench/1 JSON runs are ingested with their .sysinfo "
-            "sidecars, and everything else is recorded with the reason it was not."
+            "every file: mtl5-bench/1 JSON, MTL5's CSV formats and bench_blas.py "
+            "JSON are ingested with their .sysinfo sidecars, and everything else is "
+            "recorded with the reason it was not."
         ),
     )
     p.add_argument("root", help="the benchmark data directory")
     p.add_argument("--db", default="bench.duckdb", help="database file (default: %(default)s)")
     p.add_argument("--rebuild", action="store_true", help="delete the database and start over")
     p.add_argument("-v", "--verbose", action="store_true", help="list every file with a reason")
+    p.add_argument(
+        "--no-git-time",
+        action="store_true",
+        help="do not date files outside a timestamp directory by the commit that added them",
+    )
     p.set_defaults(func=_cmd_ingest)
 
     args = parser.parse_args(argv)
