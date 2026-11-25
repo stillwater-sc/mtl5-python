@@ -30,7 +30,12 @@ import mtl5
 pytest.importorskip("matplotlib", reason="notebooks need the [notebooks] extra")
 
 NOTEBOOK_DIR = Path(__file__).resolve().parent.parent / "notebooks"
-NOTEBOOKS = sorted(NOTEBOOK_DIR.glob("*.ipynb")) if NOTEBOOK_DIR.is_dir() else []
+# The guide's notebooks, and the examples ported from MTL5 in examples/.
+NOTEBOOKS = (
+    sorted([*NOTEBOOK_DIR.glob("*.ipynb"), *NOTEBOOK_DIR.glob("examples/*.ipynb")])
+    if NOTEBOOK_DIR.is_dir()
+    else []
+)
 
 # Resolve the child against the same mtl5 this process imported — under
 # `pip install .` the repo root holds a source package with no compiled _core.
@@ -55,7 +60,7 @@ def test_notebooks_exist():
     assert NOTEBOOKS, "expected at least one notebook under notebooks/"
 
 
-@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.relative_to(NOTEBOOK_DIR).as_posix())
 def test_notebook_runs(path: Path):
     env = dict(os.environ)
     existing = env.get("PYTHONPATH")
@@ -84,7 +89,7 @@ def test_notebook_runs(path: Path):
     )
 
 
-@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.relative_to(NOTEBOOK_DIR).as_posix())
 def test_notebook_outputs_are_stripped(path: Path):
     """Committed outputs bloat diffs and go stale; the runner above is what
     proves the notebook works."""
