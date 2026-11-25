@@ -55,6 +55,18 @@ FRAMES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _run_in_tmp_path(tmp_path, monkeypatch):
+    """Run each test in its own directory, never the checkout.
+
+    ``mtl5-bench figure`` writes to ``KIND-MACHINE.*`` in the current
+    directory when no ``--out`` is given. A test that expects the command to
+    refuse, run against code that regressed, would draw the figure into the
+    repository instead.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture(scope="module")
 def db(tmp_path_factory) -> str:
     path = tmp_path_factory.mktemp("figures") / "bench.duckdb"
