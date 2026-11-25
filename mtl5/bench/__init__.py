@@ -27,8 +27,8 @@ can say which one changed.
 Legacy formats (MTL5's CSVs, ``bench_blas.py`` JSON) go to the long
 ``measurements`` table and the ``trend_measurements`` view instead, one row
 per file row and metric; :mod:`mtl5.bench.formats` describes each dialect.
-A file outside a timestamp directory takes its run time from the git commit
-that added it.
+A legacy file outside a timestamp directory takes its run time from the git
+commit that added it.
 
 The submodules ``sysinfo``, ``schema``, ``formats`` and ``ingest`` hold the
 details. Only

@@ -583,6 +583,9 @@ def _parse_table_run(
         reasons += _sidecar_gaps(fields, required)
     if "pool_size" in fields and _int(fields["pool_size"]) is None:
         reasons.append(f"sidecar pool_size={fields['pool_size']!r} is not an integer")
+    if fields.get("label") == "blas" and not fields.get("blas_vendor"):
+        # As for mtl5_bench: without the vendor, OpenBLAS and MKL share a series.
+        reasons.append("a blas run with no blas_vendor in the sidecar")
     if fields.get("git_dirty", "0") != "0" or fields.get("tree_git_dirty", "0") != "0":
         reasons.append("dirty build: the commit does not identify the code")
 
@@ -662,8 +665,11 @@ def _parse_table_run(
     skip = set(params_present) | set(metrics_present) | ({fmt.repeat} if fmt.repeat else set())
     seen: dict[str, int] = {}
     measurements = []
+    stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     for i, row in enumerate(table.rows):
         params = {p: row[p] for p in params_present}
+        if fmt.file_in_entry:
+            params = {"file": stem, **params}
         entry_id = f"{fmt.name}:" + ",".join(f"{k}={v}" for k, v in params.items())
         sample = seen.get(entry_id, 0)
         seen[entry_id] = sample + 1
@@ -696,7 +702,9 @@ def _bench_blas_table(doc: dict) -> fm.ParsedTable:
     results = doc.get("results")
     if not isinstance(results, list) or not all(isinstance(r, dict) for r in results):
         raise _Rejected("bench_blas JSON: 'results' is not a list of objects")
-    header: list[str] = []
+    # Seeded with the metrics, so a document whose every result failed (and
+    # so carries no metric keys) still records each result as invalid.
+    header: list[str] = list(fm.BENCH_BLAS.metrics)
     rows = []
     for i, r in enumerate(results):
         for key in fm.BENCH_BLAS.signature:
@@ -866,11 +874,14 @@ def _is_utf8(text: str) -> bool:
     return True
 
 
-def _path_provenance(rel: str) -> tuple[bytes, bytes]:
+def _path_provenance(rel: str) -> tuple[bytes, bytes, bytes]:
     parts = rel.split("/")
     machine_dir = parts[0] if len(parts) > 1 else ""
     stamp = parts[-2] if _run_timestamp(rel) is not None else ""
-    return machine_dir.encode(), stamp.encode()
+    # A CSV's name can be what it measured (klu_scoreboard, superlu_scoreboard),
+    # so the same bytes under two names are two runs.
+    name = parts[-1] if rel.lower().endswith(".csv") else ""
+    return machine_dir.encode(), stamp.encode(), name.encode()
 
 
 def _sha256(*chunks: bytes) -> str:
@@ -895,9 +906,11 @@ def ingest(
     paths are relative to it, and a file missing from the root is recorded as
     removed, so ingesting a different root into the same database raises.
 
-    A file outside a timestamp directory takes its run time from the commit
-    that added it, when ``root`` is in a git work tree and ``time_from_git``
-    is true; without one it is incomplete.
+    A legacy-format file (a CSV, bench_blas.py JSON) outside a timestamp
+    directory takes its run time from the commit that added it, when ``root``
+    is in a git work tree and ``time_from_git`` is true; without one it is
+    incomplete. An ``mtl5-bench/1`` run always needs its timestamp directory:
+    mtl5_bench writes one, so a run outside it has been moved.
     """
     root_path = Path(root).resolve()
     if not root_path.is_dir():

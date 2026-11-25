@@ -268,6 +268,42 @@ class TestEdges:
             "sidecar pool_size='invalid' is not an integer"
         ]
 
+    def test_scoreboards_of_two_solvers_are_two_series(self, tree):
+        # Different values for the same matrices, and the same label on both,
+        # so only the file name tells the solvers apart.
+        text = (tree / KLU).read_text().replace(",ok,", ",ok,1", 1)
+        (tree / "superlu_scoreboard.csv").write_text(text)
+        for name in (KLU, "superlu_scoreboard.csv"):
+            (tree / (name + ".sysinfo")).write_text(_complete_sidecar())
+        con, _ = _ingest(tree)
+        keys = {
+            path: {
+                k
+                for (k,) in con.execute(
+                    "SELECT DISTINCT series_key FROM measurements JOIN runs USING (run_id) "
+                    "WHERE path = ?",
+                    [path],
+                ).fetchall()
+            }
+            for path in (KLU, "superlu_scoreboard.csv")
+        }
+        assert keys[KLU] and keys["superlu_scoreboard.csv"]
+        assert not keys[KLU] & keys["superlu_scoreboard.csv"]
+
+    def test_identical_scoreboards_under_two_names_are_two_runs(self, tree):
+        # The name is part of what a file_in_entry format measured.
+        shutil.copy(tree / KLU, tree / "superlu_scoreboard.csv")
+        _, report = _ingest(tree)
+        assert _status(report, "superlu_scoreboard.csv").status == "incomplete"
+
+    def test_blas_run_without_a_vendor(self, tree):
+        side = tree / (INTERLEAVE + ".sysinfo")
+        side.write_text(side.read_text().replace("label=", "label_was=") + "label=blas\n")
+        _, report = _ingest(tree)
+        assert _status(report, INTERLEAVE).reasons == [
+            "a blas run with no blas_vendor in the sidecar"
+        ]
+
     def test_status_gates_a_scoreboard_value(self, tree):
         rel = "i7-12700k/superlu/20261117T202641Z/x.csv"
         (tree / rel).parent.mkdir(parents=True)
@@ -400,6 +436,19 @@ class TestBenchBlas:
         rid = _run_id(con, self.REL)
         n = "SELECT count(*) FROM measurements WHERE run_id = ? AND NOT valid"
         assert _scalar(con, n, [rid]) == 2
+
+    def test_every_result_failed(self, tree):
+        doc = _bench_blas_doc()
+        doc["results"] = [doc["results"][1]]
+        for key in ("seconds_per_op", "gflops"):
+            del doc["results"][0][key]
+        self._write(tree, doc)
+        con, _ = _ingest(tree)
+        rid = _run_id(con, self.REL)
+        got = con.execute(
+            "SELECT metric, valid FROM measurements WHERE run_id = ? ORDER BY 1", [rid]
+        ).fetchall()
+        assert got == [("gflops", False), ("seconds_per_op", False)]
 
     def test_without_a_sidecar(self, tree):
         self._write(tree, _bench_blas_doc(), sidecar=False)

@@ -57,6 +57,11 @@ class Format:
         the interleave CSVs). Every row must agree.
     ``aliases``
         Sidecar keys this producer spells differently.
+    ``file_in_entry``
+        Put the file's name (without suffix) into each entry, for a format
+        whose file name is the only thing naming what was compared: the KLU
+        and SuperLU scoreboards share columns, and only ``klu_scoreboard``
+        and ``superlu_scoreboard`` tell them apart.
     ``version``
         The format definition's version; part of every series key.
     """
@@ -70,6 +75,7 @@ class Format:
     exempt: frozenset[str] = frozenset()
     from_columns: dict[str, str] = field(default_factory=dict)
     aliases: dict[str, str] = field(default_factory=dict)
+    file_in_entry: bool = False
     version: int = 1
 
     @property
@@ -181,6 +187,7 @@ FORMATS: tuple[Format, ...] = (
         valid_if={m: (f"{m.split('_')[0]}_status", "ok") for m in _SCOREBOARD_METRICS},
         exempt=_NOT_LEGACY | {"pool_size"},
         aliases=_HARNESS_ALIASES,
+        file_in_entry=True,
     ),
 )
 
