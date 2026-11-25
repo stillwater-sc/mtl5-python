@@ -9,7 +9,9 @@ from .ingest import ingest
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
-    con, report = ingest(args.root, args.db, rebuild=args.rebuild)
+    con, report = ingest(
+        args.root, args.db, rebuild=args.rebuild, time_from_git=not args.no_git_time
+    )
     try:
         print(report)
         problems = report.problems()
@@ -61,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", default="bench.duckdb", help="database file (default: %(default)s)")
     p.add_argument("--rebuild", action="store_true", help="delete the database and start over")
     p.add_argument("-v", "--verbose", action="store_true", help="list every file with a reason")
+    p.add_argument(
+        "--no-git-time",
+        action="store_true",
+        help="do not date files outside a timestamp directory by the commit that added them",
+    )
     p.set_defaults(func=_cmd_ingest)
 
     args = parser.parse_args(argv)

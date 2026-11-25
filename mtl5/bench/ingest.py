@@ -548,6 +548,7 @@ def _parse_table_run(
     *,
     git_time: datetime | None,
     exempt_listed: bool,
+    git_problem: str | None = None,
 ) -> _Run:
     """Validate and flatten one legacy-format file (a CSV or bench_blas JSON).
 
@@ -598,7 +599,7 @@ def _parse_table_run(
         time_source = None
         reasons.append(
             "no run time: the directory name is not a UTC timestamp, "
-            "and git has no commit adding the file"
+            f"and {git_problem or 'git has no commit adding the file'}"
         )
     if not table.rows:
         reasons.append("the table has no data rows")
@@ -803,12 +804,32 @@ def _classify(rel: str, all_paths: set[str]) -> tuple[str, str, list[str]] | Non
     return "other", "ignored", ["not a recognised benchmark file"]
 
 
-def _git_add_times(root: Path) -> dict[str, datetime]:
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, check=True, timeout=120
+    ).stdout.decode("utf-8", "surrogateescape")
+
+
+def _git_add_times(root: Path) -> tuple[dict[str, datetime], str | None]:
     """When each file under root was first committed, as naive UTC.
 
-    Empty when git is missing or root is not in a work tree. Paths are
-    relative to root, as the walk produces them.
+    Returns the times, keyed by paths relative to root as the walk produces
+    them, and why there are none when git cannot give them: git missing, root
+    not in a work tree, a failure or timeout, or a shallow clone, whose
+    grafted root commit would date every file to the same moment.
     """
+    try:
+        if _git(root, "rev-parse", "--is-shallow-repository").strip() == "true":
+            return {}, "the clone is shallow, so git cannot date the file"
+    except FileNotFoundError:
+        return {}, "git is not installed"
+    except subprocess.TimeoutExpired:
+        return {}, "git timed out"
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.decode("utf-8", "replace").strip().splitlines()
+        return {}, f"git failed: {detail[0] if detail else 'exit ' + str(exc.returncode)}"
+    except OSError as exc:
+        return {}, f"git could not run: {exc}"
     try:
         out = subprocess.run(
             [
@@ -832,8 +853,10 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
             check=True,
             timeout=120,
         ).stdout.decode("utf-8", "surrogateescape")
-    except (OSError, subprocess.SubprocessError):
-        return {}
+    except subprocess.TimeoutExpired:
+        return {}, "git timed out"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {}, f"git log failed: {exc}"
     times: dict[str, datetime] = {}
     when = None
     after_time = False
@@ -854,7 +877,7 @@ def _git_add_times(root: Path) -> dict[str, datetime]:
                 # git log runs newest first, so the last assignment is the first add.
                 times[name] = when
         previous = token
-    return times
+    return times, None
 
 
 def _sidecar_exempt(root: Path) -> set[str]:
@@ -964,7 +987,10 @@ def _ingest(root_path: Path, con, *, time_from_git: bool = True) -> IngestReport
 
     paths = _walk(root_path, _database_files(con))
     path_set = set(paths)
-    git_times = _git_add_times(root_path) if time_from_git else {}
+    if time_from_git:
+        git_times, git_problem = _git_add_times(root_path)
+    else:
+        git_times, git_problem = {}, "git run times are switched off"
     exempt_list = _sidecar_exempt(root_path)
     outcomes: list[FileOutcome] = []
     file_rows: list[dict] = []
@@ -1083,6 +1109,7 @@ def _ingest(root_path: Path, con, *, time_from_git: bool = True) -> IngestReport
                     text,
                     git_time=git_time,
                     exempt_listed=rel in exempt_list,
+                    git_problem=git_problem,
                 ),
             )
 

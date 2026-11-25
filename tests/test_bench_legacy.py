@@ -137,8 +137,9 @@ class TestFixtures:
         _, report = _ingest(tree)
         assert _status(report, BLOCKING).reasons == [
             "sidecar lacks clock_policy, bench_cpus",
+            # The fixture tests switch git times off.
             "no run time: the directory name is not a UTC timestamp, "
-            "and git has no commit adding the file",
+            "and git run times are switched off",
         ]
         assert _status(report, MODEL).reasons == ["model output: no measured columns"]
         assert _status(report, KLU).reasons[0] == (
@@ -573,13 +574,39 @@ class TestGitTime:
         _git(root, "add", ".")
         _git(root, "commit", "-q", "-m", "add")
         _, report = bench.ingest(root, time_from_git=False)
-        assert _status(report, self.REL).status == "incomplete"
+        o = _status(report, self.REL)
+        assert o.status == "incomplete"
+        assert o.reasons[0].endswith("and git run times are switched off")
+
+    def test_switched_off_from_the_command_line(self, tmp_path, capsys):
+        from mtl5.bench.cli import main
+
+        root = self._tree(tmp_path)
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "add")
+        assert main(["ingest", str(root), "--db", str(tmp_path / "b.duckdb"), "--no-git-time"]) == 0
+        assert "git run times are switched off" in capsys.readouterr().out
+
+    def test_a_shallow_clone_dates_nothing(self, tmp_path):
+        root = self._tree(tmp_path)
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "add")
+        (root / "later.txt").write_text("x\n")
+        _git(root, "add", ".")
+        _git(root, "commit", "-q", "-m", "later", date="2026-11-22T10:00:00Z")
+        clone = tmp_path / "clone"
+        _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{root}", str(clone))
+        _, report = bench.ingest(clone)
+        o = _status(report, self.REL)
+        assert o.status == "incomplete"
+        assert o.reasons[0].endswith("the clone is shallow, so git cannot date the file")
 
     def test_outside_a_work_tree(self, tmp_path):
         root = self._tree(tmp_path)
         shutil.rmtree(root / ".git")
         _, report = bench.ingest(root)
-        assert "no run time" in _status(report, self.REL).reasons[0]
+        reason = _status(report, self.REL).reasons[0]
+        assert reason.startswith("no run time") and "git failed: fatal:" in reason
 
 
 @pytest.mark.skipif(
