@@ -1430,6 +1430,49 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.6 (2026-11-26)
+
+### Bug Fixes
+
+- **sparse**: True final residual, breakdown padding, GMRES's history
+  ([#150](https://github.com/stillwater-sc/mtl5-python/pull/150),
+  [`7b583bb`](https://github.com/stillwater-sc/mtl5-python/commit/7b583bbcfc618b8bf8f7fb303604d5061210a158))
+
+### Documentation
+
+- **bench**: Benchmark analysis notebook on MTL5's data (#121 P8)
+  ([#146](https://github.com/stillwater-sc/mtl5-python/pull/146),
+  [`04af724`](https://github.com/stillwater-sc/mtl5-python/commit/04af7247583272ef411b2c493bcb92e00b22498a))
+
+- **examples**: An Examples section with MTL5's first tutorial notebooks (#147 PR 1)
+  ([#148](https://github.com/stillwater-sc/mtl5-python/pull/148),
+  [`5303f18`](https://github.com/stillwater-sc/mtl5-python/commit/5303f187670767a400abaa321959cee0b0e5635e))
+
+- **examples**: Dense factorizations and spectra (#147 PR 2)
+  ([#149](https://github.com/stillwater-sc/mtl5-python/pull/149),
+  [`27b0e99`](https://github.com/stillwater-sc/mtl5-python/commit/27b0e99f01705657dd3d8e9eca8b2c28ed3c7e8a))
+
+- **examples**: Dense factorizations and spectra notebooks (#147 PR 2)
+  ([#149](https://github.com/stillwater-sc/mtl5-python/pull/149),
+  [`27b0e99`](https://github.com/stillwater-sc/mtl5-python/commit/27b0e99f01705657dd3d8e9eca8b2c28ed3c7e8a))
+
+- **examples**: Recommend bunch_kaufman for symmetric indefinite matrices
+  ([#149](https://github.com/stillwater-sc/mtl5-python/pull/149),
+  [`27b0e99`](https://github.com/stillwater-sc/mtl5-python/commit/27b0e99f01705657dd3d8e9eca8b2c28ed3c7e8a))
+
+### Features
+
+- **sparse**: Krylov solver history, callback= and full_output= (#147 PR 3)
+  ([#150](https://github.com/stillwater-sc/mtl5-python/pull/150),
+  [`7b583bb`](https://github.com/stillwater-sc/mtl5-python/commit/7b583bbcfc618b8bf8f7fb303604d5061210a158))
+
+### Testing
+
+- **notebooks**: Run notebook scripts with UTF-8 stdout
+  ([#148](https://github.com/stillwater-sc/mtl5-python/pull/148),
+  [`5303f18`](https://github.com/stillwater-sc/mtl5-python/commit/5303f187670767a400abaa321959cee0b0e5635e))
+
+
 ## v5.25.5 (2026-11-25)
 
 ### Bug Fixes
