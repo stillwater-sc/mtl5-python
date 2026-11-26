@@ -65,9 +65,14 @@
 #include <mtl/itl/pc/ilut.hpp>
 #include <mtl/itl/pc/ssor.hpp>
 #include <mtl/operation/matrix_properties.hpp>
+#include <mtl/operation/mult.hpp>
 
+#include <cmath>
 #include <cstddef>
+#include <exception>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <stdexcept>
 #include <string>
@@ -195,13 +200,96 @@ void require_exact_adjoint(Solver s, const PCBase<double>* pcd,
         "ilut, block_diagonal, diagonal or identity.");
 }
 
+// ---------------------------------------------------------------------------
+// Recording iteration controller (#147)
+// ---------------------------------------------------------------------------
+/// basic_iteration that keeps the residual norm of every iteration and can
+/// hand each one to a Python callable.
+///
+/// MTL5's solvers are templated on the controller and call it through its
+/// concrete type, so redefining finished() here is enough; cyclic_iteration in
+/// MTL5 does the same to print. Every solver reports through finished(): once
+/// before its first step (iteration 0), once per iteration, and sometimes again
+/// at the same iteration count -- the true residual after a recurrence's
+/// estimate (cg, tfqmr, minres), or the residual at a GMRES restart. A repeated
+/// test replaces that iteration's entry, so the history holds one value per
+/// iteration, the last the solver saw.
+///
+/// The value is whatever norm the solver tests, which is not always ||b - Ax||.
+/// For most solvers it is: iteration 0 is ||b||, since x0 = 0. MTL5's GMRES is
+/// left-preconditioned and tests ||M^-1 (b - Ax)||, so its history starts at
+/// ||M^-1 b||; its inner steps report the least-squares estimate of that norm.
+/// run_solver therefore computes the true final residual itself.
+///
+/// A solver that breaks down advances the count and calls fail() without a
+/// last finished(), so run_solver pads the history to iterations + 1 with NaN.
+///
+/// The callback runs with the GIL taken back for the call. If it raises, the
+/// exception is kept, the controller reports itself finished so the solver
+/// stops at once, and run_solver re-raises it once the GIL is held again.
 template <typename T>
-std::tuple<VectorView<T>, int, int, double>
+class recording_iteration : public mtl::itl::basic_iteration<T> {
+    using base = mtl::itl::basic_iteration<T>;
+
+public:
+    template <typename V>
+    recording_iteration(const V& r0, int max_iter, T rtol, nb::callable* callback)
+        : base(r0, max_iter, rtol), callback_(callback) {}
+
+    template <typename V>
+        requires (!std::is_arithmetic_v<V>)
+    bool finished(const V& r) {
+        return finished(static_cast<T>(mtl::two_norm(r)));
+    }
+
+    bool finished(T r) {
+        if (error_) return true;  // a callback raised: stop, and stay stopped
+        const bool done = base::finished(r);
+        const auto k = static_cast<std::size_t>(this->i_);
+        const double value = static_cast<double>(r);
+        if (history_.size() == k + 1) {
+            history_.back() = value;
+        } else {
+            // An iteration the solver didn't test has no residual: NaN.
+            history_.resize(k, std::numeric_limits<double>::quiet_NaN());
+            history_.push_back(value);
+        }
+        if (callback_ != nullptr) {
+            nb::gil_scoped_acquire gil;
+            try {
+                (*callback_)(this->i_, value);
+            } catch (...) {
+                error_ = std::current_exception();
+                this->fail(-1, "callback raised");
+                return true;
+            }
+        }
+        return done;
+    }
+
+    const std::vector<double>& history() const { return history_; }
+    std::exception_ptr callback_error() const { return error_; }
+
+private:
+    nb::callable* callback_;
+    std::vector<double> history_;
+    std::exception_ptr error_;
+};
+
+/// What _krylov returns: x, info, iterations, the true final residual
+/// ||b - Ax||, ||b||, and the norm the solver tested at each iteration.
+template <typename T>
+using SolveResult =
+    std::tuple<VectorView<T>, int, int, double, double, std::vector<double>>;
+
+template <typename T>
+SolveResult<T>
 run_solver(Solver which, const SMat<T>& A, const PCBase<T>& M,
-           const Vec<T>& b, T rtol, int maxiter, int restart, int ell, int s)
+           const Vec<T>& b, T rtol, int maxiter, int restart, int ell, int s,
+           nb::callable* callback)
 {
     Vec<T> x(A.num_rows(), T{0});
-    mtl::itl::basic_iteration<T> iter(b, maxiter, rtol);
+    recording_iteration<T> iter(b, maxiter, rtol, callback);
     const PCRef<T> Mref{&M};
     int info = 0;
     {
@@ -220,8 +308,27 @@ run_solver(Solver which, const SMat<T>& A, const PCBase<T>& M,
                 info = mtl::itl::bicgstab_ell(A, x, b, Mref, iter, ell); break;
         }
     }
+    if (auto err = iter.callback_error()) std::rethrow_exception(err);
+
+    // The true residual, once: the solver's own final norm is preconditioned
+    // for GMRES, and a breakdown leaves it at the last test.
+    double true_resid = 0.0, norm_b = 0.0;
+    {
+        nogil guard;
+        Vec<T> Ax(A.num_rows());
+        mtl::mult(A, x, Ax);
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            const double bi = static_cast<double>(b[i]);
+            const double ri = bi - static_cast<double>(Ax[i]);
+            true_resid += ri * ri;
+            norm_b += bi * bi;
+        }
+    }
+    std::vector<double> history = iter.history();
+    history.resize(static_cast<std::size_t>(iter.iterations()) + 1,
+                   std::numeric_limits<double>::quiet_NaN());
     return {VectorView<T>(std::move(x)), info, static_cast<int>(iter.iterations()),
-            static_cast<double>(iter.resid())};
+            std::sqrt(true_resid), std::sqrt(norm_b), std::move(history)};
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +444,8 @@ template <typename T>
 void register_solvers(nb::module_& m) {
     m.def("_krylov", [](const std::string& solver, const SMat<T>& A,
                         const PCBase<T>& M, const VectorView<T>& b,
-                        double rtol, int maxiter, int restart, int ell, int s) {
+                        double rtol, int maxiter, int restart, int ell, int s,
+                        std::optional<nb::callable> callback) {
         const Solver which = parse_solver(solver);
         if (A.num_rows() != A.num_cols())
             throw std::invalid_argument(solver + ": A must be square");
@@ -355,10 +463,13 @@ void register_solvers(nb::module_& m) {
         Vec<T> bb(b.vec.size());
         for (std::size_t i = 0; i < b.vec.size(); ++i) bb[i] = b.vec[i];
         return run_solver<T>(which, A, M, bb, static_cast<T>(rtol), maxiter,
-                             restart, ell, s);
+                             restart, ell, s, callback ? &*callback : nullptr);
     }, "solver"_a, "A"_a, "M"_a, "b"_a, "rtol"_a, "maxiter"_a,
-       "restart"_a = 30, "ell"_a = 2, "s"_a = 4,
-       "Internal Krylov dispatch — use mtl5.sparse.cg() and friends");
+       "restart"_a = 30, "ell"_a = 2, "s"_a = 4, "callback"_a = nb::none(),
+       "Internal Krylov dispatch — use mtl5.sparse.cg() and friends. Returns "
+       "(x, info, iterations, residual, norm_b, history): residual is the "
+       "true ||b - Ax||, history the norm the solver tested at each "
+       "iteration from 0.");
 }
 
 template <typename T>

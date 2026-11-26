@@ -15,6 +15,26 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Krylov solver history** (#147, PR 3 of 7). Every solver in
+  `mtl5.sparse` (`cg`, `gmres`, `bicgstab` and the rest of `solvers()`):
+  - `callback=` works. It was reserved and raised `NotImplementedError`.
+    `callback(k, rnorm)` is called each time the solver tests convergence,
+    with the iteration count and the residual norm. The solver runs without
+    the GIL and takes it back only for the call. An exception raised in the
+    callback stops the solve and propagates.
+  - `full_output=True` returns `(x, info, report)`, where `report` is a
+    `SolveReport` with `iterations`, `residual`, `relative_residual` and
+    `history`. `residual` is the true ‖b − Ax‖, computed once after the
+    solve. `history` is the norm the solver tests at each iteration from 0,
+    padded with NaN after a breakdown. The default return is still SciPy's
+    `(x, info)`.
+  - MTL5's GMRES is left-preconditioned: it tests ‖M⁻¹r‖ against
+    rtol·‖b‖. So its history is the preconditioned residual, and with a
+    preconditioner its true relative residual can exceed `rtol` although
+    `info == 0`. The report shows both.
+  - The history is recorded by an iteration controller in the bindings,
+    derived from MTL5's `basic_iteration` the way MTL5's own
+    `cyclic_iteration` is, so it needs no change to MTL5.
 - **Examples: dense factorizations and spectra** (#147, PR 2 of 7). Three
   notebooks under a new "Dense linear algebra" caption of the Examples
   section:

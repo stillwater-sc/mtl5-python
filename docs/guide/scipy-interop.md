@@ -126,6 +126,31 @@ the way SciPy's do: `info == 0` means converged. The preconditioner is one of
 mtl5's own (`ms.ilu0`, `ms.ic0`, `ms.ilut`, …), applied without a round trip
 through Python on every iteration.
 
+Two things go beyond SciPy's interface. `full_output=True` adds a third result,
+a `SolveReport` with the iteration count, the final residual and the residual
+norm of every iteration. And `callback(k, rnorm)` is called with each
+iteration's count and residual norm, the same values as the history. (GMRES
+reports the preconditioned residual ‖M⁻¹r‖, which is what it tests; the
+report's `residual` is always the true ‖b − Ax‖.) SciPy's
+callbacks differ from solver to solver: CG's receives the iterate xₖ. Here
+every solver's callback receives the residual norm, because the solver runs in
+C++ and xₖ isn't handed back to Python on every iteration.
+
+```{code-cell} python
+k = 30  # a 2-D Laplacian on a 30 x 30 grid
+T = sp.diags([-1.0, 2.0, -1.0], [-1, 0, 1], shape=(k, k))
+L = (sp.kron(sp.eye(k), T) + sp.kron(T, sp.eye(k))).tocsr()
+rhs = np.ones(k * k)
+
+seen = []
+_, info, plain = ms.cg(L, rhs, rtol=1e-10, full_output=True, callback=lambda i, r: seen.append(r))
+_, _, ic0 = ms.cg(L, rhs, M=ms.ic0(L), rtol=1e-10, full_output=True)
+print(f"CG:         {plain.iterations} iterations, relative residual {plain.relative_residual:.1e}")
+print(f"CG + IC(0): {ic0.iterations} iterations, relative residual {ic0.relative_residual:.1e}")
+assert info == 0 and ic0.iterations < plain.iterations
+assert len(plain.history) == plain.iterations + 1 and seen[-1] == plain.history[-1]
+```
+
 The bridge also works the other way, so SciPy's solvers can use MTL5 pieces:
 
 - `ms.as_linear_operator(A)` wraps an MTL5 matrix as a
@@ -155,4 +180,4 @@ assert info == 0
 `mtl5.mixed.iterative_refine` does the same job, refining a narrow factor
 against a float64 residual, without leaving MTL5.
 
-API reference: {py:func}`mtl5.sparse.from_scipy`, {py:func}`mtl5.sparse.to_scipy`, {py:func}`mtl5.sparse.splu`, {py:func}`mtl5.sparse.qr`, {py:func}`mtl5.mixed.iterative_refine`, {py:func}`mtl5.io.mm_read`.
+API reference: {py:func}`mtl5.sparse.cg`, {py:class}`mtl5.sparse.SolveReport`, {py:func}`mtl5.sparse.from_scipy`, {py:func}`mtl5.sparse.to_scipy`, {py:func}`mtl5.sparse.splu`, {py:func}`mtl5.sparse.qr`, {py:func}`mtl5.mixed.iterative_refine`, {py:func}`mtl5.io.mm_read`.

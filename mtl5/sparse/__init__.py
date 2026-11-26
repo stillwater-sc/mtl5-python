@@ -17,7 +17,9 @@ This submodule provides:
   error always improves; by how much varies with ordering and platform (roughly
   1.3x-3x). Paired with `mtl5.mixed.iterative_refine` it is 4 iterations to
   1.4e-10 instead of 6 to 2.0e-9. See the README.
-- `cg`, `gmres`, `bicgstab` — iterative Krylov solvers returning (x, info)
+- `cg`, `gmres`, `bicgstab` and the rest of `solvers()` — iterative Krylov
+  solvers returning (x, info), or (x, info, report) with `full_output=True`;
+  `callback=` sees the residual norm of every iteration
 - `ilu0`, `ic0` — incomplete LU/Cholesky preconditioners
 
 scipy is an optional dependency: importing this module without scipy installed
@@ -34,6 +36,8 @@ is available directly as `A.rmatvec(x)`, which uses MTL5's own transpose view.
 """
 
 from __future__ import annotations
+
+from typing import NamedTuple
 
 import numpy as np
 
@@ -281,19 +285,42 @@ def _coerce_vector(b, expected_dtype: np.dtype):
     return _vector(arr) if arr.flags.writeable else _vector_copy(arr)
 
 
-def _check_unsupported_kwargs(callback, device):
-    """Validate optional kwargs reserved for future support.
+class SolveReport(NamedTuple):
+    """How a Krylov solve went: what `full_output=True` returns third.
 
-    These parameters are reserved on the public API surface so that callers
-    can write code today that will work transparently when the underlying
-    kernel gains preconditioner / callback / device-dispatch support, without
-    breaking the function signature later.
+    iterations : int
+        Iterations taken.
+    residual : float
+        The true residual norm ||b - A x|| of the returned x, computed once
+        after the solve.
+    relative_residual : float
+        `residual / ||b||`. For every solver but one it is at most `rtol`, up
+        to rounding, when `info == 0`. The exception is gmres with a preconditioner: MTL5's GMRES
+        is left-preconditioned and stops when ||M^-1 r|| <= rtol * ||b||, so
+        ||r|| itself can be larger.
+    history : np.ndarray
+        The norm the solver tests for convergence at each iteration, starting
+        with iteration 0, so `len(history) == iterations + 1`. For most solvers
+        it is the residual norm: the recurrence's residual during the
+        iterations, the true residual where the solver computes one at the end,
+        and ||b|| at iteration 0, since x0 = 0. tfqmr tests a quasi-residual
+        bound during its iterations. gmres tests ||M^-1 r||, so with a
+        preconditioner its history is the preconditioned residual, starting at
+        ||M^-1 b||; its inner steps report the least-squares estimate of that
+        norm. An iteration the solver didn't test holds NaN: after a breakdown
+        (`info > 1`), the last one.
     """
-    if callback is not None:
-        # TODO(#7-followup): Add per-iteration callback dispatching to Python.
-        raise NotImplementedError(
-            "callback= not yet supported. The C++ solver loop runs to completion before returning."
-        )
+
+    iterations: int
+    residual: float
+    relative_residual: float
+    history: np.ndarray
+
+
+def _check_unsupported_kwargs(callback, device):
+    """Validate the callback, and the device reserved for KPU dispatch."""
+    if callback is not None and not callable(callback):
+        raise TypeError(f"callback must be callable, got {type(callback).__name__}")
     if device is not None and device != "cpu":
         # TODO(#7-followup): Wire up KPU dispatch via mtl5.set_backend('kpu').
         raise NotImplementedError(
@@ -316,22 +343,35 @@ _SOLVER_DOC = """
         `ic0`, `diagonal`, `ssor`, `ilut`, `ildl`, `block_diagonal`,
         `identity`. Defaults to `identity`, i.e. unpreconditioned.
     callback : callable, optional
-        Reserved for per-iteration monitoring. Currently raises
-        NotImplementedError.
+        Called as `callback(k, rnorm)` each time the solver tests convergence:
+        `k` is the iteration count, from 0, and `rnorm` the residual norm it
+        tests (see `SolveReport.history`). `k` can repeat when the solver
+        rechecks at the same iteration, with the true residual at the end or
+        at a gmres restart. The return value is ignored. An exception raised
+        in it stops the solve and propagates. The solver runs without the GIL
+        and takes it back for each call, so a callback costs a few
+        microseconds per iteration.
     device : str, optional
         Reserved for KPU dispatch. Currently raises NotImplementedError for
         anything other than 'cpu'.
+    full_output : bool, optional
+        Also return a `SolveReport`: the iteration count, the final residual
+        and the residual history. False by default, which keeps the
+        SciPy-style `(x, info)`.
 
     Returns
     -------
     x : np.ndarray
         Solution vector.
     info : int
-        0 on convergence, nonzero otherwise.
+        0 on convergence, 1 if `maxiter` was reached, and greater than 1 on a
+        breakdown.
+    report : SolveReport
+        Only with `full_output=True`.
     """
 
 
-def _run(name, A, b, rtol, maxiter, M, callback, device, restart=30, ell=2, s=4):
+def _run(name, A, b, rtol, maxiter, M, callback, device, restart=30, ell=2, s=4, full_output=False):
     """Shared body: coerce, default the preconditioner, dispatch."""
     _check_unsupported_kwargs(callback, device)
     mat = _coerce_matrix(A)
@@ -345,8 +385,14 @@ def _run(name, A, b, rtol, maxiter, M, callback, device, restart=30, ell=2, s=4)
             f"got {type(M).__name__}. A scipy LinearOperator cannot be used here — "
             "it would have to be applied from Python once per iteration."
         )
-    x_view, info, _iters, _resid = _krylov(name, mat, M, bv, rtol, maxiter, restart, ell, s)
-    return x_view.to_numpy(), info
+    x_view, info, iters, resid, norm_b, history = _krylov(
+        name, mat, M, bv, rtol, maxiter, restart, ell, s, callback
+    )
+    x = x_view.to_numpy()
+    if not full_output:
+        return x, info
+    relative = resid / norm_b if norm_b > 0 else resid
+    return x, info, SolveReport(iters, resid, relative, np.asarray(history, dtype=np.float64))
 
 
 def iterative_solve(
@@ -362,6 +408,7 @@ def iterative_solve(
     restart=30,
     ell=2,
     s=4,
+    full_output=False,
 ):
     """Solve `A @ x = b` with any of the Krylov solvers in `solvers()`.
 
@@ -373,7 +420,7 @@ def iterative_solve(
     """
     if solver not in solvers():
         raise ValueError(f"unknown solver {solver!r}; valid: {solvers()}")
-    return _run(solver, A, b, rtol, maxiter, M, callback, device, restart, ell, s)
+    return _run(solver, A, b, rtol, maxiter, M, callback, device, restart, ell, s, full_output)
 
 
 def _solver_doc(f):
@@ -389,65 +436,88 @@ def _solver_doc(f):
 
 
 @_solver_doc
-def cg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def cg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False):
     """Conjugate Gradient, for symmetric positive definite systems."""
-    return _run("cg", A, b, rtol, maxiter, M, callback, device)
+    return _run("cg", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 @_solver_doc
-def minres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def minres(
+    A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False
+):
     """MINRES, for symmetric systems that may be indefinite — where CG does not
     apply.
     """
-    return _run("minres", A, b, rtol, maxiter, M, callback, device)
+    return _run("minres", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 @_solver_doc
-def bicgstab(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def bicgstab(
+    A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False
+):
     """BiCGSTAB, for general non-symmetric systems. A good default."""
-    return _run("bicgstab", A, b, rtol, maxiter, M, callback, device)
+    return _run("bicgstab", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 @_solver_doc
-def bicgstab_ell(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, ell=2):
+def bicgstab_ell(
+    A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, ell=2, full_output=False
+):
     """BiCGSTAB(ell), which smooths BiCGSTAB's irregular convergence by taking
     `ell` minimal-residual steps at a time.
     """
-    return _run("bicgstab_ell", A, b, rtol, maxiter, M, callback, device, ell=ell)
+    return _run(
+        "bicgstab_ell", A, b, rtol, maxiter, M, callback, device, ell=ell, full_output=full_output
+    )
 
 
 @_solver_doc
-def cgs(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def cgs(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False):
     """Conjugate Gradient Squared, for non-symmetric systems. Avoids A^T but
     converges more erratically than BiCGSTAB.
     """
-    return _run("cgs", A, b, rtol, maxiter, M, callback, device)
+    return _run("cgs", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 @_solver_doc
-def gmres(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, restart=30):
+def gmres(
+    A,
+    b,
+    *,
+    rtol=1e-10,
+    maxiter=1000,
+    M=None,
+    callback=None,
+    device=None,
+    restart=30,
+    full_output=False,
+):
     """GMRES with restarts, for general non-symmetric systems. `restart` bounds
     the Krylov subspace, trading memory against convergence.
     """
-    return _run("gmres", A, b, rtol, maxiter, M, callback, device, restart=restart)
+    return _run(
+        "gmres", A, b, rtol, maxiter, M, callback, device, restart=restart, full_output=full_output
+    )
 
 
 @_solver_doc
-def idr_s(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, s=4):
+def idr_s(
+    A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, s=4, full_output=False
+):
     """IDR(s), for non-symmetric systems. Larger `s` usually means fewer
     iterations and more memory.
     """
-    return _run("idr_s", A, b, rtol, maxiter, M, callback, device, s=s)
+    return _run("idr_s", A, b, rtol, maxiter, M, callback, device, s=s, full_output=full_output)
 
 
 @_solver_doc
-def tfqmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def tfqmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False):
     """Transpose-free QMR, for non-symmetric systems."""
-    return _run("tfqmr", A, b, rtol, maxiter, M, callback, device)
+    return _run("tfqmr", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 @_solver_doc
-def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False):
     """BiCG, for non-symmetric systems.
 
     Needs a preconditioner with an **exact adjoint** (`M.has_exact_adjoint`).
@@ -456,15 +526,15 @@ def bicg(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
     whose adjoint is its forward solve; that pairing is refused rather than
     allowed to break down.
     """
-    return _run("bicg", A, b, rtol, maxiter, M, callback, device)
+    return _run("bicg", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 @_solver_doc
-def qmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None):
+def qmr(A, b, *, rtol=1e-10, maxiter=1000, M=None, callback=None, device=None, full_output=False):
     """QMR, for non-symmetric systems. Needs a preconditioner with an exact
     adjoint — see `bicg` for why.
     """
-    return _run("qmr", A, b, rtol, maxiter, M, callback, device)
+    return _run("qmr", A, b, rtol, maxiter, M, callback, device, full_output=full_output)
 
 
 # ===========================================================================
@@ -806,6 +876,7 @@ __all__ = [
     "Preconditioner_f64",
     "SSOR_f32",
     "SSOR_f64",
+    "SolveReport",
     "amd",
     "as_linear_operator",
     "as_preconditioner_lo",
