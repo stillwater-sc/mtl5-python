@@ -290,3 +290,53 @@ class TestGenerators:
     def test_seed_is_required(self):
         with pytest.raises(TypeError):
             mtl5.generators.gen_dot(10, 1e10)
+
+
+# ---------------------------------------------------------------------------
+# Layout and dtype: nanobind's conversion pass must not change the precision
+# ---------------------------------------------------------------------------
+class TestLayoutKeepsPrecision:
+    """A strided or mixed-dtype array matches no overload exactly, and
+    nanobind's second pass would cast it for the first overload that takes a
+    cast. That narrowed a strided float64 array to float32 in mixed.dot, and
+    widened a strided float32 array to float64 in sum_k."""
+
+    def test_strided_float32_sum_stays_float32(self):
+        x = np.array([1, 0, 2**-24, 0], dtype=np.float32)[::2]
+        assert mtl5.sum_k(x) == mtl5.sum_k(np.ascontiguousarray(x)) == 1.0
+
+    def test_strided_float32_dot_stays_float32(self):
+        x = np.array([1, 0, 2**-24, 0], dtype=np.float32)[::2]
+        y = np.ones(4, dtype=np.float32)[::2]
+        assert mtl5.dot_k(x, y) == 1.0
+
+    @pytest.mark.parametrize("acc", [None, "f64", "compensated", "exact"])
+    def test_strided_float64_mixed_dot_is_not_narrowed(self, acc):
+        x = np.array([1 + 2**-30, 0, 1, 0])[::2]
+        y = np.ones(4)[::2]
+        assert mtl5.mixed.dot(x, y, accumulator=acc) == 2 + 2**-30
+
+    def test_strided_float64_sum_and_dot(self):
+        x = np.array([1e16, 9, 1.0, 9, -1e16, 9])[::2]
+        assert mtl5.sum_k(x) == 1.0
+        assert mtl5.dot_k(x, np.ones(6)[::2]) == 1.0
+
+    def test_lists_and_integers_are_float64(self):
+        assert mtl5.sum_k([1e16, 1.0, -1e16]) == 1.0
+        assert mtl5.dot_k([1, 2], [3, 4]) == 11.0
+        big = np.array([2**53, 1, -(2**53)], dtype=np.int64)
+        assert mtl5.sum_k(big) == 1.0
+
+    def test_float32_with_float64_in_mixed_dot_is_float64(self):
+        x = np.array([1 + 2**-30, 1.0])
+        y = np.ones(2, dtype=np.float32)
+        assert mtl5.mixed.dot(x, y, accumulator="exact") == 2 + 2**-30
+
+    def test_core_functions_refuse_rather_than_cast(self):
+        x = np.array([1, 0, 2**-24, 0], dtype=np.float32)[::2]
+        with pytest.raises(TypeError):
+            mtl5._core.sum_k(x)
+        # mtl5.mixed is the C++ submodule, with its dot replaced by the
+        # wrapper; the C++ function itself is kept as _core_mixed_dot.
+        with pytest.raises(TypeError):
+            mtl5._core_mixed_dot(np.ones(4)[::2], np.ones(4)[::2])

@@ -36,6 +36,14 @@ against, and semantic-release manages only the **patch** component.
     platform.
   - The tests check the paper's error bounds (Propositions 4.5, 4.10, 5.5 and
     5.11) against exact `Fraction` references.
+  - **Fixed along the way:** `mtl5.mixed.dot` cast a strided float64 array to
+    float32. nanobind's conversion pass gave it to the float32 overload,
+    which is registered first, under every accumulator. `mixed.dot`,
+    `sum_k` and `dot_k` now make an array contiguous while keeping its
+    dtype, and compute a float32/float64 pair in float64. Their C++
+    functions take only exact matches, so a direct `_core` call fails
+    rather than casting. The bare `mtl5.dot` still has this behavior: the
+    same root cause as #152.
 
 - **Examples: sparse structure** (#147, PR 5 of 7). Three notebooks under a
   new "Sparse structure" caption, porting MTL5's `phase07/sparse_formats`,

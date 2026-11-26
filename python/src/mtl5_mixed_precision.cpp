@@ -348,7 +348,12 @@ void register_mixed_native(nb::module_& mx) {
         auto va = mtl::vec::dense_vector<T>(n, ap);
         auto vb = mtl::vec::dense_vector<T>(n, bp);
         return mixed_dot<T>(va, vb, kind, elem);
-    }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none());
+    },
+    // noconvert: in nanobind's conversion pass a strided float64 array would
+    // otherwise be cast to the float32 overload, registered first, and lose
+    // its low bits before any accumulator saw them. mtl5.mixed.dot's Python
+    // wrapper (mtl5/__init__.py) makes the layout contiguous, keeping the dtype.
+    "a"_a.noconvert(), "b"_a.noconvert(), "accumulator"_a = nb::none(), "result"_a = nb::none());
 
     mx.def("norm", [](const VV& v, int ord, std::optional<std::string> accumulator) {
         if (ord != 2)

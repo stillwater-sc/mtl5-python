@@ -109,13 +109,17 @@ constexpr const char* kDotDoc =
 
 template <typename T>
 void register_for(nb::module_& m) {
+    // noconvert: nanobind's conversion pass would otherwise hand a strided or
+    // mixed-dtype array to the first overload that accepts a cast, which can
+    // change the working precision. The Python wrappers in mtl5/__init__.py
+    // normalise the layout, keeping the dtype, before calling these.
     m.def("sum_k", [](Arr1<T> x, int k) { return sum_k_impl<T>(borrow<T>(x), k); },
-          "x"_a, "k"_a = 2, kSumDoc);
+          "x"_a.noconvert(), "k"_a = 2, kSumDoc);
     m.def("sum_k", [](const VectorView<T>& x, int k) { return sum_k_impl<T>(x.vec, k); },
           "x"_a, "k"_a = 2);
     m.def("dot_k",
           [](Arr1<T> x, Arr1<T> y, int k) { return dot_k_impl<T>(borrow<T>(x), borrow<T>(y), k); },
-          "x"_a, "y"_a, "k"_a = 2, kDotDoc);
+          "x"_a.noconvert(), "y"_a.noconvert(), "k"_a = 2, kDotDoc);
     m.def("dot_k",
           [](const VectorView<T>& x, const VectorView<T>& y, int k) {
               return dot_k_impl<T>(x.vec, y.vec, k);
@@ -126,8 +130,6 @@ void register_for(nb::module_& m) {
 }  // namespace
 
 void register_accurate(nb::module_& m) {
-    // float64 first: an untyped Python list converts to the first overload
-    // that accepts it, and float64 is the precision a caller of these wants.
     register_for<double>(m);
     register_for<float>(m);
 }
