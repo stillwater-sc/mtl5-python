@@ -384,6 +384,20 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Examples: the factorizations notebook uses MTL5's test-matrix
+  generators** (#147). It used the C++ example's hand-built matrix,
+  1 / (1 + |i − j|) plus the identity. That matrix has no standard name and is
+  well conditioned (cond ≈ 2.3), so every method agreed on it and it showed
+  nothing about why one is preferred. Now:
+  - **Lehmer** (`mtl5.generators.lehmer`) gives the easy SPD system.
+  - **Hilbert** (`hilbert`), in a new section, shows where the methods
+    differ. LU, Cholesky and QR keep the backward error at ε for n = 4 to 15,
+    while `inv(A) @ b`'s grows with cond(H), to 1e-3. Cholesky stops once
+    cond(H) passes 1/ε.
+  - **Wilkinson's W₇⁺** (`wilkinson`) is the indefinite matrix for Cholesky's
+    refusal and LDLᵀ's inertia.
+  - The curve fit keeps `np.vander`: `generators.vandermonde` is square, and
+    a least-squares fit needs a tall matrix.
 - **Guide page: "How fill-reducing orderings work".** It explains why the
   ordering decides the fill, and how each algorithm turns that into a rule:
   - **The elimination game.** Eliminating a vertex makes its neighbours a
