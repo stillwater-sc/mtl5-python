@@ -15,6 +15,20 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Examples: dense factorizations and spectra** (#147, PR 2 of 7). Three
+  notebooks under a new "Dense linear algebra" caption of the Examples
+  section:
+  - **Three factorizations and a curve fit**: LU, Cholesky and QR on one
+    system, Cholesky refusing an indefinite matrix and LDLᵀ giving its
+    inertia, and a polynomial fit where QR loses cond(V) digits and the
+    normal equations cond(V)², measured against a quad-double QR.
+  - **Vibrating string**: the 1D Laplacian's eigenvalues and modes against
+    the closed form, the 2D Laplacian from Kronecker products, and complex
+    eigenvalues from an asymmetric change. The C++ example's perturbation of
+    0.5 leaves the eigenvalues real; the notebook sweeps it and shows them
+    turn complex at about 1.25.
+  - **PCA by SVD**: variance explained, the covariance route, and the
+    Eckart–Young error of the rank-2 reconstruction.
 - **Examples: MTL5's tutorial as executed notebooks** (#147, PR 1 of 7).
   - A new top-level **Examples** section of the site,
     `docs/examples/index.md`. It lists all 40 of MTL5's example programs at

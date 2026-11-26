@@ -30,3 +30,6 @@ index.
 | `examples/basics.ipynb` | `intro/hello_mtl5`, `phase01_core_types/vectors_and_matrices`, `phase02_basic_operations/*` | Containers over NumPy memory, norms and their unit balls, products, and dense against sparse storage. |
 | `examples/views.ipynb` | `phase07_sparse_formats/structured_views`, `phase10_matrix_views/*` | Triangular, banded, Hermitian and mapped views; triangular solves; permutations as index vectors; block-diagonal systems. |
 | `examples/backends.ipynb` | `phase09_advanced_types/blas_dispatch` | What the build dispatches to, and `mtl5.matmul` against NumPy's BLAS. |
+| `examples/factorizations.ipynb` | `phase05_dense_decompositions/*` | LU, Cholesky and QR on one system; Cholesky refusing an indefinite matrix, and LDLᵀ's inertia; a polynomial fit by QR and by the normal equations, against a quad-double reference. |
+| `examples/vibrating_string.ipynb` | `phase06_eigenvalue_svd/vibrating_string` | Eigenvalues and modes of the 1D Laplacian against the closed form; the 2D Laplacian by Kronecker products; complex eigenvalues from an asymmetric change; singular values against eigenvalues. |
+| `examples/pca.ipynb` | `phase06_eigenvalue_svd/pca_svd` | PCA by SVD: variance explained, the covariance route, and the rank-2 reconstruction error equal to the dropped singular value. |
