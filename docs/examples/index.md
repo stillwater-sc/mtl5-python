@@ -28,6 +28,15 @@ against.
 ../notebooks/examples/backends
 ```
 
+```{toctree}
+:maxdepth: 1
+:caption: Dense linear algebra
+
+../notebooks/examples/factorizations
+../notebooks/examples/vibrating_string
+../notebooks/examples/pca
+```
+
 ## Every MTL5 example, and where it is
 
 | MTL5 example | Here |
@@ -41,10 +50,10 @@ against.
 | [`phase03_iterative_solvers/convection_diffusion.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase03_iterative_solvers/convection_diffusion.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Heat and transport in 1D |
 | [`phase04_sparse_assembly/laplacian_2d.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase04_sparse_assembly/laplacian_2d.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Poisson in 2D and relaxation |
 | [`phase04_sparse_assembly/smoother_convergence.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase04_sparse_assembly/smoother_convergence.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Poisson in 2D and relaxation |
-| [`phase05_dense_decompositions/solve_three_ways.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/solve_three_ways.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Three factorizations and a curve fit |
-| [`phase05_dense_decompositions/least_squares_qr.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/least_squares_qr.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Three factorizations and a curve fit |
-| [`phase06_eigenvalue_svd/vibrating_string.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/vibrating_string.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Vibrating string |
-| [`phase06_eigenvalue_svd/pca_svd.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/pca_svd.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): PCA by SVD |
+| [`phase05_dense_decompositions/solve_three_ways.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/solve_three_ways.cpp) | [Three factorizations and a curve fit](../notebooks/examples/factorizations.ipynb) |
+| [`phase05_dense_decompositions/least_squares_qr.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/least_squares_qr.cpp) | [Three factorizations and a curve fit](../notebooks/examples/factorizations.ipynb) |
+| [`phase06_eigenvalue_svd/vibrating_string.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/vibrating_string.cpp) | [Vibrating string](../notebooks/examples/vibrating_string.ipynb) |
+| [`phase06_eigenvalue_svd/pca_svd.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/pca_svd.cpp) | [PCA by SVD](../notebooks/examples/pca.ipynb) |
 | [`phase07_sparse_formats/sparse_formats.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase07_sparse_formats/sparse_formats.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Sparse formats |
 | [`phase07_sparse_formats/structured_views.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase07_sparse_formats/structured_views.cpp) | [Views](../notebooks/examples/views.ipynb) |
 | [`phase08_expression_templates/expression_benchmark.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase08_expression_templates/expression_benchmark.cpp) | Not ported: expression templates fuse C++ loops at compile time |
