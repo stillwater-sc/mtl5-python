@@ -581,13 +581,15 @@ def _float_dtype(a):
 
 
 def _common_float(a, b):
-    """Two operands of different floating dtypes -- ndarrays or native float
-    DenseVectors, in any pairing -- go to the wider one as ndarrays: the
-    narrower widens exactly. Anything else is returned as it is."""
+    """Two floating operands -- ndarrays or native float DenseVectors -- of
+    different dtypes, or of different kinds (an ndarray with a DenseVector),
+    go to ndarrays of the wider dtype: the narrower widens exactly, and the C++
+    overloads take two ndarrays or two DenseVectors of one type. Anything else
+    is returned as it is."""
     import numpy as _np
 
     ta, tb = _float_dtype(a), _float_dtype(b)
-    if ta is not None and tb is not None and ta != tb:
+    if ta is not None and tb is not None and (ta != tb or type(a) is not type(b)):
         t = _np.result_type(ta, tb)
         return _np.asarray(a).astype(t, copy=False), _np.asarray(b).astype(t, copy=False)
     return a, b

@@ -341,6 +341,14 @@ class TestLayoutKeepsPrecision:
         x64 = mtl5.vector(x)
         assert mtl5.dot_k(x64, np.ones(2, dtype=np.float32)) == 2 + 2**-30
 
+    @pytest.mark.parametrize("dt", [np.float32, np.float64])
+    def test_container_with_array_of_the_same_dtype(self, dt):
+        x = np.array([1.0, 2.0], dtype=dt)
+        v = mtl5.vector(np.array([3.0, 4.0], dtype=dt))
+        assert mtl5.dot_k(v, x) == mtl5.dot_k(x, v) == 11.0
+        assert mtl5.dot_k(v, [1, 2]) == 11.0
+        assert mtl5.mixed.dot(v, x, accumulator="exact") == 11.0
+
     def test_core_functions_refuse_rather_than_cast(self):
         x = np.array([1, 0, 2**-24, 0], dtype=np.float32)[::2]
         with pytest.raises(TypeError):
