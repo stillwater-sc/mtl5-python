@@ -1545,6 +1545,61 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.7 (2026-11-26)
+
+### Bug Fixes
+
+- Accept a DenseVector paired with an ndarray of the same dtype
+  ([#157](https://github.com/stillwater-sc/mtl5-python/pull/157),
+  [`0b96312`](https://github.com/stillwater-sc/mtl5-python/commit/0b96312426b8c044a39fae2c93b85b4bdc991735))
+
+- Keep the dtype of strided arrays in sum_k, dot_k and mixed.dot
+  ([#157](https://github.com/stillwater-sc/mtl5-python/pull/157),
+  [`0b96312`](https://github.com/stillwater-sc/mtl5-python/commit/0b96312426b8c044a39fae2c93b85b4bdc991735))
+
+- Promote a float32 DenseVector paired with a float64 operand
+  ([#157](https://github.com/stillwater-sc/mtl5-python/pull/157),
+  [`0b96312`](https://github.com/stillwater-sc/mtl5-python/commit/0b96312426b8c044a39fae2c93b85b4bdc991735))
+
+### Build System
+
+- Notebooks extra requires scipy>=1.12
+  ([#155](https://github.com/stillwater-sc/mtl5-python/pull/155),
+  [`f930bf2`](https://github.com/stillwater-sc/mtl5-python/commit/f930bf26e64247d7b1f5707fcf7cd4ed4cc8f947))
+
+### Documentation
+
+- **examples**: Factorizations notebook on MTL5's test-matrix generators
+  ([#153](https://github.com/stillwater-sc/mtl5-python/pull/153),
+  [`efff580`](https://github.com/stillwater-sc/mtl5-python/commit/efff58076180ef62b646846128f67f2b138ae8cc))
+
+- **examples**: Factorizations notebook on MTL5's test-matrix generators (#147)
+  ([#153](https://github.com/stillwater-sc/mtl5-python/pull/153),
+  [`efff580`](https://github.com/stillwater-sc/mtl5-python/commit/efff58076180ef62b646846128f67f2b138ae8cc))
+
+- **examples**: Only Cholesky may fail in the Hilbert sweep
+  ([#153](https://github.com/stillwater-sc/mtl5-python/pull/153),
+  [`efff580`](https://github.com/stillwater-sc/mtl5-python/commit/efff58076180ef62b646846128f67f2b138ae8cc))
+
+- **examples**: P1's diagonal coupling is zero per triangle, not a cancellation
+  ([#156](https://github.com/stillwater-sc/mtl5-python/pull/156),
+  [`5d721ba`](https://github.com/stillwater-sc/mtl5-python/commit/5d721ba09f7140ac62209313ea8ae0cd4cfa1ee5))
+
+- **examples**: PDEs and iterative solvers notebooks (#147 PR 4)
+  ([#155](https://github.com/stillwater-sc/mtl5-python/pull/155),
+  [`f930bf2`](https://github.com/stillwater-sc/mtl5-python/commit/f930bf26e64247d7b1f5707fcf7cd4ed4cc8f947))
+
+- **examples**: Sparse structure notebooks (#147 PR 5)
+  ([#156](https://github.com/stillwater-sc/mtl5-python/pull/156),
+  [`5d721ba`](https://github.com/stillwater-sc/mtl5-python/commit/5d721ba09f7140ac62209313ea8ae0cd4cfa1ee5))
+
+### Features
+
+- SumK, DotK, compensated and exact accumulators, GenDot (#147 PR 6)
+  ([#157](https://github.com/stillwater-sc/mtl5-python/pull/157),
+  [`0b96312`](https://github.com/stillwater-sc/mtl5-python/commit/0b96312426b8c044a39fae2c93b85b4bdc991735))
+
+
 ## v5.25.6 (2026-11-26)
 
 ### Bug Fixes
