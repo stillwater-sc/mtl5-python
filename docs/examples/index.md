@@ -37,6 +37,16 @@ against.
 ../notebooks/examples/pca
 ```
 
+```{toctree}
+:maxdepth: 1
+:caption: PDEs and iterative solvers
+
+../notebooks/examples/heat_transport
+../notebooks/examples/poisson_relaxation
+../notebooks/examples/krylov_comparison
+../notebooks/examples/multigrid
+```
+
 ## Every MTL5 example, and where it is
 
 | MTL5 example | Here |
@@ -46,11 +56,11 @@ against.
 | [`phase01_core_types/concepts_and_traits.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase01_core_types/concepts_and_traits.cpp) | Not ported: C++20 concepts are compile-time checks |
 | [`phase02_basic_operations/norms_and_products.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase02_basic_operations/norms_and_products.cpp) | [Basics](../notebooks/examples/basics.ipynb) |
 | [`phase02_basic_operations/matrix_arithmetic.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase02_basic_operations/matrix_arithmetic.cpp) | [Basics](../notebooks/examples/basics.ipynb) |
-| [`phase03_iterative_solvers/heat_equation_1d.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase03_iterative_solvers/heat_equation_1d.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Heat and transport in 1D |
-| [`phase03_iterative_solvers/convection_diffusion.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase03_iterative_solvers/convection_diffusion.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Heat and transport in 1D |
-| [`phase04_sparse_assembly/laplacian_2d.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase04_sparse_assembly/laplacian_2d.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Poisson in 2D and relaxation |
-| [`phase04_sparse_assembly/smoother_convergence.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase04_sparse_assembly/smoother_convergence.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Poisson in 2D and relaxation |
-| [`phase05_dense_decompositions/solve_three_ways.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/solve_three_ways.cpp) | [Three factorizations and a curve fit](../notebooks/examples/factorizations.ipynb) |
+| [`phase03_iterative_solvers/heat_equation_1d.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase03_iterative_solvers/heat_equation_1d.cpp) | [Heat and transport in 1D](../notebooks/examples/heat_transport.ipynb) |
+| [`phase03_iterative_solvers/convection_diffusion.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase03_iterative_solvers/convection_diffusion.cpp) | [Heat and transport in 1D](../notebooks/examples/heat_transport.ipynb) |
+| [`phase04_sparse_assembly/laplacian_2d.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase04_sparse_assembly/laplacian_2d.cpp) | [Poisson in 2D, and relaxation](../notebooks/examples/poisson_relaxation.ipynb) |
+| [`phase04_sparse_assembly/smoother_convergence.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase04_sparse_assembly/smoother_convergence.cpp) | [Poisson in 2D, and relaxation](../notebooks/examples/poisson_relaxation.ipynb) |
+| [`phase05_dense_decompositions/solve_three_ways.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/solve_three_ways.cpp) | [Three factorizations and a curve fit](../notebooks/examples/factorizations.ipynb); Part 3, preconditioners, in [Krylov solvers compared](../notebooks/examples/krylov_comparison.ipynb) |
 | [`phase05_dense_decompositions/least_squares_qr.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/least_squares_qr.cpp) | [Three factorizations and a curve fit](../notebooks/examples/factorizations.ipynb) |
 | [`phase06_eigenvalue_svd/vibrating_string.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/vibrating_string.cpp) | [Vibrating string](../notebooks/examples/vibrating_string.ipynb) |
 | [`phase06_eigenvalue_svd/pca_svd.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/pca_svd.cpp) | [PCA by SVD](../notebooks/examples/pca.ipynb) |
@@ -69,8 +79,8 @@ against.
 | [`phase12_transcendental_functions/activation_functions.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase12_transcendental_functions/activation_functions.cpp) | Not ported: NumPy's element-wise functions |
 | [`phase12_transcendental_functions/radioactive_decay.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase12_transcendental_functions/radioactive_decay.cpp) | Not ported: NumPy's element-wise functions |
 | [`phase12_transcendental_functions/coordinate_geometry.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase12_transcendental_functions/coordinate_geometry.cpp) | Not ported: NumPy's element-wise functions |
-| [`phase13_krylov_multigrid/krylov_comparison.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase13_krylov_multigrid/krylov_comparison.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Krylov solvers compared |
-| [`phase13_krylov_multigrid/multigrid_poisson.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase13_krylov_multigrid/multigrid_poisson.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Multigrid for Poisson |
+| [`phase13_krylov_multigrid/krylov_comparison.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase13_krylov_multigrid/krylov_comparison.cpp) | [Krylov solvers compared](../notebooks/examples/krylov_comparison.ipynb) |
+| [`phase13_krylov_multigrid/multigrid_poisson.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase13_krylov_multigrid/multigrid_poisson.cpp) | [Multigrid for Poisson](../notebooks/examples/multigrid.ipynb) |
 | [`phase14_io_generators/csv_io_prettyprint.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase14_io_generators/csv_io_prettyprint.cpp) | Not ported: NumPy reads and writes CSV; Matrix Market is `mtl5.io`, used in [the orderings notebook](../notebooks/sparse_direct_orderings.ipynb) |
 | [`phase14_io_generators/poisson_diag_toolkit.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase14_io_generators/poisson_diag_toolkit.cpp) | Covered by [Test-matrix generators](../notebooks/generators.ipynb) |
 | [`phase15_sparse_direct/sparse_direct_solvers.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase15_sparse_direct/sparse_direct_solvers.cpp) | Covered by [Sparse direct solvers](../guide/direct-solvers.md) |
