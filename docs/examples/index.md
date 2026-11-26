@@ -56,6 +56,15 @@ against.
 ../notebooks/examples/circuit_klu
 ```
 
+```{toctree}
+:maxdepth: 1
+:caption: Numerical robustness and interop
+
+../notebooks/examples/accurate_sum_dot
+../notebooks/examples/ukf_cholesky_vs_ldlt
+../notebooks/examples/zero_copy
+```
+
 ## Every MTL5 example, and where it is
 
 | MTL5 example | Here |
@@ -94,12 +103,12 @@ against.
 | [`phase14_io_generators/poisson_diag_toolkit.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase14_io_generators/poisson_diag_toolkit.cpp) | Covered by [Test-matrix generators](../notebooks/generators.ipynb) |
 | [`phase15_sparse_direct/sparse_direct_solvers.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase15_sparse_direct/sparse_direct_solvers.cpp) | Covered by [Sparse direct solvers](../guide/direct-solvers.md) |
 | [`phase15_sparse_direct/circuit_matrix_klu.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase15_sparse_direct/circuit_matrix_klu.cpp) | [Circuit matrices with KLU](../notebooks/examples/circuit_klu.ipynb) |
-| [`accurate_sum_dot/accurate_sum_dot.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/accurate_sum_dot/accurate_sum_dot.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Accurate sum and dot |
-| [`ukf_cholesky_vs_ldlt/ukf_comparison.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/ukf_cholesky_vs_ldlt/ukf_comparison.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): UKF, Cholesky against LDLᵀ |
-| [`ukf_bearing_only/bearing_only_ukf.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/ukf_bearing_only/bearing_only_ukf.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): UKF, Cholesky against LDLᵀ |
-| [`zero_copy/ode_rhs_callback.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/zero_copy/ode_rhs_callback.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Zero copy |
-| [`zero_copy/shared_frame_pipeline.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/zero_copy/shared_frame_pipeline.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Zero copy |
-| [`zero_copy/zero_copy_rules.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/zero_copy/zero_copy_rules.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Zero copy |
+| [`accurate_sum_dot/accurate_sum_dot.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/accurate_sum_dot/accurate_sum_dot.cpp) | [Accurate sum and dot product](../notebooks/examples/accurate_sum_dot.ipynb) |
+| [`ukf_cholesky_vs_ldlt/ukf_comparison.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/ukf_cholesky_vs_ldlt/ukf_comparison.cpp) | [UKF sigma points: Cholesky against LDLᵀ](../notebooks/examples/ukf_cholesky_vs_ldlt.ipynb) |
+| [`ukf_bearing_only/bearing_only_ukf.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/ukf_bearing_only/bearing_only_ukf.cpp) | [UKF sigma points: Cholesky against LDLᵀ](../notebooks/examples/ukf_cholesky_vs_ldlt.ipynb) |
+| [`zero_copy/ode_rhs_callback.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/zero_copy/ode_rhs_callback.cpp) | [Zero copy](../notebooks/examples/zero_copy.ipynb) |
+| [`zero_copy/shared_frame_pipeline.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/zero_copy/shared_frame_pipeline.cpp) | [Zero copy](../notebooks/examples/zero_copy.ipynb) |
+| [`zero_copy/zero_copy_rules.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/zero_copy/zero_copy_rules.cpp) | [Zero copy](../notebooks/examples/zero_copy.ipynb) |
 
 The examples that are not ported teach C++ itself (concepts, expression
 templates, compile-time traversal), or what NumPy already does in Python.

@@ -166,6 +166,80 @@ class TestLDLT:
             mtl5.ldlt(mtl5.matrix(A))
 
 
+class TestFactorL:
+    """`.L` on the Cholesky and LDL^T factors (#147 PR 7: the UKF notebook's
+    sigma points need the factor itself, not only solves with it).
+
+    MTL5 factors in place and leaves A's entries in the strict upper triangle,
+    so these check that `.L` zeroes it, and for LDL^T restores the unit
+    diagonal, where the factor stores D.
+    """
+
+    @pytest.mark.parametrize("dtype, tol", [(np.float64, 1e-13), (np.float32, 1e-5)])
+    def test_cholesky_L(self, dtype, tol):
+        P = spd(12, seed=21).astype(dtype)
+        fac = mtl5.cholesky(P)
+        L = np.asarray(fac.L)
+        assert L.dtype == dtype and L.shape == (12, 12)
+        assert not np.triu(L, 1).any(), "the strict upper triangle must be zero"
+        assert (np.diag(L) > 0).all()
+        np.testing.assert_allclose(L @ L.T, P, rtol=0, atol=tol * np.abs(P).max())
+
+    def test_cholesky_L_is_a_copy(self):
+        P = spd(6, seed=22)
+        fac = mtl5.cholesky(P)
+        L = fac.L
+        assert not L.is_view
+        L[0, 0] = 1e6
+        b = np.ones(6)
+        x = fac.solve(b).to_numpy()
+        np.testing.assert_allclose(P @ x, b, rtol=1e-12)
+        assert np.asarray(fac.L)[0, 0] != 1e6
+
+    @pytest.mark.parametrize("dtype, tol", [(np.float64, 1e-12), (np.float32, 1e-4)])
+    def test_ldlt_L_on_an_indefinite_matrix(self, dtype, tol):
+        S = sym(12, seed=23).astype(dtype)
+        fac = mtl5.ldlt(S)
+        L, D = np.asarray(fac.L), fac.diagonal()
+        assert L.dtype == dtype
+        assert (np.diag(L) == 1).all(), "L is unit lower triangular; D is separate"
+        assert not np.triu(L, 1).any()
+        assert (D < 0).any()
+        LD = L.astype(np.float64) @ np.diag(D) @ L.T.astype(np.float64)
+        np.testing.assert_allclose(LD, S, rtol=0, atol=tol * np.abs(S).max())
+
+    def test_ldlt_and_cholesky_give_the_same_square_root(self):
+        P = spd(8, seed=24)
+        Lc = np.asarray(mtl5.cholesky(P).L)
+        f = mtl5.ldlt(P)
+        np.testing.assert_allclose(np.asarray(f.L) * np.sqrt(f.diagonal()), Lc, rtol=1e-12)
+
+    @pytest.mark.parametrize("dtype", UNIVERSAL + ["dd_cascade"])
+    def test_universal(self, dtype):
+        P = spd(6, seed=25)
+        M = mtl5.convert(P, dtype)
+        Lc = np.asarray(mtl5.cholesky(M).L)
+        f = mtl5.ldlt(M)
+        Ll = np.asarray(f.L)
+        assert not np.triu(Lc, 1).any() and not np.triu(Ll, 1).any()
+        assert (np.diag(Ll) == 1).all()
+        if dtype in ("posit32", "posit64", "dd_cascade"):
+            np.testing.assert_allclose(Lc @ Lc.T, P, rtol=0, atol=1e-6 * np.abs(P).max())
+            np.testing.assert_allclose(
+                Ll @ np.diag(f.diagonal()) @ Ll.T, P, rtol=0, atol=1e-6 * np.abs(P).max()
+            )
+
+    @pytest.mark.parametrize("dtype", [np.complex128, np.complex64])
+    def test_complex_cholesky_L(self, dtype):
+        rng = np.random.default_rng(26)
+        B = rng.standard_normal((6, 6)) + 1j * rng.standard_normal((6, 6))
+        A = (B @ B.conj().T + 6 * np.eye(6)).astype(dtype)
+        L = np.asarray(mtl5.cholesky(A).L)
+        assert L.dtype == dtype and not np.triu(L, 1).any()
+        tol = 1e-12 if dtype == np.complex128 else 1e-4
+        np.testing.assert_allclose(L @ L.conj().T, A, rtol=0, atol=tol * np.abs(A).max())
+
+
 class TestAcrossNumberSystems:
     """#18: Cholesky and LDL^T available in the same precision, so they can be
     compared on a covariance matrix that drifts out of positive-definiteness."""

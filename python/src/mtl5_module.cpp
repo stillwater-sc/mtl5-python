@@ -775,6 +775,9 @@ void register_native_dense_ops(nb::module_& m) {
             return VV(std::move(x));
         }, "b"_a)
         .def_prop_ro("n", [](const CF& self) { return self.n; })
+        .def_prop_ro("L", [](const CF& self) {
+            return MV(lower_factor(self.L, false));
+        }, "The lower triangular factor L of A = L L^T, as a new matrix")
         .def("__repr__", [](const CF& self) {
             return std::string("mtl5.CholeskyFactor_") + type_suffix<T>() +
                    "(n=" + std::to_string(self.n) + ")";

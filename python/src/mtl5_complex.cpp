@@ -680,6 +680,9 @@ void register_complex_cholesky(nb::module_& m) {
         .def_prop_ro("shape", [](const CF& f) {
             return std::pair<std::size_t, std::size_t>(f.n, f.n);
         })
+        .def_prop_ro("L", [](const CF& f) {
+            return MatrixView<T>(lower_factor(f.L, false));
+        }, "The lower triangular factor L of A = L L^H, as a new matrix")
         .def("solve", [](const CF& f, const VectorView<T>& b) {
             if (b.vec.size() != f.n)
                 throw std::invalid_argument("cholesky.solve: dimension mismatch");

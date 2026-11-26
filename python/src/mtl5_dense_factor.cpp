@@ -260,6 +260,9 @@ void register_ldlt(nb::module_& m) {
             return nb::ndarray<nb::numpy, double, nb::ndim<1>>(buf, 1, shape, owner);
         }, "The diagonal D. Its signs are the inertia: any negative entry means "
            "A is indefinite, which is exactly the case Cholesky cannot handle.")
+        .def_prop_ro("L", [](const Wrap& s) {
+            return wrap_matrix<T>(lower_factor(s.LD, true));
+        }, "The unit lower triangular factor L of A = L D L^T, as a new matrix")
         .def("solve", [](const Wrap& s, const VecArg<T>& b_in) {
             const auto& b = as_vector<T>(b_in);
             if (b.size() != s.n)
@@ -395,6 +398,8 @@ void register_universal_cholesky(nb::module_& m) {
         }, "A"_a, "Cholesky factorization of an SPD matrix")
         .def_prop_ro("n", [](const Wrap& s) { return s.n; })
         .def_prop_ro("dtype", [](const Wrap&) { return type_suffix<T>(); })
+        .def_prop_ro("L", [](const Wrap& s) { return lower_factor(s.L, false); },
+                     "The lower triangular factor L of A = L L^T, as a new matrix")
         .def("solve", [](const Wrap& s, const Vec& b) {
             if (b.size() != s.n)
                 throw std::invalid_argument("cholesky.solve: dimension mismatch");
