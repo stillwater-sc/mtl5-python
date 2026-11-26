@@ -106,19 +106,9 @@ class TestEveryPairingConverges:
         """If ILU(0) did not reduce the iteration count, the preconditioner
         would not be reaching the solver at all."""
         A, _, b = system(k=14)
-        _, _, plain, _ = ms._krylov(
-            "cg", ms.from_scipy(A), ms.identity(A), _vec(b), 1e-12, 5000, 30, 2, 4
-        )
-        _, _, precond, _ = ms._krylov(
-            "cg", ms.from_scipy(A), ms.ilu0(A), _vec(b), 1e-12, 5000, 30, 2, 4
-        )
-        assert precond < plain, (precond, plain)
-
-
-def _vec(b):
-    import mtl5
-
-    return mtl5.vector(np.ascontiguousarray(b, dtype=np.float64))
+        _, _, plain = ms.cg(A, b, rtol=1e-12, maxiter=5000, full_output=True)
+        _, _, precond = ms.cg(A, b, M=ms.ilu0(A), rtol=1e-12, maxiter=5000, full_output=True)
+        assert precond.iterations < plain.iterations, (precond, plain)
 
 
 class TestBicgQmrNeedAnExactAdjoint:
@@ -341,10 +331,8 @@ class TestSolverSurface:
         with pytest.raises(ValueError, match="does not match"):
             ms.cg(A, b, M=ms.ilu0(laplacian(4)))
 
-    def test_callback_and_device_still_reserved(self):
+    def test_device_still_reserved(self):
         A, _, b = system()
-        with pytest.raises(NotImplementedError):
-            ms.cg(A, b, callback=lambda *_: None)
         with pytest.raises(NotImplementedError):
             ms.cg(A, b, device="kpu")
 

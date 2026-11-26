@@ -100,6 +100,7 @@ suffixes.
    bicgstab
    minres
    iterative_solve
+   SolveReport
    ilu0
    ic0
    ilut
