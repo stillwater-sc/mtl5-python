@@ -105,3 +105,21 @@ def test_notebook_outputs_are_stripped(path: Path):
             assert cell.get("execution_count") is None, (
                 f"{path.name} cell {i} has an execution count"
             )
+
+
+def _scipy_floor(requirements: list[str]) -> tuple[int, ...]:
+    (spec,) = [r for r in requirements if r.startswith("scipy")]
+    return tuple(int(part) for part in spec.split(">=")[1].split("."))
+
+
+def test_notebooks_extra_allows_only_the_scipy_the_notebooks_need():
+    """The notebooks run under both the `notebooks` and the `docs` extra. The
+    docs extra requires SciPy 1.12, the first whose iterative solvers take
+    `rtol=`, which the multigrid notebook passes to `scipy.sparse.linalg.cg`;
+    with the notebooks extra at 1.10 it raised TypeError on SciPy 1.10-1.11."""
+    tomllib = pytest.importorskip("tomllib")  # Python 3.11+
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]
+    assert _scipy_floor(extras["notebooks"]) >= _scipy_floor(extras["docs"]) >= (1, 12)

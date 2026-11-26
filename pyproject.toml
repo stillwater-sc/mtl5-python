@@ -61,8 +61,10 @@ jax = ["jax[cpu]>=0.4"]
 pandas = ["pandas>=2.0"]
 sklearn = ["scikit-learn>=1.3"]
 universal = ["universal_dtypes>=2.5"]
-# benchmark_analysis.ipynb needs the bench dependencies too.
-notebooks = ["matplotlib>=3.7", "jupyterlab>=4.0", "scipy>=1.10", "duckdb>=1.2", "pandas>=2.0"]
+# benchmark_analysis.ipynb needs the bench dependencies too. SciPy 1.12 is the
+# first whose iterative solvers take rtol=, which the multigrid notebook passes
+# to scipy.sparse.linalg.cg (the docs extra has the same floor for the guide).
+notebooks = ["matplotlib>=3.7", "jupyterlab>=4.0", "scipy>=1.12", "duckdb>=1.2", "pandas>=2.0"]
 all = ["scipy>=1.10", "torch>=2.0", "jax[cpu]>=0.4", "pandas>=2.0", "scikit-learn>=1.3", "universal_dtypes>=2.5"]
 dev = ["pytest>=7.0", "numpy>=1.24", "scipy>=1.10"]
 # Benchmark data ingestion and analysis (mtl5.bench, the mtl5-bench command).

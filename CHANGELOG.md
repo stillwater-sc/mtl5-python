@@ -45,6 +45,9 @@ against, and semantic-release manages only the **patch** component.
       example's three fixed levels stop converging from n = 511.
     - A symmetric Gauss–Seidel V-cycle, as a preconditioner for SciPy's CG,
       takes 5 iterations at every size.
+  - The `notebooks` extra now requires `scipy>=1.12`, as the `docs` extra
+    already did: the multigrid notebook passes `rtol=` to SciPy's `cg`,
+    which 1.10 and 1.11 reject. A test keeps the two floors in step.
 - **Krylov solver history** (#147, PR 3 of 7). Every solver in
   `mtl5.sparse` (`cg`, `gmres`, `bicgstab` and the rest of `solvers()`):
   - `callback=` works. It was reserved and raised `NotImplementedError`.
