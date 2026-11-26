@@ -15,6 +15,37 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Examples: sparse structure** (#147, PR 5 of 7). Three notebooks under a
+  new "Sparse structure" caption, porting MTL5's `phase07/sparse_formats`,
+  `phase11/fem_assembly_reorder` and `phase15/circuit_matrix_klu`.
+  - **Sparse formats.**
+    - The 6 × 6 Laplacian assembled in COO, compressed to CSR (checked equal to
+      `generators.laplacian_2d`) and padded to ELL.
+    - Storage counted per format and asserted. On a large grid ELL ends up
+      slightly smaller than CSR.
+    - ELL on a circuit matrix: one 1310-entry row pads it to 99.5% empty
+      slots, about 200 times the size of CSR.
+    - Matrix Market round trips, checked bit for bit.
+  - **FEM assembly and reordering.**
+    - 1-D assembly by COO triplets, with duplicates summed, in place of
+      `shifted_inserter` and `update_plus`.
+    - A real P1 triangle mesh with a random node numbering. Its interior
+      matrix equals `generators.laplacian_2d`.
+    - RCM brings the bandwidth from 526 to 23. RCM also beats the C++
+      example's hand-picked permutation (bandwidth 2, not 3).
+    - Cholesky fill by ordering shows that AMD and nested dissection fill
+      less than RCM, so a smaller band isn't the least fill.
+    - Spectrum and solution unchanged by the reordering.
+  - **Circuit matrices with KLU,** on `Sandia/adder_dcop_01`.
+    - 469 diagonal blocks, 257 of them single entries.
+    - KLU stores 3.6 times fewer entries than the best `splu` ordering.
+    - `refactor` for a Newton-like step.
+    - `refactor` on `adder_dcop_02`, the next matrix of the sequence, runs
+      without an error, but its pivot growth is 4e35 and its residual 1e17.
+      The notebook checks the residual and factors afresh.
+  - `notebooks/data` gains `adder_dcop_01.mtx` and `adder_dcop_02.mtx` from
+    the SuiteSparse Matrix Collection, 312 KB each.
+
 - **Examples: PDEs and iterative solvers** (#147, PR 4 of 7). Four
   notebooks under a new "PDEs and iterative solvers" caption, porting
   MTL5's phase03, phase04 and phase13 examples and Part 3 of
