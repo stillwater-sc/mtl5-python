@@ -568,19 +568,28 @@ def _ieee(a):
     return a
 
 
+def _float_dtype(a):
+    """The floating dtype of an ndarray or a native float container, else None."""
+    import numpy as _np
+
+    if isinstance(a, _np.ndarray):
+        return a.dtype if a.dtype.kind == "f" else None
+    return {
+        "DenseVector_f32": _np.dtype(_np.float32),
+        "DenseVector_f64": _np.dtype(_np.float64),
+    }.get(type(a).__name__)
+
+
 def _common_float(a, b):
-    """Two ndarrays of different floating dtypes go to the wider one: the
+    """Two operands of different floating dtypes -- ndarrays or native float
+    DenseVectors, in any pairing -- go to the wider one as ndarrays: the
     narrower widens exactly. Anything else is returned as it is."""
     import numpy as _np
 
-    if (
-        isinstance(a, _np.ndarray)
-        and isinstance(b, _np.ndarray)
-        and a.dtype != b.dtype
-        and a.dtype.kind == b.dtype.kind == "f"
-    ):
-        t = _np.result_type(a.dtype, b.dtype)
-        return a.astype(t, copy=False), b.astype(t, copy=False)
+    ta, tb = _float_dtype(a), _float_dtype(b)
+    if ta is not None and tb is not None and ta != tb:
+        t = _np.result_type(ta, tb)
+        return _np.asarray(a).astype(t, copy=False), _np.asarray(b).astype(t, copy=False)
     return a, b
 
 

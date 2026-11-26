@@ -332,6 +332,15 @@ class TestLayoutKeepsPrecision:
         y = np.ones(2, dtype=np.float32)
         assert mtl5.mixed.dot(x, y, accumulator="exact") == 2 + 2**-30
 
+    def test_float32_container_with_float64_array_is_float64(self):
+        x = np.array([1 + 2**-30, 1.0])
+        y32 = mtl5.vector(np.ones(2, dtype=np.float32))
+        assert mtl5.dot_k(x, y32) == 2 + 2**-30
+        assert mtl5.dot_k(y32, x) == 2 + 2**-30
+        assert mtl5.mixed.dot(y32, x, accumulator="exact") == 2 + 2**-30
+        x64 = mtl5.vector(x)
+        assert mtl5.dot_k(x64, np.ones(2, dtype=np.float32)) == 2 + 2**-30
+
     def test_core_functions_refuse_rather_than_cast(self):
         x = np.array([1, 0, 2**-24, 0], dtype=np.float32)[::2]
         with pytest.raises(TypeError):
