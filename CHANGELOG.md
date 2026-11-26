@@ -15,6 +15,39 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Examples: PDEs and iterative solvers** (#147, PR 4 of 7). Four
+  notebooks under a new "PDEs and iterative solvers" caption, porting
+  MTL5's phase03, phase04 and phase13 examples and Part 3 of
+  `solve_three_ways`. They use the solver histories from PR 3 throughout.
+  - **Heat and transport in 1D.**
+    - Variable-conductivity heat flow. CG takes 145 iterations, Jacobi-CG
+      100. The solution is checked against its closed form, with
+      second-order convergence.
+    - Convection–diffusion. CG fails in every regime and BiCGSTAB converges.
+      Central differences overshoot once the cell Péclet number passes 1.
+  - **Poisson in 2D, and relaxation.**
+    - `generators.poisson2d` with an exact solution. That f is a discrete
+      eigenvector, so every Krylov solver converges in one iteration.
+    - With f = 1: GMRES(5), GMRES(20) and CG.
+    - Jacobi and Gauss–Seidel measured at cos(πh) and cos²(πh) to 10
+      digits; SOR(1) is Gauss–Seidel bit for bit; the smoothing property.
+  - **Krylov solvers compared.**
+    - Nine solvers on a nonsymmetric system.
+    - MINRES on the C++ example's indefinite matrix, which is too well
+      conditioned (cond 1.5) to show anything, and on a shifted Laplacian,
+      where it is monotone and GMRES(30) needs 16 times the iterations.
+    - The C++ example's MINRES with a diagonal preconditioner is invalid:
+      that preconditioner is indefinite, and MINRES breaks down.
+    - IC(0) and ILU(0) are exact on a tridiagonal matrix. On 2D Poisson they
+      halve the iterations, but not their growth with the grid.
+  - **Multigrid for Poisson.**
+    - V-cycles stay at 8 from n = 63 to 4095 with a full hierarchy. The C++
+      example's three fixed levels stop converging from n = 511.
+    - A symmetric Gauss–Seidel V-cycle, as a preconditioner for SciPy's CG,
+      takes 5 iterations at every size.
+  - The `notebooks` extra now requires `scipy>=1.12`, as the `docs` extra
+    already did: the multigrid notebook passes `rtol=` to SciPy's `cg`,
+    which 1.10 and 1.11 reject. A test keeps the two floors in step.
 - **Krylov solver history** (#147, PR 3 of 7). Every solver in
   `mtl5.sparse` (`cg`, `gmres`, `bicgstab` and the rest of `solvers()`):
   - `callback=` works. It was reserved and raised `NotImplementedError`.
@@ -384,6 +417,13 @@ against, and semantic-release manages only the **patch** component.
 
 ### Documentation
 
+- **Examples: the vibrating string's eigenvalues turn complex at exactly
+  s = 5/4** (#147, stillwater-sc/mtl5#938). The notebook said "about 1.25".
+  It now derives the boundary: the corner entry adds s to the characteristic
+  polynomial, det(B − λI) = det(T − λI) + s. That identity is asserted, along
+  with real eigenvalues for −1 ≤ s ≤ 5/4 and the double eigenvalues
+  2 ± √(3/2) at s = 5/4, with a plot of max |Im λ| against s. T now comes
+  from `generators.laplacian_1d`.
 - **Examples: the factorizations notebook uses MTL5's test-matrix
   generators** (#147). It used the C++ example's hand-built matrix,
   1 / (1 + |i − j|) plus the identity. That matrix has no standard name and is
