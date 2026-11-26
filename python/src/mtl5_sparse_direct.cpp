@@ -193,6 +193,12 @@ AccKind parse_sparse_acc(const std::optional<std::string>& spec) {
             "factorizations: their numeric workspace holds one accumulator per "
             "row, and a quire<double> is 4226 bits wide. Use 'f64' or 'fma64' "
             "for a wider accumulator.");
+    if (spec && (*spec == "compensated" || *spec == "exact"))
+        throw std::invalid_argument(
+            "accumulator='" + *spec + "' is not available for the sparse "
+            "factorizations: it is offered by the mtl5.mixed reductions (dot, "
+            "norm, frobenius_norm). Use 'f64' or 'fma64' for a wider "
+            "accumulator.");
     const AccKind kind = parse_acc(spec, type_suffix<T>(), /*quire_ok=*/false);
     if constexpr (std::is_same_v<T, double>) {
         if (kind == AccKind::F32 || kind == AccKind::FMA32)
@@ -216,6 +222,9 @@ inline const char* acc_name(AccKind kind) {
         case AccKind::FMA32:   return "fma32";
         case AccKind::FMA64:   return "fma64";
         case AccKind::Quire:   return "quire";
+        case AccKind::I32:
+        case AccKind::Compensated:
+        case AccKind::Exact:   break;  // refused by parse_sparse_acc
     }
     return "default";
 }

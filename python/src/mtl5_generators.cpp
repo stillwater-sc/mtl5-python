@@ -22,6 +22,7 @@
 #include "mtl5_types.hpp"
 
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
 #include <mtl/generators/clement.hpp>
@@ -29,6 +30,7 @@
 #include <mtl/generators/forsythe.hpp>
 #include <mtl/generators/frank.hpp>
 #include <mtl/generators/hilbert.hpp>
+#include <mtl/generators/ill_conditioned.hpp>
 #include <mtl/generators/kahan.hpp>
 #include <mtl/generators/laplacian.hpp>
 #include <mtl/generators/lehmer.hpp>
@@ -265,6 +267,57 @@ void register_generators(nb::module_& m) {
     }, "name"_a,
        "Published condition number for a catalog matrix — a reference value to "
        "check a computed condition number against");
+
+    // ----- ill-conditioned dot products and sums (Ogita, Rump and Oishi) -----
+    // Unlike the matrices above, these are generated in the requested type,
+    // not in float64 and rounded: their entries are chosen so that the exact
+    // dot product (or sum) of the T values cancels, and rounding float64
+    // entries to float32 afterwards would destroy that. So dtype= is handled
+    // here, and only float32 and float64 exist (the exact accumulator the
+    // construction needs covers those). The seed drives MTL5's portable
+    // generator: the same seed gives the same vectors on every platform.
+    g.def("gen_dot", [](std::size_t n, double cond, std::uint64_t seed,
+                        const std::string& dtype) -> nb::tuple {
+        auto make = [&]<typename T>() {
+            mtl::generators::ill_conditioned_dot<T> r;
+            {
+                nogil guard;
+                r = gen::gen_dot<T>(n, cond, seed);
+            }
+            return nb::make_tuple(VectorView<T>(std::move(r.x)), VectorView<T>(std::move(r.y)),
+                                  static_cast<double>(r.d), r.cond);
+        };
+        if (dtype == "f64") return make.template operator()<double>();
+        if (dtype == "f32") return make.template operator()<float>();
+        throw std::invalid_argument("gen_dot: dtype must be 'f64' or 'f32', got '" + dtype + "'");
+    }, "n"_a, "cond"_a, "seed"_a, "dtype"_a = "f64",
+       "GenDot (Ogita, Rump and Oishi 2005, Algorithm 6.1): vectors x, y of "
+       "length n >= 6 whose dot product has a condition number of about cond "
+       "(>= 1). Returns (x, y, dot, achieved_cond): dot is x.y rounded to "
+       "nearest from the exact value, and achieved_cond is "
+       "2 abs(x).abs(y) / abs(x.y), "
+       "typically within a factor of 10 or so of cond.");
+
+    g.def("gen_sum", [](std::size_t n, double cond, std::uint64_t seed,
+                        const std::string& dtype) -> nb::tuple {
+        auto make = [&]<typename T>() {
+            mtl::generators::ill_conditioned_sum<T> r;
+            {
+                nogil guard;
+                r = gen::gen_sum<T>(n, cond, seed);
+            }
+            return nb::make_tuple(VectorView<T>(std::move(r.p)), static_cast<double>(r.s), r.cond);
+        };
+        if (dtype == "f64") return make.template operator()<double>();
+        if (dtype == "f32") return make.template operator()<float>();
+        throw std::invalid_argument("gen_sum: dtype must be 'f64' or 'f32', got '" + dtype + "'");
+    }, "n"_a, "cond"_a, "seed"_a, "dtype"_a = "f64",
+       "An ill-conditioned sum of even length n >= 12, built the paper's way: "
+       "GenDot of length n / 2, each product split exactly into its rounded "
+       "value and its error, the n summands permuted. Returns (p, sum, "
+       "achieved_cond): sum is the exact sum rounded to nearest, and "
+       "achieved_cond is sum(abs(p)) / abs(sum(p)), about half the dot "
+       "product's.");
 
     // ----- range vectors -----------------------------------------------------
     m.def("arange", [](std::int64_t start, std::int64_t stop, std::int64_t step) {

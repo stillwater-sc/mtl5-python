@@ -1894,6 +1894,9 @@ NB_MODULE(_core, m) {
     // ----- Test-matrix generators and range vectors --------------------------
     register_generators(m);
 
+    // ----- Sums and dot products in K-fold precision (separate TU) -----------
+    register_accurate(m);
+
     // ----- Matrix Market I/O and spy visualization ---------------------------
     register_io(m);
 

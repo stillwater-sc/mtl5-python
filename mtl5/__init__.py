@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from typing import NamedTuple as _NamedTuple
 
 try:
     import mtl5._core as _core
@@ -247,10 +248,12 @@ try:
     )
     from mtl5._core import arange as _arange
     from mtl5._core import det as _det
+    from mtl5._core import dot_k as _core_dot_k
     from mtl5._core import generators as _generators
     from mtl5._core import geomspace as _geomspace
     from mtl5._core import linspace as _linspace
     from mtl5._core import logspace as _logspace
+    from mtl5._core import sum_k as _core_sum_k
 except ImportError as _exc:  # pragma: no cover - depends on a stale build
     # Only reframe a failure that is actually about _core. An ImportError from
     # somewhere else (numpy missing inside tensor.py, say) must surface as
@@ -530,6 +533,170 @@ def _make_generator(name):
     return wrapper
 
 
+# ---------------------------------------------------------------------------
+# Accurate sums and dot products
+#
+# The ndarray arguments of these C++ functions are `noconvert`: nanobind's
+# second overload pass would otherwise give a strided or mixed-dtype array to
+# the first overload that accepts a cast, which can change -- even narrow --
+# the working precision. Here the layout is made contiguous with the dtype
+# kept, so a strided float32 view stays float32 and a strided float64 view
+# stays float64.
+# ---------------------------------------------------------------------------
+def _contiguous(a):
+    """A C-contiguous ndarray with a's dtype; mtl5 containers pass through."""
+    if type(a).__module__ == "mtl5._core":
+        return a
+    import numpy as _np
+
+    return _np.ascontiguousarray(a)
+
+
+def _ieee(a):
+    """As _contiguous, and float32 or float64: an integer or boolean array (or
+    a list of them) becomes float64, exactly up to 2**53, and float16
+    becomes float32, exactly."""
+    a = _contiguous(a)
+    if type(a).__module__ == "mtl5._core":
+        return a
+    import numpy as _np
+
+    if a.dtype.kind in "biu":
+        return a.astype(_np.float64)
+    if a.dtype.kind == "f" and a.dtype.itemsize < 4:
+        return a.astype(_np.float32)
+    return a
+
+
+def _float_dtype(a):
+    """The floating dtype of an ndarray or a native float container, else None."""
+    import numpy as _np
+
+    if isinstance(a, _np.ndarray):
+        return a.dtype if a.dtype.kind == "f" else None
+    return {
+        "DenseVector_f32": _np.dtype(_np.float32),
+        "DenseVector_f64": _np.dtype(_np.float64),
+    }.get(type(a).__name__)
+
+
+def _common_float(a, b):
+    """Two floating operands -- ndarrays or native float DenseVectors -- of
+    different dtypes, or of different kinds (an ndarray with a DenseVector),
+    go to ndarrays of the wider dtype: the narrower widens exactly, and the C++
+    overloads take two ndarrays or two DenseVectors of one type. Anything else
+    is returned as it is."""
+    import numpy as _np
+
+    ta, tb = _float_dtype(a), _float_dtype(b)
+    if ta is not None and tb is not None and (ta != tb or type(a) is not type(b)):
+        t = _np.result_type(ta, tb)
+        return _np.asarray(a).astype(t, copy=False), _np.asarray(b).astype(t, copy=False)
+    return a, b
+
+
+def sum_k(x, k: int = 2) -> float:
+    """The sum of x as if computed in k-fold working precision, rounded once to
+    x's type: Ogita-Rump-Oishi SumK, and Sum2 for k = 2 (the default). k = 1 is
+    the plain recursive sum.
+
+    The error is about u abs(s) + (phi u)^k sum(abs(x)), with u the unit
+    roundoff and s the exact sum: each pass buys another factor of u against the
+    condition number sum(abs(x)) / abs(s). Cost: (6k - 5)(n - 1) flops and one
+    copy of x.
+
+    x is a float32 or float64 array (any layout), a DenseVector_f32 or _f64, or
+    a list. A float32 input is summed in float32; integers and lists of them are
+    summed as float64. k runs from 1 to 10. Needs strict IEEE arithmetic: no
+    -ffast-math.
+    """
+    return _core_sum_k(_ieee(x), k)
+
+
+def dot_k(x, y, k: int = 2) -> float:
+    """The dot product of x and y as if computed in k-fold working precision,
+    rounded once: Ogita-Rump-Oishi Dot2 for k = 2 (the default), DotK for k >= 3.
+
+    The error is about u abs(x.y) + (phi u)^k abs(x).abs(y). Dot2 is the same
+    loop as `mtl5.mixed.dot(x, y, accumulator="compensated")` and gives the same
+    bits; larger k keeps 2n error terms. For the correctly rounded value at any
+    condition number, use `accumulator="exact"`.
+
+    x and y are float32 or float64 arrays (any layout), DenseVectors or lists. A
+    float32 and a float64 operand are computed in float64. k runs from 2 to 10.
+    Needs strict IEEE arithmetic: no -ffast-math.
+    """
+    x, y = _common_float(_ieee(x), _ieee(y))
+    return _core_dot_k(x, y, k)
+
+
+_core_mixed_dot = mixed.dot
+
+
+def _mixed_dot(a, b, accumulator=None, result=None):
+    a, b = _common_float(_contiguous(a), _contiguous(b))
+    return _core_mixed_dot(a, b, accumulator=accumulator, result=result)
+
+
+_mixed_dot.__name__ = _mixed_dot.__qualname__ = "dot"
+_mixed_dot.__module__ = "mtl5.mixed"
+_mixed_dot.__doc__ = (
+    "dot(a, b, accumulator=None, result=None)\n\n"
+    "Dot product with an accumulator policy: the element precision is the "
+    "operands', the accumulator is `accumulator=` (see "
+    "mtl5.mixed.accumulators(dtype)), and `result=` is 'f64' (the default, "
+    "the accumulator rounded once to double) or 'element' (rounded once to the "
+    "element type).\n\n"
+    "An ndarray of any layout keeps its dtype: it is made contiguous, not "
+    "cast. A float32 and a float64 operand are computed in float64.\n\n"
+    "The overloads, one per element type:\n\n" + (_core_mixed_dot.__doc__ or "")
+)
+mixed.dot = _mixed_dot
+
+
+class IllConditionedDot(_NamedTuple):
+    """`mtl5.generators.gen_dot`'s result: x . y is `dot`, rounded to nearest from
+    the exact value, with achieved condition number `cond` = 2 abs(x).abs(y) /
+    abs(x.y)."""
+
+    x: object
+    y: object
+    dot: float
+    cond: float
+
+
+class IllConditionedSum(_NamedTuple):
+    """`mtl5.generators.gen_sum`'s result: the sum of `p` is `sum`, rounded to
+    nearest from the exact value, with achieved condition number `cond` =
+    sum(abs(p)) / abs(sum(p))."""
+
+    p: object
+    sum: float
+    cond: float
+
+
+def _gen_dot(n, cond, seed, dtype="f64"):
+    return IllConditionedDot(*_generators.gen_dot(n, cond, seed, dtype))
+
+
+def _gen_sum(n, cond, seed, dtype="f64"):
+    return IllConditionedSum(*_generators.gen_sum(n, cond, seed, dtype))
+
+
+_gen_dot.__name__, _gen_sum.__name__ = "gen_dot", "gen_sum"
+_gen_dot.__doc__ = (
+    (_generators.gen_dot.__doc__ or "")
+    + "\n\nThe result is an IllConditionedDot(x, y, dot, cond). Generated in "
+    "dtype ('f64' or 'f32') itself, not rounded from float64: rounding would "
+    "undo the cancellation the construction arranges."
+)
+_gen_sum.__doc__ = (
+    (_generators.gen_sum.__doc__ or "")
+    + "\n\nThe result is an IllConditionedSum(p, sum, cond). Generated in "
+    "dtype ('f64' or 'f32') itself, not rounded from float64."
+)
+
+
 class _Generators:
     """Named test matrices with known pathologies.
 
@@ -554,6 +721,8 @@ for _n in [*_Generators._DENSE, *_Generators._SPARSE]:
     setattr(_Generators, _n, staticmethod(_make_generator(_n)))
 for _n in _Generators._PASSTHROUGH:
     setattr(_Generators, _n, staticmethod(getattr(_generators, _n)))
+_Generators.gen_dot = staticmethod(_gen_dot)
+_Generators.gen_sum = staticmethod(_gen_sum)
 
 generators = _Generators()
 
@@ -745,6 +914,7 @@ __all__ = [
     "is_upper_triangular",
     "is_zero",
     "spectral_radius",
+    "sum_k",
     "symm",
     "symv",
     "syr2k",
@@ -758,6 +928,8 @@ __all__ = [
     "io",
     # Generators and range vectors
     "generators",
+    "IllConditionedDot",
+    "IllConditionedSum",
     "arange",
     "geomspace",
     "linspace",
@@ -772,6 +944,7 @@ __all__ = [
     "conj",
     "det",
     "dot",
+    "dot_k",
     "dot_real",
     "frobenius_norm",
     "inv",
