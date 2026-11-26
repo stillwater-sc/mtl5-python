@@ -8,3 +8,5 @@ tests/data/bench_figures_expected/** -text
 tests/data/bench_machines/** -text
 tests/data/bench_machines_expected/** -text
 notebooks/data/mtl5-bench/** -text
+# The notebooks' test matrices: their READMEs give each file's SHA-256.
+notebooks/data/*.mtx -text

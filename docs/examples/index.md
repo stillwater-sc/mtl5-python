@@ -47,6 +47,15 @@ against.
 ../notebooks/examples/multigrid
 ```
 
+```{toctree}
+:maxdepth: 1
+:caption: Sparse structure
+
+../notebooks/examples/sparse_formats
+../notebooks/examples/fem_assembly
+../notebooks/examples/circuit_klu
+```
+
 ## Every MTL5 example, and where it is
 
 | MTL5 example | Here |
@@ -64,7 +73,7 @@ against.
 | [`phase05_dense_decompositions/least_squares_qr.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase05_dense_decompositions/least_squares_qr.cpp) | [Three factorizations and a curve fit](../notebooks/examples/factorizations.ipynb) |
 | [`phase06_eigenvalue_svd/vibrating_string.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/vibrating_string.cpp) | [Vibrating string](../notebooks/examples/vibrating_string.ipynb) |
 | [`phase06_eigenvalue_svd/pca_svd.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase06_eigenvalue_svd/pca_svd.cpp) | [PCA by SVD](../notebooks/examples/pca.ipynb) |
-| [`phase07_sparse_formats/sparse_formats.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase07_sparse_formats/sparse_formats.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Sparse formats |
+| [`phase07_sparse_formats/sparse_formats.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase07_sparse_formats/sparse_formats.cpp) | [Sparse formats](../notebooks/examples/sparse_formats.ipynb) |
 | [`phase07_sparse_formats/structured_views.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase07_sparse_formats/structured_views.cpp) | [Views](../notebooks/examples/views.ipynb) |
 | [`phase08_expression_templates/expression_benchmark.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase08_expression_templates/expression_benchmark.cpp) | Not ported: expression templates fuse C++ loops at compile time |
 | [`phase08_expression_templates/expression_concepts.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase08_expression_templates/expression_concepts.cpp) | Not ported: expression templates fuse C++ loops at compile time |
@@ -73,7 +82,7 @@ against.
 | [`phase09_advanced_types/blas_dispatch.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase09_advanced_types/blas_dispatch.cpp) | [Backends](../notebooks/examples/backends.ipynb) |
 | [`phase10_matrix_views/triangular_views.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase10_matrix_views/triangular_views.cpp) | [Views](../notebooks/examples/views.ipynb) |
 | [`phase10_matrix_views/permutation_block_diagonal.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase10_matrix_views/permutation_block_diagonal.cpp) | [Views](../notebooks/examples/views.ipynb) |
-| [`phase11_assembly_reorder/fem_assembly_reorder.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase11_assembly_reorder/fem_assembly_reorder.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): FEM assembly and reordering |
+| [`phase11_assembly_reorder/fem_assembly_reorder.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase11_assembly_reorder/fem_assembly_reorder.cpp) | [FEM assembly and reordering](../notebooks/examples/fem_assembly.ipynb) |
 | [`phase11_assembly_reorder/strided_views_unit_vectors.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase11_assembly_reorder/strided_views_unit_vectors.cpp) | Not ported: NumPy slicing gives strided views |
 | [`phase12_transcendental_functions/signal_processing.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase12_transcendental_functions/signal_processing.cpp) | Not ported: NumPy's element-wise functions |
 | [`phase12_transcendental_functions/activation_functions.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase12_transcendental_functions/activation_functions.cpp) | Not ported: NumPy's element-wise functions |
@@ -84,7 +93,7 @@ against.
 | [`phase14_io_generators/csv_io_prettyprint.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase14_io_generators/csv_io_prettyprint.cpp) | Not ported: NumPy reads and writes CSV; Matrix Market is `mtl5.io`, used in [the orderings notebook](../notebooks/sparse_direct_orderings.ipynb) |
 | [`phase14_io_generators/poisson_diag_toolkit.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase14_io_generators/poisson_diag_toolkit.cpp) | Covered by [Test-matrix generators](../notebooks/generators.ipynb) |
 | [`phase15_sparse_direct/sparse_direct_solvers.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase15_sparse_direct/sparse_direct_solvers.cpp) | Covered by [Sparse direct solvers](../guide/direct-solvers.md) |
-| [`phase15_sparse_direct/circuit_matrix_klu.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase15_sparse_direct/circuit_matrix_klu.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Circuit matrices with KLU |
+| [`phase15_sparse_direct/circuit_matrix_klu.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/phase15_sparse_direct/circuit_matrix_klu.cpp) | [Circuit matrices with KLU](../notebooks/examples/circuit_klu.ipynb) |
 | [`accurate_sum_dot/accurate_sum_dot.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/accurate_sum_dot/accurate_sum_dot.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): Accurate sum and dot |
 | [`ukf_cholesky_vs_ldlt/ukf_comparison.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/ukf_cholesky_vs_ldlt/ukf_comparison.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): UKF, Cholesky against LDLᵀ |
 | [`ukf_bearing_only/bearing_only_ukf.cpp`](https://github.com/stillwater-sc/mtl5/blob/v5.25.0/examples/ukf_bearing_only/bearing_only_ukf.cpp) | Planned, [#147](https://github.com/stillwater-sc/mtl5-python/issues/147): UKF, Cholesky against LDLᵀ |
