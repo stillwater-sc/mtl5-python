@@ -90,6 +90,10 @@ def _copy_notebooks() -> None:
     # incremental build reuse cached outputs after a change to the package.
     for nb in sorted(src.glob("*.ipynb")):
         shutil.copy(nb, dst / nb.name)
+    # The examples ported from MTL5's examples/ (docs/examples/index.md).
+    (dst / "examples").mkdir()
+    for nb in sorted(src.glob("examples/*.ipynb")):
+        shutil.copy(nb, dst / "examples" / nb.name)
     if (src / "data").is_dir():
         shutil.copytree(src / "data", dst / "data")
 

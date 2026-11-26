@@ -30,7 +30,12 @@ import mtl5
 pytest.importorskip("matplotlib", reason="notebooks need the [notebooks] extra")
 
 NOTEBOOK_DIR = Path(__file__).resolve().parent.parent / "notebooks"
-NOTEBOOKS = sorted(NOTEBOOK_DIR.glob("*.ipynb")) if NOTEBOOK_DIR.is_dir() else []
+# The guide's notebooks, and the examples ported from MTL5 in examples/.
+NOTEBOOKS = (
+    sorted([*NOTEBOOK_DIR.glob("*.ipynb"), *NOTEBOOK_DIR.glob("examples/*.ipynb")])
+    if NOTEBOOK_DIR.is_dir()
+    else []
+)
 
 # Resolve the child against the same mtl5 this process imported — under
 # `pip install .` the repo root holds a source package with no compiled _core.
@@ -55,12 +60,16 @@ def test_notebooks_exist():
     assert NOTEBOOKS, "expected at least one notebook under notebooks/"
 
 
-@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.relative_to(NOTEBOOK_DIR).as_posix())
 def test_notebook_runs(path: Path):
     env = dict(os.environ)
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = MTL5_IMPORT_ROOT + os.pathsep + existing if existing else MTL5_IMPORT_ROOT
     env["MPLBACKEND"] = "Agg"
+    # Jupyter's output is UTF-8 on every platform, and the notebooks print
+    # non-ASCII text (ε, ∞). A script's stdout follows the locale instead,
+    # which is cp1252 on the Windows runners and can't encode those.
+    env["PYTHONIOENCODING"] = "utf-8"
 
     with tempfile.TemporaryDirectory() as work:
         script = Path(work) / "cells.py"
@@ -69,6 +78,7 @@ def test_notebook_runs(path: Path):
             [sys.executable, str(script)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             # The notebook's own directory, as under Jupyter, so a notebook
             # reads `data/...` by the same relative path in both. Safe for the
             # import: a script's directory, not the cwd, goes on sys.path, and
@@ -84,7 +94,7 @@ def test_notebook_runs(path: Path):
     )
 
 
-@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.relative_to(NOTEBOOK_DIR).as_posix())
 def test_notebook_outputs_are_stripped(path: Path):
     """Committed outputs bloat diffs and go stale; the runner above is what
     proves the notebook works."""

@@ -15,6 +15,23 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Examples: MTL5's tutorial as executed notebooks** (#147, PR 1 of 7).
+  - A new top-level **Examples** section of the site,
+    `docs/examples/index.md`. It lists all 40 of MTL5's example programs at
+    `v5.25.0` and where each one is: a notebook here, planned, covered by a
+    guide page, or not ported, with the reason.
+  - The first three notebooks, in `notebooks/examples/`: **Basics**
+    (containers over NumPy memory, norms, products, dense against sparse
+    storage), **Views** (triangles, bands, `hermitian`, `map`, triangular
+    solves, permutations, block-diagonal systems) and **Backends** (what the
+    build dispatches to, and GEMM against NumPy's BLAS).
+  - Each notebook asserts the C++ example's claims, so a change that breaks
+    one fails the build, and links the MTL5 sources it ports.
+  - `tests/test_examples_index.py` keeps the index, the notebooks and their
+    links in agreement: every MTL5 link uses the tag `CMakeLists.txt`
+    fetches. With `MTL5_SOURCE_DIR` set, it also checks the index against an
+    MTL5 checkout. `tests/test_notebooks.py` now runs the examples too.
+
 - **Benchmark analysis notebook** (#121, milestone P8).
   - `notebooks/benchmark_analysis.ipynb`, on the site under the user guide's
     "Benchmark data", takes a sample of MTL5's committed benchmark data

@@ -27,5 +27,6 @@ Prebuilt wheels cover Linux, macOS and Windows on CPython 3.10–3.12.
 
 getting-started
 guide/index
+examples/index
 api/index
 ```
