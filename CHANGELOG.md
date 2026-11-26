@@ -24,8 +24,14 @@ against, and semantic-release manages only the **patch** component.
     callback stops the solve and propagates.
   - `full_output=True` returns `(x, info, report)`, where `report` is a
     `SolveReport` with `iterations`, `residual`, `relative_residual` and
-    `history`, the residual norm of every iteration from 0. The default
-    return is still SciPy's `(x, info)`.
+    `history`. `residual` is the true ‖b − Ax‖, computed once after the
+    solve. `history` is the norm the solver tests at each iteration from 0,
+    padded with NaN after a breakdown. The default return is still SciPy's
+    `(x, info)`.
+  - MTL5's GMRES is left-preconditioned: it tests ‖M⁻¹r‖ against
+    rtol·‖b‖. So its history is the preconditioned residual, and with a
+    preconditioner its true relative residual can exceed `rtol` although
+    `info == 0`. The report shows both.
   - The history is recorded by an iteration controller in the bindings,
     derived from MTL5's `basic_iteration` the way MTL5's own
     `cyclic_iteration` is, so it needs no change to MTL5.

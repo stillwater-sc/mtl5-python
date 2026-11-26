@@ -291,17 +291,24 @@ class SolveReport(NamedTuple):
     iterations : int
         Iterations taken.
     residual : float
-        The final residual norm, the last value of `history`.
+        The true residual norm ||b - A x|| of the returned x, computed once
+        after the solve.
     relative_residual : float
-        `residual / ||b||` (the initial guess is zero, so ||r0|| = ||b||). The
-        solve converged when this is at most `rtol`.
+        `residual / ||b||`. For every solver but one it is at most `rtol`, up
+        to rounding, when `info == 0`. The exception is gmres with a preconditioner: MTL5's GMRES
+        is left-preconditioned and stops when ||M^-1 r|| <= rtol * ||b||, so
+        ||r|| itself can be larger.
     history : np.ndarray
-        The residual norm at each iteration, starting with iteration 0 (||b||),
-        so `len(history) == iterations + 1`. It is the norm the solver tests
-        for convergence: the recurrence's residual for most solvers, a
-        quasi-residual bound for gmres's inner steps and for tfqmr, replaced by
-        the true residual where the solver computes one (at the end, at a gmres
-        restart). An iteration the solver didn't test holds NaN.
+        The norm the solver tests for convergence at each iteration, starting
+        with iteration 0, so `len(history) == iterations + 1`. For most solvers
+        it is the residual norm: the recurrence's residual during the
+        iterations, the true residual where the solver computes one at the end,
+        and ||b|| at iteration 0, since x0 = 0. tfqmr tests a quasi-residual
+        bound during its iterations. gmres tests ||M^-1 r||, so with a
+        preconditioner its history is the preconditioned residual, starting at
+        ||M^-1 b||; its inner steps report the least-squares estimate of that
+        norm. An iteration the solver didn't test holds NaN: after a breakdown
+        (`info > 1`), the last one.
     """
 
     iterations: int
@@ -378,13 +385,13 @@ def _run(name, A, b, rtol, maxiter, M, callback, device, restart=30, ell=2, s=4,
             f"got {type(M).__name__}. A scipy LinearOperator cannot be used here — "
             "it would have to be applied from Python once per iteration."
         )
-    x_view, info, iters, resid, norm_r0, history = _krylov(
+    x_view, info, iters, resid, norm_b, history = _krylov(
         name, mat, M, bv, rtol, maxiter, restart, ell, s, callback
     )
     x = x_view.to_numpy()
     if not full_output:
         return x, info
-    relative = resid / norm_r0 if norm_r0 > 0 else resid
+    relative = resid / norm_b if norm_b > 0 else resid
     return x, info, SolveReport(iters, resid, relative, np.asarray(history, dtype=np.float64))
 
 

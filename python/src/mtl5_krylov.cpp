@@ -65,7 +65,9 @@
 #include <mtl/itl/pc/ilut.hpp>
 #include <mtl/itl/pc/ssor.hpp>
 #include <mtl/operation/matrix_properties.hpp>
+#include <mtl/operation/mult.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <limits>
@@ -207,11 +209,20 @@ void require_exact_adjoint(Solver s, const PCBase<double>* pcd,
 /// MTL5's solvers are templated on the controller and call it through its
 /// concrete type, so redefining finished() here is enough; cyclic_iteration in
 /// MTL5 does the same to print. Every solver reports through finished(): once
-/// before its first step (iteration 0, the residual of x0 = 0, i.e. ||b||), once
-/// per iteration, and sometimes again at the same iteration count -- the true
-/// residual after a recurrence's estimate (cg, tfqmr, minres), or the residual
-/// at a GMRES restart. A repeated test replaces that iteration's entry, so the
-/// history holds one value per iteration, the last the solver saw.
+/// before its first step (iteration 0), once per iteration, and sometimes again
+/// at the same iteration count -- the true residual after a recurrence's
+/// estimate (cg, tfqmr, minres), or the residual at a GMRES restart. A repeated
+/// test replaces that iteration's entry, so the history holds one value per
+/// iteration, the last the solver saw.
+///
+/// The value is whatever norm the solver tests, which is not always ||b - Ax||.
+/// For most solvers it is: iteration 0 is ||b||, since x0 = 0. MTL5's GMRES is
+/// left-preconditioned and tests ||M^-1 (b - Ax)||, so its history starts at
+/// ||M^-1 b||; its inner steps report the least-squares estimate of that norm.
+/// run_solver therefore computes the true final residual itself.
+///
+/// A solver that breaks down advances the count and calls fail() without a
+/// last finished(), so run_solver pads the history to iterations + 1 with NaN.
 ///
 /// The callback runs with the GIL taken back for the call. If it raises, the
 /// exception is kept, the controller reports itself finished so the solver
@@ -265,8 +276,8 @@ private:
     std::exception_ptr error_;
 };
 
-/// What _krylov returns: x, info, iterations, the final residual norm, ||r0||,
-/// and the residual norm of each iteration.
+/// What _krylov returns: x, info, iterations, the true final residual
+/// ||b - Ax||, ||b||, and the norm the solver tested at each iteration.
 template <typename T>
 using SolveResult =
     std::tuple<VectorView<T>, int, int, double, double, std::vector<double>>;
@@ -298,9 +309,26 @@ run_solver(Solver which, const SMat<T>& A, const PCBase<T>& M,
         }
     }
     if (auto err = iter.callback_error()) std::rethrow_exception(err);
+
+    // The true residual, once: the solver's own final norm is preconditioned
+    // for GMRES, and a breakdown leaves it at the last test.
+    double true_resid = 0.0, norm_b = 0.0;
+    {
+        nogil guard;
+        Vec<T> Ax(A.num_rows());
+        mtl::mult(A, x, Ax);
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            const double bi = static_cast<double>(b[i]);
+            const double ri = bi - static_cast<double>(Ax[i]);
+            true_resid += ri * ri;
+            norm_b += bi * bi;
+        }
+    }
+    std::vector<double> history = iter.history();
+    history.resize(static_cast<std::size_t>(iter.iterations()) + 1,
+                   std::numeric_limits<double>::quiet_NaN());
     return {VectorView<T>(std::move(x)), info, static_cast<int>(iter.iterations()),
-            static_cast<double>(iter.resid()), static_cast<double>(iter.norm_r0()),
-            iter.history()};
+            std::sqrt(true_resid), std::sqrt(norm_b), std::move(history)};
 }
 
 // ---------------------------------------------------------------------------
@@ -439,8 +467,9 @@ void register_solvers(nb::module_& m) {
     }, "solver"_a, "A"_a, "M"_a, "b"_a, "rtol"_a, "maxiter"_a,
        "restart"_a = 30, "ell"_a = 2, "s"_a = 4, "callback"_a = nb::none(),
        "Internal Krylov dispatch — use mtl5.sparse.cg() and friends. Returns "
-       "(x, info, iterations, residual, norm_r0, history), with history the "
-       "residual norm of each iteration from 0.");
+       "(x, info, iterations, residual, norm_b, history): residual is the "
+       "true ||b - Ax||, history the norm the solver tested at each "
+       "iteration from 0.");
 }
 
 template <typename T>
