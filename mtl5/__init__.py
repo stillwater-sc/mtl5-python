@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _pkg_version
+from typing import NamedTuple as _NamedTuple
 
 try:
     import mtl5._core as _core
@@ -141,6 +142,7 @@ try:
         devices,
         # Operations
         dot,
+        dot_k,
         dot_real,
         dtypes,
         eig,
@@ -213,6 +215,7 @@ try:
         set_num_threads,
         solve,
         spectral_radius,
+        sum_k,
         svd,
         svdvals,
         symm,
@@ -530,6 +533,49 @@ def _make_generator(name):
     return wrapper
 
 
+class IllConditionedDot(_NamedTuple):
+    """`mtl5.generators.gen_dot`'s result: x . y is `dot`, rounded to nearest from
+    the exact value, with achieved condition number `cond` = 2 abs(x).abs(y) /
+    abs(x.y)."""
+
+    x: object
+    y: object
+    dot: float
+    cond: float
+
+
+class IllConditionedSum(_NamedTuple):
+    """`mtl5.generators.gen_sum`'s result: the sum of `p` is `sum`, rounded to
+    nearest from the exact value, with achieved condition number `cond` =
+    sum(abs(p)) / abs(sum(p))."""
+
+    p: object
+    sum: float
+    cond: float
+
+
+def _gen_dot(n, cond, seed, dtype="f64"):
+    return IllConditionedDot(*_generators.gen_dot(n, cond, seed, dtype))
+
+
+def _gen_sum(n, cond, seed, dtype="f64"):
+    return IllConditionedSum(*_generators.gen_sum(n, cond, seed, dtype))
+
+
+_gen_dot.__name__, _gen_sum.__name__ = "gen_dot", "gen_sum"
+_gen_dot.__doc__ = (
+    (_generators.gen_dot.__doc__ or "")
+    + "\n\nThe result is an IllConditionedDot(x, y, dot, cond). Generated in "
+    "dtype ('f64' or 'f32') itself, not rounded from float64: rounding would "
+    "undo the cancellation the construction arranges."
+)
+_gen_sum.__doc__ = (
+    (_generators.gen_sum.__doc__ or "")
+    + "\n\nThe result is an IllConditionedSum(p, sum, cond). Generated in "
+    "dtype ('f64' or 'f32') itself, not rounded from float64."
+)
+
+
 class _Generators:
     """Named test matrices with known pathologies.
 
@@ -554,6 +600,8 @@ for _n in [*_Generators._DENSE, *_Generators._SPARSE]:
     setattr(_Generators, _n, staticmethod(_make_generator(_n)))
 for _n in _Generators._PASSTHROUGH:
     setattr(_Generators, _n, staticmethod(getattr(_generators, _n)))
+_Generators.gen_dot = staticmethod(_gen_dot)
+_Generators.gen_sum = staticmethod(_gen_sum)
 
 generators = _Generators()
 
@@ -745,6 +793,7 @@ __all__ = [
     "is_upper_triangular",
     "is_zero",
     "spectral_radius",
+    "sum_k",
     "symm",
     "symv",
     "syr2k",
@@ -758,6 +807,8 @@ __all__ = [
     "io",
     # Generators and range vectors
     "generators",
+    "IllConditionedDot",
+    "IllConditionedSum",
     "arange",
     "geomspace",
     "linspace",
@@ -772,6 +823,7 @@ __all__ = [
     "conj",
     "det",
     "dot",
+    "dot_k",
     "dot_real",
     "frobenius_norm",
     "inv",

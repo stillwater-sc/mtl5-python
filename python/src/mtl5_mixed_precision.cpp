@@ -37,6 +37,9 @@
 // the quire's accumulator_* functions next to quire (universal#1699), and
 // accumulator_traits finds them by argument-dependent lookup (mtl5#581).
 #include <mtl/math/accumulator_traits.hpp>
+// compensated_accumulator lives in accumulator_traits.hpp; the Kulisch
+// accumulator for float and double has its own header.
+#include <mtl/math/exact_accumulator.hpp>
 
 #include <cmath>
 #include <map>
@@ -159,6 +162,19 @@ double dispatch_acc(AccKind kind, F&& f) {
                 return f.template operator()<std::int32_t>();
             else
                 throw std::invalid_argument("accumulator='i32' unavailable for this dtype");
+        case AccKind::Compensated:
+        case AccKind::Exact:
+            // Guarded as Quire and I32 are: parse_acc admits these only for
+            // float and double, and the discarded branch is never instantiated
+            // for the other element types.
+            if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
+                if (kind == AccKind::Exact)
+                    return f.template operator()<mtl::math::exact_accumulator<T>>();
+                return f.template operator()<mtl::math::compensated_accumulator<T>>();
+            } else {
+                throw std::invalid_argument(
+                    "accumulator='compensated'/'exact' unavailable for this dtype");
+            }
     }
     throw std::invalid_argument("unreachable accumulator kind");
 }
@@ -314,7 +330,7 @@ void register_mixed_native(nb::module_& mx) {
                      std::optional<std::string> accumulator,
                      std::optional<std::string> result) {
         return mixed_dot<T>(a.vec, b.vec,
-                            parse_acc(accumulator, type_suffix<T>(), quire_ok),
+                            parse_acc(accumulator, type_suffix<T>(), quire_ok, /*i32_ok=*/false, /*ieee_ok=*/true),
                             parse_result_is_element(result));
     }, "a"_a, "b"_a, "accumulator"_a = nb::none(), "result"_a = nb::none());
 
@@ -324,7 +340,7 @@ void register_mixed_native(nb::module_& mx) {
                      std::optional<std::string> result) {
         if (a.shape(0) != b.shape(0))
             throw std::invalid_argument("dot: vectors must have the same length");
-        const AccKind kind = parse_acc(accumulator, type_suffix<T>(), quire_ok);
+        const AccKind kind = parse_acc(accumulator, type_suffix<T>(), quire_ok, /*i32_ok=*/false, /*ieee_ok=*/true);
         const bool elem = parse_result_is_element(result);
         const std::size_t n = a.shape(0);
         T* ap = const_cast<T*>(a.data());
@@ -339,11 +355,11 @@ void register_mixed_native(nb::module_& mx) {
             throw std::invalid_argument(
                 "mixed.norm: only ord=2 has an accumulator policy. Use mtl5.norm() "
                 "for the one- and infinity-norms.");
-        return mixed_two_norm<T>(v.vec, parse_acc(accumulator, type_suffix<T>(), quire_ok));
+        return mixed_two_norm<T>(v.vec, parse_acc(accumulator, type_suffix<T>(), quire_ok, /*i32_ok=*/false, /*ieee_ok=*/true));
     }, "x"_a, "ord"_a = 2, "accumulator"_a = nb::none());
 
     mx.def("frobenius_norm", [](const MV& m, std::optional<std::string> accumulator) {
-        return mixed_frobenius_norm<T>(m.mat, parse_acc(accumulator, type_suffix<T>(), quire_ok));
+        return mixed_frobenius_norm<T>(m.mat, parse_acc(accumulator, type_suffix<T>(), quire_ok, /*i32_ok=*/false, /*ieee_ok=*/true));
     }, "A"_a, "accumulator"_a = nb::none());
 }
 
@@ -900,6 +916,10 @@ void register_mixed_precision(nb::module_& m) {
         if (it == reg.end())
             throw std::invalid_argument("unknown dtype '" + dtype + "'; " + kDtypeHelp);
         if (it->second) v.push_back("quire");
+        if (dtype == "f32" || dtype == "f64") {
+            v.push_back("compensated");
+            v.push_back("exact");
+        }
         return v;
     }, "dtype"_a,
        "Accumulators available for an element dtype (None is always valid and "

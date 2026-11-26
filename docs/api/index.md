@@ -106,6 +106,24 @@ suffixes.
    ilut
 ```
 
+## Accurate sums and dot products
+
+```{eval-rst}
+.. currentmodule:: mtl5
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   sum_k
+   dot_k
+```
+
+`mtl5.mixed.dot(x, y, accumulator="compensated")` is Dot2 as an accumulator,
+and `accumulator="exact"` rounds the exact dot product once.
+`mtl5.generators.gen_dot` and `mtl5.generators.gen_sum` build the
+ill-conditioned test data of Ogita, Rump and Oishi.
+
 ## Mixed precision
 
 ```{eval-rst}

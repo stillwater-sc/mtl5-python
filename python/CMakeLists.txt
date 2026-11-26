@@ -37,7 +37,8 @@ nanobind_add_module(_core
     src/mtl5_krylov.cpp
     src/mtl5_multigrid.cpp
     src/mtl5_views.cpp
-    src/mtl5_tensor.cpp)
+    src/mtl5_tensor.cpp
+    src/mtl5_accurate.cpp)
 
 # Inject the package version from pyproject.toml into the C++ module via a
 # compile definition. scikit-build-core sets SKBUILD_PROJECT_VERSION; a plain

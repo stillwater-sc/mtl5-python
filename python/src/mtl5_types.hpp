@@ -254,18 +254,26 @@ void register_dense_ops(nb::module_& m);
 // Shared between the mixed-precision operations and the sparse factorizations
 // so that `accumulator=` means the same thing everywhere it appears.
 // ===========================================================================
-enum class AccKind { Default, F32, F64, FMA32, FMA64, Quire, I32 };
+enum class AccKind { Default, F32, F64, FMA32, FMA64, Quire, I32, Compensated, Exact };
 
 inline constexpr const char* kAccumulatorHelp =
     "valid accumulators: None (element precision), 'f32', 'f64', "
-    "'fma32', 'fma64'/'fma', 'quire', 'i32' (8- and 16-bit integer operands)";
+    "'fma32', 'fma64'/'fma', 'quire', 'compensated' and 'exact' (float32 and "
+    "float64 operands), 'i32' (8- and 16-bit integer operands)";
 
 /// `i32_ok` is true only for the narrow integer element types, where an int32
 /// accumulator is the whole point -- it is what vpmaddwd / vpdpbusd / SDOT
 /// accumulate into. Offering it on a float or posit dtype would be meaningless,
 /// so it is rejected by name rather than silently ignored.
+///
+/// `ieee_ok` is true only for float32 and float64 operands. 'compensated'
+/// (MTL5's compensated_accumulator, Dot2 as an accumulator) is built on the
+/// error-free transformations two_sum and two_product, which exist only for
+/// binary IEEE types; 'exact' (exact_accumulator, a Kulisch accumulator) is
+/// defined for binary32 and binary64 alone.
 inline AccKind parse_acc(const std::optional<std::string>& spec,
-                         const char* dtype, bool quire_ok, bool i32_ok = false) {
+                         const char* dtype, bool quire_ok, bool i32_ok = false,
+                         bool ieee_ok = false) {
     if (!spec || *spec == "none" || *spec == "default") return AccKind::Default;
     const std::string& a = *spec;
     if (a == "f32" || a == "float32") return AccKind::F32;
@@ -280,6 +288,17 @@ inline AccKind parse_acc(const std::optional<std::string>& spec,
                 "(i8, i16, u8), which is what the hardware widening "
                 "multiply-accumulate takes. Use 'f64' to accumulate in double.");
         return AccKind::I32;
+    }
+    if (a == "compensated" || a == "exact") {
+        if (!ieee_ok)
+            throw std::invalid_argument(
+                "accumulator='" + a + "' is not available for dtype '" + dtype +
+                "' here: it is MTL5's " +
+                (a == "exact" ? std::string("exact_accumulator") : std::string("compensated_accumulator")) +
+                ", defined for float32 and float64 operands, and offered by the "
+                "mtl5.mixed operations on those. Use 'quire' for an exact sum in "
+                "the Universal types, or 'f64'.");
+        return a == "exact" ? AccKind::Exact : AccKind::Compensated;
     }
     if (a == "quire") {
         if (!quire_ok)
@@ -319,6 +338,9 @@ void register_io(nb::module_& m);
 
 // Registered by mtl5_generators.cpp — named test matrices and range vectors.
 void register_generators(nb::module_& m);
+
+// Registered by mtl5_accurate.cpp — SumK and DotK.
+void register_accurate(nb::module_& m);
 
 // Registered by mtl5_sparse_direct.cpp — the sparse direct factorizations and
 // the fill-reducing orderings.

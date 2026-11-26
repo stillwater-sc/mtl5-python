@@ -15,6 +15,28 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Accurate sums and dot products** (#147, PR 6 of 7). Bindings for
+  MTL5's implementation of Ogita, Rump and Oishi, "Accurate sum and dot
+  product" (2005), for float32 and float64.
+  - `mtl5.sum_k(x, k=2)` and `mtl5.dot_k(x, y, k=2)`: the sum and the dot
+    product as if computed in k-fold precision and rounded once. k = 2 is
+    Sum2 and Dot2, larger k is SumK and DotK, and k runs from 1 (sum) or 2
+    (dot) to 10.
+  - `accumulator="compensated"` and `accumulator="exact"` for `mtl5.mixed.dot`,
+    `norm` and `frobenius_norm`. They are MTL5's `compensated_accumulator`
+    (Dot2 as an accumulator, the same bits as `dot_k(k=2)`) and
+    `exact_accumulator`, a Kulisch accumulator that rounds once, at any
+    condition number. Other element types, and the sparse factorizations'
+    `accumulator=`, refuse them by name.
+  - `mtl5.generators.gen_dot(n, cond, seed)` and `gen_sum(n, cond, seed)`: the
+    paper's ill-conditioned test data. They return `IllConditionedDot(x, y,
+    dot, cond)` and `IllConditionedSum(p, sum, cond)`, with the exact result
+    rounded and the condition number achieved. They are generated in the
+    requested dtype, and the same seed gives the same vectors on every
+    platform.
+  - The tests check the paper's error bounds (Propositions 4.5, 4.10, 5.5 and
+    5.11) against exact `Fraction` references.
+
 - **Examples: sparse structure** (#147, PR 5 of 7). Three notebooks under a
   new "Sparse structure" caption, porting MTL5's `phase07/sparse_formats`,
   `phase11/fem_assembly_reorder` and `phase15/circuit_matrix_klu`.
