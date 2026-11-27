@@ -1591,6 +1591,49 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.8 (2026-11-27)
+
+### Bug Fixes
+
+- **examples**: Address local review of the PR 7 notebooks
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: Decide the exact accumulator's rounding in exact arithmetic
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: H13's last pivot is rounding noise, its sign platform-dependent
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: The frame pipeline fails fast if a worker raises
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: UKF review: exact wrap, honest C++ attributions
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: UKF review: failing stage, gain, inertia, backward accuracy
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+### Documentation
+
+- **examples**: H13's Cholesky failure, stated without a 1/u limit
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: Numerical robustness and interop notebooks, factor .L (#147 PR 7)
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+- **examples**: Robustness and interop notebooks, factor .L (#147 PR 7)
+  ([#158](https://github.com/stillwater-sc/mtl5-python/pull/158),
+  [`8892265`](https://github.com/stillwater-sc/mtl5-python/commit/88922656767ffee8c8533f174fcd4f561f73b6cb))
+
+
 ## v5.25.7 (2026-11-26)
 
 ### Bug Fixes
