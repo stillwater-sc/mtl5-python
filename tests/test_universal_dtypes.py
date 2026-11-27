@@ -223,7 +223,8 @@ class TestEncodingChangeIsRefused:
     @pytest.mark.parametrize("ours,theirs", [((5, 18), (5, 11)), ((5, 14), (5, 15))])
     def test_fp16_across_the_change_is_refused(self, releases, ours, theirs):
         a = np.array([1.0, np.inf], dtype=ud.fp16)
-        v = mtl5.vector(a)  # built before the pair is swapped in
+        releases(ours, ours)  # a compatible pair, whatever the real builds are
+        v = mtl5.vector(a)
         releases(ours, theirs)
         with pytest.raises(TypeError, match="Universal 5.15 changed the fp16 encoding"):
             mtl5.vector(a)
