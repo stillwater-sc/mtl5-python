@@ -216,7 +216,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        v5.11.0
+        GIT_TAG        v5.18.0
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )

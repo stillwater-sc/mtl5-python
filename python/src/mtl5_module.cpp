@@ -809,10 +809,10 @@ void register_native_dense_ops(nb::module_& m) {
 // dense_vector<posit16>. The way back is the same copy in reverse.
 //
 // WHY A COPY OF THE BITS, and not a reinterpreting view of NumPy's buffer.
-// The two packages need not be built on the same Universal. Both pin v5.11.0
-// today (universal_dtypes from 2.5.1; 2.5.0 and earlier are on 4.7.9), but each
-// pin moves on its own schedule, and a build that finds an installed Universal
-// uses that one instead. What two Universal versions agree on is the ENCODING --
+// The two packages need not be built on the same Universal. Today this module
+// pins v5.18.0 and universal_dtypes v5.11.0 (from 2.5.1; 2.5.0 and earlier are
+// on 4.7.9): each pin moves on its own schedule, and a build that finds an
+// installed Universal uses that one instead. What two Universal versions agree on is the ENCODING --
 // the posit standard, the lns and takum formats -- not the C++ object layout,
 // and the encoding is what crosses here. The copy is one pass over the data,
 // which is nothing next to emulated arithmetic.

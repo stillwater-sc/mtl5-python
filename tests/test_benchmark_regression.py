@@ -99,7 +99,8 @@ def sweep(bench):
         # this first carried would have allowed ~100s on a CI worker while the
         # docstring promised six.
         #
-        # 5s is ~4.5x the healthy posit32 time, so it will not false-trip. And
+        # 5s is far above the healthy posit32 time (about 0.06s on Universal
+        # v5.18.0), so it will not false-trip. And
         # a regression bigger than that makes the row `too_slow`, which drops
         # the dtype and fails test_the_guard_is_not_vacuous — a large
         # regression therefore fails FAST rather than slowly, which is the
@@ -134,13 +135,20 @@ def test_the_baseline_escaped_per_call_overhead(sweep):
     )
 
 
-def test_posit32_is_several_times_costlier_than_takum32(sweep):
+def test_posit32_costs_about_twice_takum32(sweep):
     """The tightest guard, because both operands are emulated: they pay the
     same per-call overhead and run the same generic kernel, so only the number
-    systems' arithmetic differs. Measured 9.2-10.1 across every run."""
+    systems' arithmetic differs.
+
+    Measured 1.94-1.98 across four runs on Universal v5.18.0, and the band is
+    about 3x either side of that. On v5.11.0 it was 9.2-10.1: v5.18.0 made
+    posit32 arithmetic about 6.9x faster and takum32 about 2.4x faster (a
+    64x64 multiply-add loop against each Universal tag), with identical
+    results. A Universal bump that moves the ratio out of the band needs that
+    kind of check before the band moves."""
     r = _seconds(sweep, "posit32") / _seconds(sweep, "takum32")
-    assert 3.0 < r < 30.0, (
-        f"posit32/takum32 = {r:.1f} on {KERNEL}, outside the 3-30x band. "
+    assert 0.65 < r < 6.0, (
+        f"posit32/takum32 = {r:.2f} on {KERNEL}, outside the 0.65-6x band. "
         "Either a format changed cost class or one of them stopped using the "
         "path it used to."
     )
@@ -151,7 +159,8 @@ def test_emulation_cost_stays_within_an_order_of_magnitude_band(sweep):
 
     Wider than the emulated-vs-emulated band on purpose: this ratio moved
     between 2900x and 6600x across builds during #69-#73 without anything being
-    wrong, because it also tracks how well the NATIVE side is vectorised.
+    wrong, because it also tracks how well the NATIVE side is vectorised. On
+    Universal v5.18.0, with faster posit arithmetic, it is 1200-1350x.
     """
     if "posit32" not in sweep:
         pytest.skip("posit32 produced no measurement")

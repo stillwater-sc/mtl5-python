@@ -700,6 +700,29 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **Universal pinned to v5.18.0** (was v5.11.0). The `find_package` floor stays
+  at 5.8.0, and no binding source changes. The suite gives 2254 passed and 6
+  skipped, as before, and gcc and clang both build. universal_dtypes still pins
+  v5.11.0. The interop copies encodings, not object layouts, so the two need not
+  match.
+  - **Results: 4 of 915 change, all fixes.** The comparison covers 15 Universal
+    dtypes: edge-value conversion, plus 10 trials each of conversion, `norm`
+    (1 and 2), `dot`, `matmul` and `solve`.
+    - `convert(-0.0)` to td_cascade and qd_cascade now gives −0, as dd_cascade
+      and IEEE do: a cascade's zero now converts from its leading component
+      (universal#2114).
+    - Two posit64 2-norms moved by one float64 ulp. Each now equals the exact
+      norm rounded to float64, where before it was one ulp off: posit sqrt is
+      correctly rounded natively for nbits ≤ 64 (universal#1856).
+  - **Emulated arithmetic is faster.** On a 64×64 multiply-add loop, posit32 is
+    6.9x faster and takum32 2.4x faster than on v5.11.0, with identical
+    results. On `gemm` at n = 64, posit32/takum32 goes from 9.2–10.1 to
+    1.94–1.98. So the benchmark guard's band moves from 3–30x to 0.65–6x, the
+    same 3x margin either side, and the test is renamed
+    `test_posit32_costs_about_twice_takum32`.
+
+### Changed
+
 - **MTL5 pinned to v5.22.0** (was v5.20.0), and the package version set to
   5.22.0, since its minor tracks MTL5's. The `find_package` floor moves from
   5.19.0 to 5.22.0, because the tests now pin two results that 5.21.0 and
