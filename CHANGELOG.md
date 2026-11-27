@@ -1689,6 +1689,25 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.11 (2026-11-27)
+
+### Bug Fixes
+
+- **dense**: Find the float32/float64 operand pair by keyword too
+  ([#162](https://github.com/stillwater-sc/mtl5-python/pull/162),
+  [`24d7a9f`](https://github.com/stillwater-sc/mtl5-python/commit/24d7a9f6c0a9892a9293512e4f98f68207374b92))
+
+- **dense**: NumPy input to the dense solvers no longer drops to float32
+  ([#162](https://github.com/stillwater-sc/mtl5-python/pull/162),
+  [`24d7a9f`](https://github.com/stillwater-sc/mtl5-python/commit/24d7a9f6c0a9892a9293512e4f98f68207374b92))
+
+### Performance Improvements
+
+- **dense**: Call the binding directly when no argument is an ndarray
+  ([#162](https://github.com/stillwater-sc/mtl5-python/pull/162),
+  [`24d7a9f`](https://github.com/stillwater-sc/mtl5-python/commit/24d7a9f6c0a9892a9293512e4f98f68207374b92))
+
+
 ## v5.25.10 (2026-11-27)
 
 ### Bug Fixes
