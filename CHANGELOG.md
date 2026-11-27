@@ -1719,6 +1719,28 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.13 (2026-11-27)
+
+### Documentation
+
+- Session log for 2026-11-27 ([#164](https://github.com/stillwater-sc/mtl5-python/pull/164),
+  [`cd0dba2`](https://github.com/stillwater-sc/mtl5-python/commit/cd0dba299b6231d0a1af47097bd6dc89b8aa479e))
+
+- Session log release column matches the tags
+  ([#164](https://github.com/stillwater-sc/mtl5-python/pull/164),
+  [`cd0dba2`](https://github.com/stillwater-sc/mtl5-python/commit/cd0dba299b6231d0a1af47097bd6dc89b8aa479e))
+
+- **types**: Takum16/32 are Universal's linear takum, not the logarithmic one
+  ([#167](https://github.com/stillwater-sc/mtl5-python/pull/167),
+  [`e22444d`](https://github.com/stillwater-sc/mtl5-python/commit/e22444d846cc837dd5335c457531c927d3ee91dc))
+
+### Features
+
+- **types**: Add the takum16 element type
+  ([#167](https://github.com/stillwater-sc/mtl5-python/pull/167),
+  [`e22444d`](https://github.com/stillwater-sc/mtl5-python/commit/e22444d846cc837dd5335c457531c927d3ee91dc))
+
+
 ## v5.25.12 (2026-11-27)
 
 ### Features
