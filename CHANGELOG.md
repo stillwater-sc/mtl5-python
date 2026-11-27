@@ -701,10 +701,10 @@ against, and semantic-release manages only the **patch** component.
 ### Changed
 
 - **Universal pinned to v5.18.0** (was v5.11.0). The `find_package` floor stays
-  at 5.8.0. The suite gives 2255 passed and 6 skipped (2254 before, plus one
-  new test), and gcc and clang both build. universal_dtypes still pins
-  v5.11.0. The interop copies encodings, not object layouts, so the two need not
-  match.
+  at 5.8.0. With universal_dtypes 3.0.0 built locally, also on v5.18.0, the
+  suite gives 2329 passed and 5 skipped. That is the 2254 from before, plus the
+  `build_info` test, plus the 74 universal_dtypes interop tests (61 that the
+  local venv had skipped, and 13 new ones). gcc and clang both build.
   - **Results: 4 of 915 change, all fixes.** The comparison covers 15 Universal
     dtypes: edge-value conversion, plus 10 trials each of conversion, `norm`
     (1 and 2), `dot`, `matmul` and `solve`.
@@ -737,6 +737,18 @@ against, and semantic-release manages only the **patch** component.
     - CMake stops with that reason on GCC < 12, rather than with pages of errors
       from Universal's headers.
     - Wheels are unaffected: cibuildwheel builds them in manylinux_2_28.
+  - **fp16's ±inf encoding changed, and interop with older universal_dtypes is
+    refused.** Universal v5.15.0 gave cfloat IEEE-754's `±inf` (universal#1895):
+    fp16 `0x7c00` was NaN and is now +inf, and +inf was `0x7ffe`. Values are
+    unchanged, and so is the mixed-precision arithmetic, but the bits mean
+    different things on either side of v5.15.0.
+    - `mtl5.vector()`/`mtl5.matrix()` of a universal_dtypes fp16 array, and
+      `.to_universal()` on fp16, raise `TypeError` when this build and
+      universal_dtypes were built on opposite sides of v5.15.0. When either
+      version is unknown, they proceed as before.
+    - The `universal` and `all` extras now require `universal_dtypes>=3.0`, the
+      first release on Universal v5.18.0. Before it, CI's ecosystem job, against
+      universal_dtypes 2.5.1, failed `test_every_pattern_decodes_alike[fp16]`.
   - **`mtl5.build_info()["universal"]`** reports the Universal release the
     build used, found or fetched, as major.minor.patch, or `"unknown"`.
     Universal's headers carry no version macro, so CMake passes it in.

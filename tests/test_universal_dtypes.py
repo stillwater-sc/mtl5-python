@@ -204,3 +204,57 @@ class TestUnsupportedDtypesAreRefused:
     def test_fp8_and_cfloat32_have_no_to_universal(self):
         assert not hasattr(mtl5.DenseVector_fp8, "to_universal")
         assert not hasattr(mtl5.DenseVector_cfloat32, "to_universal")
+
+
+class TestEncodingChangeIsRefused:
+    """Universal v5.15.0 changed cfloat's +-inf encoding (universal#1895), so
+    fp16 bits must not cross between builds on opposite sides of it. The pairs
+    are simulated: a real mismatch needs two builds."""
+
+    @pytest.fixture
+    def releases(self, monkeypatch):
+        from mtl5 import _universal_interop as ui
+
+        def use(ours, theirs):
+            monkeypatch.setattr(ui, "_universal_releases", lambda: (ours, theirs))
+
+        return use
+
+    @pytest.mark.parametrize("ours,theirs", [((5, 18), (5, 11)), ((5, 14), (5, 15))])
+    def test_fp16_across_the_change_is_refused(self, releases, ours, theirs):
+        a = np.array([1.0, np.inf], dtype=ud.fp16)
+        v = mtl5.vector(a)  # built before the pair is swapped in
+        releases(ours, theirs)
+        with pytest.raises(TypeError, match="Universal 5.15 changed the fp16 encoding"):
+            mtl5.vector(a)
+        with pytest.raises(TypeError, match="Upgrade universal_dtypes to 3.0"):
+            v.to_universal()
+
+    @pytest.mark.parametrize(
+        "ours,theirs", [((5, 18), (5, 18)), ((5, 14), (5, 11)), ((5, 18), None), (None, (5, 11))]
+    )
+    def test_fp16_on_one_side_or_unknown_is_allowed(self, releases, ours, theirs):
+        releases(ours, theirs)
+        a = np.array([1.0, np.inf], dtype=ud.fp16)
+        assert _bits(mtl5.vector(a).to_universal()).tolist() == _bits(a).tolist()
+
+    def test_other_formats_are_unaffected(self, releases):
+        releases((5, 18), (5, 11))
+        a = np.array([1.0, 2.5], dtype=ud.posit16)
+        assert _bits(mtl5.vector(a).to_universal()).tolist() == _bits(a).tolist()
+
+    @pytest.mark.parametrize(
+        "text,want",
+        [
+            ("5.18.0", (5, 18)),
+            ("v5.11.0", (5, 11)),
+            ("5.11.0 (found package)", (5, 11)),
+            ("unknown", None),
+            ("unknown (found package)", None),
+            (None, None),
+        ],
+    )
+    def test_version_parsing(self, text, want):
+        from mtl5 import _universal_interop as ui
+
+        assert ui._major_minor(text) == want
