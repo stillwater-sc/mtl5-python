@@ -149,6 +149,22 @@ class TestOtherInputIsUnchanged:
         with pytest.raises(TypeError, match="got int64"):
             mtl5.solve(A=A.astype(np.int64), b=B)
 
+    def test_a_mixed_pair_by_keyword_goes_to_float64(self):
+        """The pair is found by name too, not only by position."""
+        A32, B32 = A.astype(np.float32), B.astype(np.float32)
+        for call in (
+            lambda: mtl5.solve(A=A32, b=B),
+            lambda: mtl5.solve(A32, b=B),
+            lambda: mtl5.solve(b=B32, A=A),
+        ):
+            assert call().dtype == np.float64
+        assert mtl5.matmul(A=A32, B=A).dtype == "f64"
+        assert mtl5.matmul(A32, B=A).dtype == "f64"
+        x = np.repeat(np.array([1.0 + EPS, 1.0]), 2)[::2]
+        assert mtl5.dot(a=x.astype(np.float32), b=x) == mtl5.dot(
+            x.astype(np.float32).astype(np.float64), x
+        )
+
     def test_a_list_is_still_refused(self):
         with pytest.raises(TypeError):
             mtl5.solve(A.tolist(), B.tolist())

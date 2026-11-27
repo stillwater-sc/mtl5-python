@@ -506,33 +506,46 @@ def _dense_array(name: str, a):
     return _np.ascontiguousarray(a)
 
 
-def _dense_arrays(name: str, args, kwargs):
-    args = [_dense_array(name, a) for a in args]
-    kwargs = {k: _dense_array(name, v) for k, v in kwargs.items()}
-    if len(args) == 2 and not kwargs:
-        args = list(_common_float(*args))
-    return args, kwargs
+def _operands(names, args, kwargs):
+    """The leading operands, positional or by keyword, in parameter order, and
+    the keywords that remain. A keyword whose earlier operands are missing is
+    left where it is, for the binding to report."""
+    vals, kwargs = list(args), dict(kwargs)
+    for n in names[len(vals) :]:
+        if n not in kwargs:
+            break
+        vals.append(kwargs.pop(n))
+    return vals, kwargs
 
 
-def _refusing_narrowing(fn):
-    """fn, with its NumPy arguments checked and made contiguous first."""
+def _promote_pair(vals, names):
+    if len(names) == 2 and len(vals) >= 2:
+        vals[:2] = _common_float(vals[0], vals[1])
+    return vals
+
+
+def _refusing_narrowing(fn, *names):
+    """fn, with its NumPy arguments checked and made contiguous first, and a
+    float32/float64 pair of operands, `names`, taken to float64."""
     import functools
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        args, kwargs = _dense_arrays(fn.__name__, args, kwargs)
-        return fn(*args, **kwargs)
+        vals, kwargs = _operands(names, args, kwargs)
+        vals = [_dense_array(fn.__name__, a) for a in vals]
+        kwargs = {k: _dense_array(fn.__name__, v) for k, v in kwargs.items()}
+        return fn(*_promote_pair(vals, names), **kwargs)
 
     return wrapper
 
 
-solve = _refusing_narrowing(solve)
-inv = _refusing_narrowing(inv)
-lu = _refusing_narrowing(lu)
-matmul = _refusing_narrowing(matmul)
+solve = _refusing_narrowing(solve, "A", "b")
+inv = _refusing_narrowing(inv, "A")
+lu = _refusing_narrowing(lu, "A")
+matmul = _refusing_narrowing(matmul, "A", "B")
 
 
-def _contiguous_floats(fn):
+def _contiguous_floats(fn, *names):
     """fn, with its floating and complex NumPy arguments made C-contiguous,
     dtype kept, and a float32/float64 pair taken to the wider type. norm and
     dot have integer overloads too (widening dot), so other dtypes pass
@@ -548,16 +561,15 @@ def _contiguous_floats(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        args = [fix(a) for a in args]
-        if len(args) == 2:
-            args = list(_common_float(*args))
-        return fn(*args, **{k: fix(v) for k, v in kwargs.items()})
+        vals, kwargs = _operands(names, args, kwargs)
+        vals = [fix(a) for a in vals]
+        return fn(*_promote_pair(vals, names), **{k: fix(v) for k, v in kwargs.items()})
 
     return wrapper
 
 
-norm = _contiguous_floats(norm)
-dot = _contiguous_floats(dot)
+norm = _contiguous_floats(norm, "x")
+dot = _contiguous_floats(dot, "a", "b")
 
 
 # Re-export det (avoids shadowing the builtin namespace)
