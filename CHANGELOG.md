@@ -15,6 +15,22 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Conditioning notebook** (`notebooks/conditioning.ipynb`, for #166). It is
+  the first of the matrix-property visualizations planned in #166, on the site
+  under "Test matrices". It compares eight number systems at three widths:
+  `fp16`, `posit16`, `takum16`, `f32`, `posit32`, `takum32`, `f64` and
+  `dd_cascade`.
+  - Each format's unit roundoff, measured.
+  - The five `randsvd` modes at the same κ.
+  - The noise floor that rounding to a format puts under a spectrum.
+  - The largest condition number each format can hold: two to three decades
+    above 1/u.
+  - Forward error against κ·u, and how the spectrum's shape changes the error
+    at a fixed κ.
+  - A precision-ladder heatmap of correct digits, by format and κ.
+  - Every matrix is seeded, and the whole notebook runs in about three
+    seconds.
+
 - **`takum16` element type** (for #166). The 16-bit takum,
   `takum<16,3,uint16_t>`, joins `takum32`. Number-system comparisons at 16 bits
   can then set the takum beside `posit16` and `fp16`. It is the linear takum,
