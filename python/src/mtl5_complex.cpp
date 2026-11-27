@@ -432,7 +432,9 @@ void register_complex_norms(nb::module_& m) {
         if (ord == 2) return static_cast<double>(mtl::frobenius_norm(A.mat));
         return static_cast<double>(mtl::infinity_norm(A.mat));
     }, "A"_a, "ord"_a = 2,
-       "Matrix norm. 1 = max column sum, 2 = Frobenius, -1 = max row sum.");
+       "Matrix norm. 1 = max column sum, 2 = Frobenius, -1 = max row sum.\n\n"
+       "ord=2 is the Frobenius norm, np.linalg.norm(A, 'fro'), not NumPy's\n"
+       "np.linalg.norm(A, 2), the spectral norm.");
 
     m.def("frobenius_norm", [](const MatrixView<T>& A) -> double {
         nogil guard;

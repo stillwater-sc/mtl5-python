@@ -381,6 +381,30 @@ void register_native_norm_overload(nb::module_& m) {
     }, "x"_a, "ord"_a = 2);
 }
 
+// Matrix norms for real f32/f64 matrices, with the complex overloads' semantics
+// (mtl5_complex.cpp). ord = 2 is the Frobenius norm, as MTL5's matrix two_norm
+// is, not NumPy's spectral norm: that is mtl5.svdvals(A)[0].
+template <typename T>
+    requires std::is_floating_point_v<T>
+void register_native_matrix_norms(nb::module_& m) {
+    m.def("norm", [](const MatrixView<T>& A, int ord) -> double {
+        if (ord != 1 && ord != 2 && ord != -1)
+            throw std::invalid_argument("ord must be 1, 2, or -1 (infinity)");
+        nogil guard;
+        if (ord == 1) return static_cast<double>(mtl::one_norm(A.mat));
+        if (ord == 2) return static_cast<double>(mtl::frobenius_norm(A.mat));
+        return static_cast<double>(mtl::infinity_norm(A.mat));
+    }, "A"_a, "ord"_a = 2,
+       "Matrix norm. 1 = max column sum, 2 = Frobenius, -1 = max row sum.\n\n"
+       "ord=2 is the Frobenius norm, np.linalg.norm(A, 'fro'), not NumPy's\n"
+       "np.linalg.norm(A, 2), the spectral norm. For that, use mtl5.svdvals(A)[0].");
+
+    m.def("frobenius_norm", [](const MatrixView<T>& A) -> double {
+        nogil guard;
+        return static_cast<double>(mtl::frobenius_norm(A.mat));
+    }, "A"_a, "Frobenius norm, sqrt(sum a_ij^2).");
+}
+
 template <typename T>
     requires std::is_arithmetic_v<T>
 void register_native_dot_overload(nb::module_& m) {
@@ -409,6 +433,14 @@ void register_native_dot_overload(nb::module_& m) {
 
 // ---------------------------------------------------------------------------
 // Solve for native types — accepts both ndarray and VectorView/MatrixView
+//
+// The ndarray arguments of solve, matmul, det, inv, lu and cholesky are
+// `noconvert` (#152). Otherwise nanobind's second, converting pass hands an
+// integer, float16 or non-contiguous array to the first overload that accepts
+// a cast, the float32 one, and a float64 array came back in single precision.
+// mtl5/__init__.py checks the input first: any layout goes to C order with
+// the dtype kept, and an integer or float16 array is refused with the cast to
+// make, as the factorizations refuse it.
 // ---------------------------------------------------------------------------
 template <typename T>
     requires std::is_floating_point_v<T>
@@ -453,7 +485,7 @@ void register_native_solve(nb::module_& m) {
         std::size_t shape[1] = { n };
         nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<T*>(p); });
         return nb::ndarray<nb::numpy, T, nb::ndim<1>>(buf, 1, shape, owner);
-    }, "A"_a, "b"_a);
+    }, nb::arg("A").noconvert(), nb::arg("b").noconvert());
 
     // VectorView/MatrixView overload
     m.def("solve", [](const MatrixView<T>& A_mv, const VectorView<T>& b_vv) {
@@ -600,7 +632,7 @@ void register_native_dense_ops(nb::module_& m) {
             mtl::mult(A, B, C);
         }
         return MV(std::move(C));
-    }, "A"_a, "B"_a);
+    }, nb::arg("A").noconvert(), nb::arg("B").noconvert());
 
     // matrix-vector multiplication
     m.def("matvec", [](const MV& A_mv, const VV& x_vv) {
@@ -662,7 +694,7 @@ void register_native_dense_ops(nb::module_& m) {
             throw std::invalid_argument("det: A must be square");
         nogil guard;
         return compute_det(copy_ndarray_to_dense<T>(A_np));
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 
     // -- inv (matrix inverse) ---------------------------------------------
     m.def("inv", [](const MV& A_mv) {
@@ -688,7 +720,7 @@ void register_native_dense_ops(nb::module_& m) {
             Ainv = mtl::inv(A);
         }
         return MV(std::move(Ainv));
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 
     // -- LU factorization object ------------------------------------------
     using LUF = LUFactor<T>;
@@ -741,7 +773,7 @@ void register_native_dense_ops(nb::module_& m) {
         nogil guard;
         Mat A = copy_ndarray_to_dense<T>(A_np);
         return LUF(A);
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 
     // -- Cholesky factorization object ------------------------------------
     using CF = CholeskyFactor<T>;
@@ -797,7 +829,7 @@ void register_native_dense_ops(nb::module_& m) {
         nogil guard;
         Mat A = copy_ndarray_to_dense<T>(A_np);
         return CF(A);
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 }
 
 // ===========================================================================
@@ -1211,6 +1243,7 @@ void register_native_with_solve(nb::module_& m) {
     register_native<T>(m);
     register_native_solve<T>(m);
     register_native_dense_ops<T>(m);
+    register_native_matrix_norms<T>(m);
 }
 
 template <typename T>

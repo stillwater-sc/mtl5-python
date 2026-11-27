@@ -494,6 +494,44 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **NumPy input to the dense solvers no longer drops to float32** (#152).
+  When an array's dtype or layout matched no overload exactly, nanobind's
+  converting pass gave it to the first overload that accepts a cast, the
+  float32 one. An int64 matrix came back in float32. So did a float64 matrix
+  in Fortran order, a transposed or strided one, or one paired with a
+  float32 `b`. None of these warned.
+  - **Layout:** `solve`, `inv`, `lu`, `cholesky`, `matmul` and `det` make
+    any layout C-contiguous with the dtype kept, so float64 stays float64.
+  - **Mixed pair:** a float32/float64 pair goes to float64, which is exact.
+  - **`norm` and `dot`:** a strided float vector keeps its dtype the same
+    way. Their integer overloads (widening dot) are unchanged.
+  - **Behaviour change:** an integer, bool or float16 array is now refused
+    with a `TypeError` that names the cast (`a.astype(np.float64)`). That is
+    how `qr`, `lq`, `ldlt` and `bunch_kaufman` already treat such arrays.
+    `cholesky` used to differ, accepting an int64 array silently in float32;
+    it now follows the same rule. A universal_dtypes array is pointed at
+    `mtl5.matrix(a)`.
+  - **C++:** the ndarray parameters of these six are `noconvert`, so a direct
+    `_core` call raises instead of narrowing.
+  - Tests cover every entry point with int64, int32, uint8, bool and float16
+    input, and with Fortran-order and strided float64. 52 of the 62 fail
+    before the fix.
+
+- **`frobenius_norm` and the matrix `norm` take real matrices** (#151). They
+  were bound only for `DenseMatrix_c64` and `DenseMatrix_c128`, so a float32
+  or float64 matrix raised `TypeError`. The only route for a real matrix was
+  `mtl5.mixed.frobenius_norm`.
+  - Both now take `DenseMatrix_f32` and `DenseMatrix_f64`, with the complex
+    overloads' semantics: `ord` 1 is the largest column sum, 2 the Frobenius
+    norm, and −1 the largest row sum.
+  - `ord=2` stays the Frobenius norm, as MTL5's matrix `two_norm` is. That
+    is not NumPy's: `np.linalg.norm(A, 2)` is the spectral norm, which is
+    `mtl5.svdvals(A)[0]`. Both docstrings say so.
+  - The PCA notebook uses `mtl5.frobenius_norm` in place of
+    `np.linalg.norm(·, "fro")`.
+  - Tests compare against `np.linalg.norm` for each `ord`, in both
+    precisions, and pin the difference from the spectral norm.
+
 - **Threshold pivoting works under a fill-reducing ordering** (MTL5 pin
   v5.24.0 → v5.24.1, MTL5 #917). `splu`, `supernodal_lu` and `klu` preferred
   the wrong row when keeping a pivot on the diagonal. Column `k` of the
@@ -1665,6 +1703,54 @@ policy (minor follows the MTL5 release built against), not new surface.
   ([#57](https://github.com/stillwater-sc/mtl5-python/pull/57))
 
 <!-- version list -->
+
+## v5.25.10 (2026-11-27)
+
+### Bug Fixes
+
+- **norms**: Bind frobenius_norm and the matrix norm for real matrices
+  ([#161](https://github.com/stillwater-sc/mtl5-python/pull/161),
+  [`f1fff32`](https://github.com/stillwater-sc/mtl5-python/commit/f1fff32bb7cf02395b2d8e6bae11882a46bbfe7e))
+
+### Documentation
+
+- **pca**: The From C++ row passes mtl5.matrix(Xc), as the cell does
+  ([#161](https://github.com/stillwater-sc/mtl5-python/pull/161),
+  [`f1fff32`](https://github.com/stillwater-sc/mtl5-python/commit/f1fff32bb7cf02395b2d8e6bae11882a46bbfe7e))
+
+
+## v5.25.9 (2026-11-27)
+
+### Bug Fixes
+
+- **build**: Require GCC 12, as documented, and build CI's gcc jobs with it
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **interop**: Refuse fp16 transport across Universal 5.15's encoding change
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **tests**: Build the refusal test's vector under a compatible simulated pair
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **tests**: Pick the posit32/takum32 band from the Universal release
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+### Chores
+
+- **deps**: Bump Universal to v5.18.0
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+### Documentation
+
+- Session log for 2026-11-26; CHANGELOG cross-reference to mtl5#953
+  ([#159](https://github.com/stillwater-sc/mtl5-python/pull/159),
+  [`d428f29`](https://github.com/stillwater-sc/mtl5-python/commit/d428f29e2735cd61c447428182a2bf11870bafab))
+
 
 ## v5.25.8 (2026-11-27)
 

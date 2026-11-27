@@ -305,26 +305,18 @@ class TestAcrossNumberSystems:
         pointing an unsupported NumPy dtype at convert() is always the useful
         answer.
 
-        cholesky is excluded because it is not dispatched through the Python
-        layer at all — it is bound straight from _core, so nanobind implicitly
-        converts an int64 array to float32 and it never reaches this message.
-        Long-standing behaviour, unrelated to #73, but it does mean
-        `mtl5.cholesky(int_array)` silently picks a precision where the other
-        four raise.
+        cholesky is excluded: its NumPy input is checked by the same rule as
+        solve, inv, lu, matmul and det (#152), which names the cast to make.
         """
         for fn in (mtl5.ldlt, mtl5.qr, mtl5.lq, mtl5.bunch_kaufman):
             with pytest.raises(TypeError, match="convert"):
                 fn(np.eye(3, dtype=np.int64))
 
-    def test_cholesky_silently_accepts_an_integer_array(self):
-        """Pinning the asymmetry above rather than leaving it as folklore.
-
-        Asserted on the class rather than a `.dtype` property, because the
-        native CholeskyFactor does not carry one — only the Universal
-        instantiations do. A second small inconsistency in the same corner.
-        """
-        fac = mtl5.cholesky(np.eye(3, dtype=np.int64))
-        assert type(fac).__name__ == "CholeskyFactor_f32"
+    def test_cholesky_refuses_an_integer_array(self):
+        """It used to accept one silently, in float32, where the other four
+        raise: nanobind gave the int64 array to the float32 overload (#152)."""
+        with pytest.raises(TypeError, match=r"^cholesky: .*got int64"):
+            mtl5.cholesky(np.eye(3, dtype=np.int64))
 
     def test_float_only_hint_survives_for_a_factorization_without_universal_support(self):
         """The other branch of that hint no longer has a caller.
