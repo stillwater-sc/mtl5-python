@@ -196,6 +196,24 @@ struct VectorView {
 };
 
 // ===========================================================================
+// lower_factor -- the triangular factor of an in-place Cholesky or LDL^T
+//
+// cholesky_factor, cholesky_h_factor and ldlt_factor overwrite the lower
+// triangle and leave the strict upper triangle as it was, holding A's entries.
+// A caller asking for L wants those zeroed, and for LDL^T the unit diagonal
+// restored (the stored diagonal is D).
+// ===========================================================================
+template <typename T>
+mtl::mat::dense2D<T> lower_factor(const mtl::mat::dense2D<T>& F, bool unit_diagonal) {
+    const std::size_t n = F.num_rows();
+    mtl::mat::dense2D<T> L(n, n);
+    for (std::size_t r = 0; r < n; ++r)
+        for (std::size_t c = 0; c < n; ++c)
+            L(r, c) = c < r ? F(r, c) : (c == r ? (unit_diagonal ? T(1) : F(r, c)) : T(0));
+    return L;
+}
+
+// ===========================================================================
 // MatrixView<T> — zero-copy wrapper around dense2D<T>
 // ===========================================================================
 template <typename T>

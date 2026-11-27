@@ -15,6 +15,52 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Examples: numerical robustness and interop** (#147, PR 7 of 7). Three
+  notebooks under a new "Numerical robustness and interop" caption, porting
+  MTL5's `accurate_sum_dot`, `ukf_cholesky_vs_ldlt`, `ukf_bearing_only` and
+  `zero_copy/*`. With them, every MTL5 example is ported, or listed in the
+  index with the reason it isn't.
+  - **Accurate sum and dot product.** Section 6 of Ogita, Rump and Oishi:
+    - Dot2 and DotK (K up to 7) against the condition number, at n = 100 and
+      n = 2000, and in float32.
+    - Every error is measured against an exact reference: each product is
+      split exactly, and `math.fsum` sums the parts.
+    - The bounds (5.8) and (5.11) are checked on all 2200 samples, on the
+      uncapped errors. The exact accumulator is checked to round correctly.
+    - Table 6.2's correct digits of summation, and the cost of each algorithm.
+  - **UKF sigma points: Cholesky against LDLᵀ.** It tests the C++ examples'
+    claim, that Cholesky's square roots lose precision on an ill-conditioned
+    covariance and make the filter diverge, and finds it doesn't hold:
+    - Both factorizations are backward stable on Hilbert matrices up to cond
+      1e16.
+    - The only difference is an indefinite matrix: Cholesky raises, and LDLᵀ
+      reports the inertia.
+    - Both examples' filters give the same estimates with either
+      factorization.
+    - The float32 bearing-only filter fails at the same step with both
+      factorizations. The cause is the UKF weights at alpha = 1e-3: W₀ ≈ −10⁶,
+      so the weighted means and covariances cancel. With alpha = 1, both
+      float32 filters run and match float64.
+    - A sigma point's bearing more than π from the central one's is moved by
+      2π before the sums, not only the innovation as in the C++. Both
+      examples' targets start near the `atan2` branch cut.
+  - **Zero copy.**
+    - The rules of a view over NumPy memory, each checked: write-through, a
+      `TypeError` instead of a hidden copy, explicit copies, aliasing, strided
+      arrays through `mtl5.array`, and lifetime.
+    - An RK4 integrator whose callback writes the integrator's own buffer with
+      `mtl5.symv`.
+    - Frames corrected in a shared two-slot region by a producer thread and a
+      processing thread.
+  - **`.L` on `CholeskyFactor` and `LDLTFactor`.** It is on `CholeskyFactor`
+    for float32/float64, complex (`A = L Lᴴ`) and the Universal types, and on
+    `LDLTFactor` for float32/float64 and the Universal types (complex LDLᵀ has
+    no factor object). It returns the triangular factor
+    as a new matrix, with the strict upper triangle zeroed, and for LDLᵀ the
+    unit diagonal restored (D stays `.diagonal()`). MTL5 factors in place and
+    leaves A's entries above the diagonal, so the stored matrix wasn't usable
+    as L. The UKF notebook's sigma points need it.
+
 - **Accurate sums and dot products** (#147, PR 6 of 7). Bindings for
   MTL5's implementation of Ogita, Rump and Oishi, "Accurate sum and dot
   product" (2005), for float32 and float64.

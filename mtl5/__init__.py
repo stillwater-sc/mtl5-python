@@ -455,8 +455,9 @@ def ldlt(A):
     """LDL^T factorization of a symmetric matrix.
 
     Takes no square roots, so unlike `cholesky` it tolerates an indefinite
-    matrix; `.diagonal()` returns D, whose signs give the inertia. It does not
-    pivot, so a zero pivot raises.
+    matrix; `.diagonal()` returns D, whose signs give the inertia, and `.L` the
+    unit lower triangular factor, as a new matrix. It does not pivot, so a zero
+    pivot raises.
 
     Available for float32/float64 and all ten Universal dtypes, which is what
     makes a Cholesky-versus-LDL^T comparison across number systems possible.
@@ -486,7 +487,9 @@ def cholesky(A):  # noqa: F811
 
     Accepts float32/float64 matrices and NumPy arrays, and — since Phase 3 —
     the Universal dtypes as well, so it can be compared against `ldlt` in the
-    same precision.
+    same precision. `.solve(b)` solves with the factor, and `.L` returns L as a
+    new matrix. For complex input the factorization is A = L L^H, so
+    reconstruct with `L @ L.conj().T`.
     """
     dt = getattr(A, "dtype", None)
     if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
