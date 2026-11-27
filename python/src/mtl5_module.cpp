@@ -1702,6 +1702,13 @@ NB_MODULE(_core, m) {
         d["highway_simd"]     = has_highway;
         d["kpu"]              = has_kpu;
         d["zlib"]             = has_zlib;
+        // The Universal release this build used, found or fetched. Its
+        // headers carry no version macro, so CMake passes it in.
+#ifdef MTL5PY_UNIVERSAL_VERSION
+        d["universal"]        = MTL5PY_UNIVERSAL_VERSION;
+#else
+        d["universal"]        = "unknown";
+#endif
         // The ISA this binary was actually COMPILED for, read from the
         // compiler's own predefined macros (MTL5 #443).
         //

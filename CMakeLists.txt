@@ -197,8 +197,22 @@ endif()
 #             quire<double> (universal#1703), which accumulator='quire' on
 #             f32/f64 needs. Before it those two quires are not MTL5
 #             accumulators.
+#
+# MTL5PY_UNIVERSAL_VERSION records which Universal the build used, found or
+# fetched, for mtl5.build_info()["universal"]. Universal's headers carry no
+# version macro, and its speed differs by release: the benchmark guard in
+# tests/test_benchmark_regression.py picks its band from this.
+set(MTL5PY_UNIVERSAL_TAG v5.18.0)
 find_package(universal 5.8.0 QUIET)
-if(NOT universal_FOUND)
+if(universal_FOUND)
+    # An install made from a git checkout can append a commit
+    # (5.11.0.c75b4aca5); keep major.minor.patch.
+    string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MTL5PY_UNIVERSAL_VERSION "${universal_VERSION}")
+    if(MTL5PY_UNIVERSAL_VERSION STREQUAL "")
+        set(MTL5PY_UNIVERSAL_VERSION "unknown")
+    endif()
+else()
+    string(REGEX REPLACE "^v" "" MTL5PY_UNIVERSAL_VERSION "${MTL5PY_UNIVERSAL_TAG}")
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_DEMONSTRATION OFF CACHE BOOL "" FORCE)
@@ -216,7 +230,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        v5.18.0
+        GIT_TAG        ${MTL5PY_UNIVERSAL_TAG}
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )

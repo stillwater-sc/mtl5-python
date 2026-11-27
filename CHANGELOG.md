@@ -701,8 +701,8 @@ against, and semantic-release manages only the **patch** component.
 ### Changed
 
 - **Universal pinned to v5.18.0** (was v5.11.0). The `find_package` floor stays
-  at 5.8.0, and no binding source changes. The suite gives 2254 passed and 6
-  skipped, as before, and gcc and clang both build. universal_dtypes still pins
+  at 5.8.0. The suite gives 2255 passed and 6 skipped (2254 before, plus one
+  new test), and gcc and clang both build. universal_dtypes still pins
   v5.11.0. The interop copies encodings, not object layouts, so the two need not
   match.
   - **Results: 4 of 915 change, all fixes.** The comparison covers 15 Universal
@@ -717,9 +717,18 @@ against, and semantic-release manages only the **patch** component.
   - **Emulated arithmetic is faster.** On a 64×64 multiply-add loop, posit32 is
     6.9x faster and takum32 2.4x faster than on v5.11.0, with identical
     results. On `gemm` at n = 64, posit32/takum32 goes from 9.2–10.1 to
-    1.94–1.98. So the benchmark guard's band moves from 3–30x to 0.65–6x, the
-    same 3x margin either side, and the test is renamed
-    `test_posit32_costs_about_twice_takum32`.
+    1.94–1.98.
+  - **The benchmark guard picks its band from the Universal release.**
+    `find_package` still accepts an installed 5.8.0 or later, where the old
+    ratio holds.
+    - On v5.18.0 and later, the band is 0.65–6x, the same 3x margin either side
+      as before.
+    - Older or unknown builds get 0.65–30x, the union with the v5.11.0 band.
+      Releases 5.12–5.17 were not measured.
+    - The test is renamed `test_posit32_costs_about_twice_takum32`.
+  - **`mtl5.build_info()["universal"]`** reports the Universal release the
+    build used, found or fetched, as major.minor.patch, or `"unknown"`.
+    Universal's headers carry no version macro, so CMake passes it in.
 
 ### Changed
 

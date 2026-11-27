@@ -44,10 +44,13 @@ tying up a worker for minutes.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
 import pytest
+
+import mtl5
 
 BENCH = Path(__file__).resolve().parent.parent / "benchmarks" / "bench_blas.py"
 
@@ -135,20 +138,34 @@ def test_the_baseline_escaped_per_call_overhead(sweep):
     )
 
 
+def _universal_at_least(major, minor):
+    v = mtl5.build_info().get("universal", "unknown")
+    m = re.fullmatch(r"(\d+)\.(\d+)\.\d+", v)
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (major, minor)
+
+
 def test_posit32_costs_about_twice_takum32(sweep):
     """The tightest guard, because both operands are emulated: they pay the
     same per-call overhead and run the same generic kernel, so only the number
     systems' arithmetic differs.
 
-    Measured 1.94-1.98 across four runs on Universal v5.18.0, and the band is
-    about 3x either side of that. On v5.11.0 it was 9.2-10.1: v5.18.0 made
-    posit32 arithmetic about 6.9x faster and takum32 about 2.4x faster (a
-    64x64 multiply-add loop against each Universal tag), with identical
-    results. A Universal bump that moves the ratio out of the band needs that
-    kind of check before the band moves."""
+    The ratio depends on the Universal release, which an installed Universal
+    (find_package accepts 5.8.0 and later) can make older than the pin:
+    - v5.18.0: measured 1.94-1.98 across four runs, and the band is about 3x
+      either side of that. v5.18.0 made posit32 arithmetic about 6.9x faster
+      and takum32 about 2.4x faster than v5.11.0 (a 64x64 multiply-add loop
+      against each tag), with identical results.
+    - v5.11.0: measured 9.2-10.1, guarded by 3-30x.
+    - Releases 5.12-5.17 were not measured, so builds before v5.18.0, or of
+      unknown version, get the union of the two bands.
+    A Universal bump that moves the ratio out of its band needs that kind of
+    check before the band moves."""
     r = _seconds(sweep, "posit32") / _seconds(sweep, "takum32")
-    assert 0.65 < r < 6.0, (
-        f"posit32/takum32 = {r:.2f} on {KERNEL}, outside the 0.65-6x band. "
+    lo, hi = (0.65, 6.0) if _universal_at_least(5, 18) else (0.65, 30.0)
+    universal = mtl5.build_info().get("universal", "unknown")
+    assert lo < r < hi, (
+        f"posit32/takum32 = {r:.2f} on {KERNEL} with Universal {universal}, "
+        f"outside the {lo}-{hi}x band. "
         "Either a format changed cost class or one of them stopped using the "
         "path it used to."
     )
