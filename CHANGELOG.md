@@ -15,6 +15,21 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **`seed=` on the random generators** (#154). `randorth`, `randspd`,
+  `randsym` and `randsvd` drew from MTL5's non-deterministic engine, so every
+  call returned a different matrix. A notebook couldn't use them, and a
+  failure found on one couldn't be reproduced.
+  - Each now takes a keyword-only `seed`, an integer from 0 to 2⁶⁴ − 1, and
+    calls MTL5's seeded overload. MTL5 draws its seeded matrices portably
+    across compilers and standard libraries (MTL5 #844).
+  - `seed=None`, the default, keeps the fresh matrix on every call.
+  - `dtype=` rounds a seeded matrix like any other.
+  - Tests:
+    - the same seed gives the same matrix, bit for bit;
+    - different seeds differ, and no seed still draws afresh;
+    - a seeded matrix keeps its spectrum, orthogonality or condition number;
+    - a seed outside uint64 is refused.
+
 - **Examples: numerical robustness and interop** (#147, PR 7 of 7). Three
   notebooks under a new "Numerical robustness and interop" caption, porting
   MTL5's `accurate_sum_dot`, `ukf_cholesky_vs_ldlt`, `ukf_bearing_only` and

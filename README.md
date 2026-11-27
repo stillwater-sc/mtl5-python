@@ -333,6 +333,10 @@ Also `frank`, `pascal`, `wilkinson`, `rosser`, `magic`, `lehmer`, `lotkin`,
 `randorth`, `laplacian_1d`, `poisson2d`, and the published catalog via
 `testsuite_names()` / `testsuite_kappa(name)`.
 
+The random generators, `randorth`, `randspd`, `randsym` and `randsvd`, draw a
+fresh matrix on every call. Pass `seed=` for the same matrix every time:
+`g.randsym(4, [-5, -1, 2, 7], seed=42)`.
+
 Every dense generator takes `dtype=`, which is what makes them useful here:
 
 ```python
