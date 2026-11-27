@@ -25,7 +25,8 @@ against, and semantic-release manages only the **patch** component.
       n = 2000, and in float32.
     - Every error is measured against an exact reference: each product is
       split exactly, and `math.fsum` sums the parts.
-    - The bounds (5.8) and (5.11) are checked on all 2200 samples.
+    - The bounds (5.8) and (5.11) are checked on all 2200 samples, on the
+      uncapped errors. The exact accumulator is checked to round correctly.
     - Table 6.2's correct digits of summation, and the cost of each algorithm.
   - **UKF sigma points: Cholesky against LDLᵀ.** It tests the C++ examples'
     claim, that Cholesky's square roots lose precision on an ill-conditioned
@@ -36,9 +37,14 @@ against, and semantic-release manages only the **patch** component.
       reports the inertia.
     - Both examples' filters give the same estimates with either
       factorization.
-    - The float32 bearing-only filter fails at the same step with both. The
-      cause is the UKF weights at alpha = 1e-3: W₀ ≈ −10⁶, so the weighted
-      means cancel. With alpha = 1 it runs, with either factorization.
+    - In float32, the bearing-only filter breaks with both factorizations.
+      The C++ run fails at the same step with each, and here the two drift to
+      unrelated estimates. The cause is the UKF weights at alpha = 1e-3:
+      W₀ ≈ −10⁶, so the weighted means cancel and rounding decides the
+      result. With alpha = 1, both float32 filters match float64.
+    - The bearing is wrapped at the `atan2` branch cut in the sigma points,
+      not only in the innovation as in the C++. Both examples' targets start
+      near the cut.
   - **Zero copy.**
     - The rules of a view over NumPy memory, each checked: write-through, a
       `TypeError` instead of a hidden copy, explicit copies, aliasing, strided
@@ -47,8 +53,10 @@ against, and semantic-release manages only the **patch** component.
       `mtl5.symv`.
     - Frames corrected in a shared two-slot region by a producer thread and a
       processing thread.
-  - **`.L` on `CholeskyFactor` and `LDLTFactor`**, for every element type that
-    has them (float, complex and Universal). It returns the triangular factor
+  - **`.L` on `CholeskyFactor` and `LDLTFactor`.** It is on `CholeskyFactor`
+    for float32/float64, complex (`A = L Lᴴ`) and the Universal types, and on
+    `LDLTFactor` for float32/float64 and the Universal types (complex LDLᵀ has
+    no factor object). It returns the triangular factor
     as a new matrix, with the strict upper triangle zeroed, and for LDLᵀ the
     unit diagonal restored (D stays `.diagonal()`). MTL5 factors in place and
     leaves A's entries above the diagonal, so the stored matrix wasn't usable

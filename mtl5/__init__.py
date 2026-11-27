@@ -488,7 +488,8 @@ def cholesky(A):  # noqa: F811
     Accepts float32/float64 matrices and NumPy arrays, and — since Phase 3 —
     the Universal dtypes as well, so it can be compared against `ldlt` in the
     same precision. `.solve(b)` solves with the factor, and `.L` returns L as a
-    new matrix.
+    new matrix. For complex input the factorization is A = L L^H, so
+    reconstruct with `L @ L.conj().T`.
     """
     dt = getattr(A, "dtype", None)
     if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
