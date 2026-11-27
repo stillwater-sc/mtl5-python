@@ -1995,6 +1995,7 @@ NB_MODULE(_core, m) {
     register_universal<cfloat32>(m, "vector_cfloat32", "matrix_cfloat32");
 
     // Takum — tapered logarithmic
+    register_universal<takum16>(m, "vector_takum16", "matrix_takum16");
     register_universal<takum32>(m, "vector_takum32", "matrix_takum32");
 
     // Floating-point cascades — extended precision above float64

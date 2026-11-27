@@ -15,6 +15,20 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **`takum16` element type** (for #166). The 16-bit takum,
+  `takum<16,3,uint16_t>`, joins `takum32`. Number-system comparisons at 16 bits
+  can then set the tapered logarithmic format beside `posit16` and `fp16`.
+  - It gets the full set every Universal type has:
+    - `DenseVector_takum16` / `DenseMatrix_takum16` and the `vector_takum16` /
+      `matrix_takum16` factories;
+    - every dense factorization;
+    - `convert()` and `mtl5.dtypes()`;
+    - the mixed-precision operations (no quire, as for `takum32`).
+  - universal_dtypes' `takum16` arrays cross bit for bit. The test suite
+    checks all 65 536 encodings against universal_dtypes' own decoding.
+  - Accuracy is the same tier as `posit16`: a float64 round trip near 1 is
+    within 5.5e-4, and the factorization residual bounds are the same.
+
 - **`seed=` on the random generators** (#154). `randorth`, `randspd`,
   `randsym` and `randsvd` drew from MTL5's non-deterministic engine, so every
   call returned a different matrix. A notebook couldn't use them, and a

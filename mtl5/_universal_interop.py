@@ -45,6 +45,7 @@ SUPPORTED = (
     "fixpnt16",
     "lns16",
     "lns32",
+    "takum16",
     "takum32",
     "fp16",
     "dd_cascade",

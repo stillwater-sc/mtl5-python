@@ -106,8 +106,10 @@ using lns32 = sw::universal::lns<32, 16>;
 using cfloat32 = sw::universal::fp32;
 
 // Takum — a tapered logarithmic format. rbits=3 is the value the takum
-// reference uses, and uint32_t as the block type keeps a 32-bit value in a
-// single limb instead of the 4 the uint8_t default would take.
+// reference uses, and a block type as wide as the format keeps the value in a
+// single limb instead of the several the uint8_t default would take. These are
+// universal_dtypes' takum16 and takum32 exactly, so the bits interoperate.
+using takum16 = sw::universal::takum<16, 3, uint16_t>;
 using takum32 = sw::universal::takum<32, 3, uint32_t>;
 
 // Floating-point cascades: an unevaluated sum of 2/3/4 doubles, carrying
@@ -164,6 +166,7 @@ template <> constexpr const char* type_suffix<fixpnt16>(){ return "fixpnt16"; }
 template <> constexpr const char* type_suffix<lns16>()   { return "lns16"; }
 template <> constexpr const char* type_suffix<lns32>()   { return "lns32"; }
 template <> constexpr const char* type_suffix<cfloat32>(){ return "cfloat32"; }
+template <> constexpr const char* type_suffix<takum16>() { return "takum16"; }
 template <> constexpr const char* type_suffix<takum32>() { return "takum32"; }
 template <> constexpr const char* type_suffix<dd_cascade>() { return "dd_cascade"; }
 template <> constexpr const char* type_suffix<td_cascade>() { return "td_cascade"; }
