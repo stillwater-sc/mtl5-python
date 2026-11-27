@@ -381,6 +381,30 @@ void register_native_norm_overload(nb::module_& m) {
     }, "x"_a, "ord"_a = 2);
 }
 
+// Matrix norms for real f32/f64 matrices, with the complex overloads' semantics
+// (mtl5_complex.cpp). ord = 2 is the Frobenius norm, as MTL5's matrix two_norm
+// is, not NumPy's spectral norm: that is mtl5.svdvals(A)[0].
+template <typename T>
+    requires std::is_floating_point_v<T>
+void register_native_matrix_norms(nb::module_& m) {
+    m.def("norm", [](const MatrixView<T>& A, int ord) -> double {
+        if (ord != 1 && ord != 2 && ord != -1)
+            throw std::invalid_argument("ord must be 1, 2, or -1 (infinity)");
+        nogil guard;
+        if (ord == 1) return static_cast<double>(mtl::one_norm(A.mat));
+        if (ord == 2) return static_cast<double>(mtl::frobenius_norm(A.mat));
+        return static_cast<double>(mtl::infinity_norm(A.mat));
+    }, "A"_a, "ord"_a = 2,
+       "Matrix norm. 1 = max column sum, 2 = Frobenius, -1 = max row sum.\n\n"
+       "ord=2 is the Frobenius norm, np.linalg.norm(A, 'fro'), not NumPy's\n"
+       "np.linalg.norm(A, 2), the spectral norm. For that, use mtl5.svdvals(A)[0].");
+
+    m.def("frobenius_norm", [](const MatrixView<T>& A) -> double {
+        nogil guard;
+        return static_cast<double>(mtl::frobenius_norm(A.mat));
+    }, "A"_a, "Frobenius norm, sqrt(sum a_ij^2).");
+}
+
 template <typename T>
     requires std::is_arithmetic_v<T>
 void register_native_dot_overload(nb::module_& m) {
@@ -1211,6 +1235,7 @@ void register_native_with_solve(nb::module_& m) {
     register_native<T>(m);
     register_native_solve<T>(m);
     register_native_dense_ops<T>(m);
+    register_native_matrix_norms<T>(m);
 }
 
 template <typename T>

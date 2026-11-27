@@ -479,6 +479,21 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **`frobenius_norm` and the matrix `norm` take real matrices** (#151). They
+  were bound only for `DenseMatrix_c64` and `DenseMatrix_c128`, so a float32
+  or float64 matrix raised `TypeError`. The only route for a real matrix was
+  `mtl5.mixed.frobenius_norm`.
+  - Both now take `DenseMatrix_f32` and `DenseMatrix_f64`, with the complex
+    overloads' semantics: `ord` 1 is the largest column sum, 2 the Frobenius
+    norm, and −1 the largest row sum.
+  - `ord=2` stays the Frobenius norm, as MTL5's matrix `two_norm` is. That
+    is not NumPy's: `np.linalg.norm(A, 2)` is the spectral norm, which is
+    `mtl5.svdvals(A)[0]`. Both docstrings say so.
+  - The PCA notebook uses `mtl5.frobenius_norm` in place of
+    `np.linalg.norm(·, "fro")`.
+  - Tests compare against `np.linalg.norm` for each `ord`, in both
+    precisions, and pin the difference from the spectral norm.
+
 - **Threshold pivoting works under a fill-reducing ordering** (MTL5 pin
   v5.24.0 → v5.24.1, MTL5 #917). `splu`, `supernodal_lu` and `klu` preferred
   the wrong row when keeping a pivot on the diagonal. Column `k` of the
