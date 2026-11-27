@@ -60,6 +60,14 @@ else()
 endif()
 target_compile_definitions(_core PRIVATE MTL5PY_VERSION="${_MTL5PY_VERSION}")
 
+# The Universal release this build used (set in the top-level CMakeLists.txt),
+# reported as mtl5.build_info()["universal"]. "unknown" if this directory is
+# configured without it.
+if(NOT DEFINED MTL5PY_UNIVERSAL_VERSION OR "${MTL5PY_UNIVERSAL_VERSION}" STREQUAL "")
+    set(MTL5PY_UNIVERSAL_VERSION "unknown")
+endif()
+target_compile_definitions(_core PRIVATE MTL5PY_UNIVERSAL_VERSION="${MTL5PY_UNIVERSAL_VERSION}")
+
 # MTL5 exports MTL5_NATIVE_FAST_GEMM through a $<BUILD_INTERFACE:...> guard, so
 # it propagates when MTL5 is consumed via FetchContent but NOT when it is found
 # as an installed package. The macro only gates header code — no library, no ISA

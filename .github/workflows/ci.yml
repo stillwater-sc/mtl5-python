@@ -61,6 +61,16 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # GCC 12, the documented minimum (README, getting-started), not the
+      # runner's default GCC 11.4: Universal 5.13 and later use constexpr
+      # std::vector, which GCC 11's libstdc++ lacks.
+      - name: Use GCC 12 (Linux)
+        if: matrix.compiler == 'gcc'
+        run: |
+          command -v g++-12 || { sudo apt-get update && sudo apt-get install -y g++-12; }
+          echo "CC=gcc-12" >> $GITHUB_ENV
+          echo "CXX=g++-12" >> $GITHUB_ENV
+
       - name: Set up Clang (Linux)
         if: matrix.compiler == 'clang'
         run: |
@@ -112,6 +122,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # GCC 12, the documented minimum (README, getting-started), not the
+      # runner's default GCC 11.4: Universal 5.13 and later use constexpr
+      # std::vector, which GCC 11's libstdc++ lacks.
+      - name: Use GCC 12
+        run: |
+          command -v g++-12 || { sudo apt-get update && sudo apt-get install -y g++-12; }
+          echo "CC=gcc-12" >> $GITHUB_ENV
+          echo "CXX=g++-12" >> $GITHUB_ENV
       - name: Install with all optional dependencies
         run: |
           pip install ".[dev,notebooks,bench]" -v
@@ -147,6 +165,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # GCC 12, the documented minimum (README, getting-started), not the
+      # runner's default GCC 11.4: Universal 5.13 and later use constexpr
+      # std::vector, which GCC 11's libstdc++ lacks.
+      - name: Use GCC 12
+        run: |
+          command -v g++-12 || { sudo apt-get update && sudo apt-get install -y g++-12; }
+          echo "CC=gcc-12" >> $GITHUB_ENV
+          echo "CXX=g++-12" >> $GITHUB_ENV
       - name: Install zlib headers
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
       - name: Install package with zlib enabled
@@ -178,7 +204,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - compiler: g++
+          # GCC 12, the documented minimum: see "Use GCC 12" above.
+          - compiler: g++-12
             name: gcc
           - compiler: clang++
             name: clang
@@ -186,6 +213,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Make sure g++-12 is installed
+        if: matrix.name == 'gcc'
+        run: command -v g++-12 || { sudo apt-get update && sudo apt-get install -y g++-12; }
       - name: Configure (${{ matrix.name }})
         run: >
           cmake -S . -B build_apps

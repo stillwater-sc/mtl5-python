@@ -4,6 +4,16 @@ project(mtl5_python CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# GCC 12 is the documented minimum (README, docs/getting-started.md). GCC 11
+# cannot compile Universal 5.13 and later, whose constexpr code constructs a
+# std::vector, so fail here with the reason rather than with pages of errors
+# from inside Universal's headers.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 12)
+    message(FATAL_ERROR
+        "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old: mtl5-python needs GCC 12 or later "
+        "(or Clang 15+, MSVC 2022). Point CXX at a newer compiler, e.g. CXX=g++-12.")
+endif()
+
 # MSVC: report correct __cplusplus value so that C++20 headers like <bit>
 # are properly detected by Universal's bit_cast.hpp
 if(MSVC)
@@ -197,8 +207,22 @@ endif()
 #             quire<double> (universal#1703), which accumulator='quire' on
 #             f32/f64 needs. Before it those two quires are not MTL5
 #             accumulators.
+#
+# MTL5PY_UNIVERSAL_VERSION records which Universal the build used, found or
+# fetched, for mtl5.build_info()["universal"]. Universal's headers carry no
+# version macro, and its speed differs by release: the benchmark guard in
+# tests/test_benchmark_regression.py picks its band from this.
+set(MTL5PY_UNIVERSAL_TAG v5.18.0)
 find_package(universal 5.8.0 QUIET)
-if(NOT universal_FOUND)
+if(universal_FOUND)
+    # An install made from a git checkout can append a commit
+    # (5.11.0.c75b4aca5); keep major.minor.patch.
+    string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MTL5PY_UNIVERSAL_VERSION "${universal_VERSION}")
+    if(MTL5PY_UNIVERSAL_VERSION STREQUAL "")
+        set(MTL5PY_UNIVERSAL_VERSION "unknown")
+    endif()
+else()
+    string(REGEX REPLACE "^v" "" MTL5PY_UNIVERSAL_VERSION "${MTL5PY_UNIVERSAL_TAG}")
     include(FetchContent)
     set(BUILD_ALL_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_DEMONSTRATION OFF CACHE BOOL "" FORCE)
@@ -216,7 +240,7 @@ if(NOT universal_FOUND)
     FetchContent_Declare(
         universal
         GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-        GIT_TAG        v5.11.0
+        GIT_TAG        ${MTL5PY_UNIVERSAL_TAG}
         GIT_SHALLOW    TRUE
         EXCLUDE_FROM_ALL
     )
