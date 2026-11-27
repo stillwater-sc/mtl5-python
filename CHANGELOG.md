@@ -59,7 +59,7 @@ against, and semantic-release manages only the **patch** component.
   - The five `randsvd` modes at the same κ.
   - The noise floor that rounding to a format puts under a spectrum.
   - The condition number at which rounding noise takes over a dense
-    matrix: two to three decades above 1/u.
+    matrix: two to four decades above 1/u.
   - Forward error against κ·u, and how the spectrum's shape changes the error
     at a fixed κ.
   - A precision-ladder heatmap of correct digits, by format and κ.
