@@ -15,6 +15,23 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Non-normality notebook** (`notebooks/nonnormality.ipynb`, for #166), the
+  third matrix-property notebook.
+  - The same eigenvalues 1..8 at three degrees of non-normality, built from
+    `randorth(seed=)` and a triangular factor. Perturbed-eigenvalue clouds show
+    eigenvalues moving up to about 220 times the perturbation, within
+    Bauer–Fike.
+  - Pseudospectra, the contours of σ_min(zI − A), for that matrix, `kahan(12)`
+    and `frank(8)`. They use NumPy's SVD, since MTL5 has no complex SVD.
+  - The field of values, through `mtl5.eigh` on a real 2n×2n embedding, and
+    the numerical abscissa.
+  - Transient growth: ‖Aᵏ‖ reaches 92 for a matrix with ρ = 0.9.
+  - Eigenvalue condition numbers, checked against measured perturbations of
+    `frank(12)` and against its exact reciprocal eigenvalue pairs.
+  - Rounding to each of the eight formats as a perturbation of the
+    eigenvalues.
+  - Every matrix is seeded, and the notebook runs in about three seconds.
+
 - **Spectra and inertia notebook** (`notebooks/spectra_inertia.ipynb`, for
   #166). The second matrix-property notebook, after the conditioning one.
   - Strip plots of the eigenvalues, coloured by sign, beside the inertia, for
