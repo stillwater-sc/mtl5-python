@@ -726,6 +726,17 @@ against, and semantic-release manages only the **patch** component.
     - Older or unknown builds get 0.65–30x, the union with the v5.11.0 band.
       Releases 5.12–5.17 were not measured.
     - The test is renamed `test_posit32_costs_about_twice_takum32`.
+  - **GCC 12 is now enforced, as documented.** GCC 11 cannot compile
+    Universal 5.13 and later, whose constexpr code constructs a `std::vector`.
+    The bound headers were compiled per release in gcc:11, gcc:12 and gcc:13
+    containers: GCC 11 fails from v5.13.0 on, and GCC 12 and 13 build every
+    release through v5.18.0.
+    - The README and getting-started guide already said GCC 12+, but CI built
+      with ubuntu-22.04's default GCC 11.4. Every Linux gcc job (build-and-test,
+      ecosystem, zlib, applications, docs) now uses `g++-12`.
+    - CMake stops with that reason on GCC < 12, rather than with pages of errors
+      from Universal's headers.
+    - Wheels are unaffected: cibuildwheel builds them in manylinux_2_28.
   - **`mtl5.build_info()["universal"]`** reports the Universal release the
     build used, found or fetched, as major.minor.patch, or `"unknown"`.
     Universal's headers carry no version macro, so CMake passes it in.

@@ -4,6 +4,16 @@ project(mtl5_python CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# GCC 12 is the documented minimum (README, docs/getting-started.md). GCC 11
+# cannot compile Universal 5.13 and later, whose constexpr code constructs a
+# std::vector, so fail here with the reason rather than with pages of errors
+# from inside Universal's headers.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 12)
+    message(FATAL_ERROR
+        "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old: mtl5-python needs GCC 12 or later "
+        "(or Clang 15+, MSVC 2022). Point CXX at a newer compiler, e.g. CXX=g++-12.")
+endif()
+
 # MSVC: report correct __cplusplus value so that C++20 headers like <bit>
 # are properly detected by Universal's bit_cast.hpp
 if(MSVC)
