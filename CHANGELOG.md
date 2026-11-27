@@ -20,11 +20,12 @@ against, and semantic-release manages only the **patch** component.
   under "Test matrices". It compares eight number systems at three widths:
   `fp16`, `posit16`, `takum16`, `f32`, `posit32`, `takum32`, `f64` and
   `dd_cascade`.
-  - Each format's unit roundoff, measured.
+  - Each format's unit roundoff: measured, except `dd_cascade`'s, which is
+    the nominal 2⁻¹⁰⁶ because a float64 probe can't resolve it.
   - The five `randsvd` modes at the same κ.
   - The noise floor that rounding to a format puts under a spectrum.
-  - The largest condition number each format can hold: two to three decades
-    above 1/u.
+  - The condition number at which rounding noise takes over a dense
+    matrix: two to three decades above 1/u.
   - Forward error against κ·u, and how the spectrum's shape changes the error
     at a fixed κ.
   - A precision-ladder heatmap of correct digits, by format and κ.
