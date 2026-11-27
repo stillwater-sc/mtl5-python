@@ -7,11 +7,17 @@ module is the seam between the two. ``mtl5.vector()`` / ``mtl5.matrix()``
 accept such an array, and ``.to_universal()`` gives one back, both without a
 detour through float64.
 
-The bits are COPIED, not viewed. ``universal_dtypes`` and this package are
+The bits are COPIED, not viewed. ``universal_dtypes`` and this package can be
 built on different Universal releases, and what two releases agree on is the
 encoding, not the C++ object layout. MTL5's Universal containers also own
 their storage, so a view would have nothing to keep the NumPy array alive. The
 copy is one pass, which is nothing next to emulated arithmetic.
+
+The encoding itself changed once. Universal v5.15.0 gave cfloat IEEE-754's
+``±inf`` encoding (universal#1895), so ``fp16`` bits mean different things on
+either side of it: ``0x7c00`` is NaN before and +inf after. ``fp16`` transport
+therefore refuses to run when the two packages' Universal releases fall on
+opposite sides of v5.15.0. universal_dtypes 3.0.0 is the first on the new side.
 
 ``universal_dtypes`` is optional. Recognising its arrays needs only their dtype
 object, so it is imported only when ``to_universal()`` has to build one.
@@ -20,6 +26,7 @@ object, so it is imported only when ``to_universal()`` has to build one.
 from __future__ import annotations
 
 import functools
+import re
 
 import numpy as np
 
@@ -51,6 +58,10 @@ _MISMATCHED = {
     "fp8e5m2": "MTL5's fp8 is Universal's cfloat<8,2> (e2m5), not e5m2",
 }
 
+# Dtypes whose encoding changed at a Universal release: the bits can cross only
+# between two builds on the same side of it.
+_ENCODING_CHANGED_AT = {"fp16": (5, 15)}  # cfloat IEEE inf/NaN, universal#1895
+
 _CASCADES = frozenset({"dd_cascade", "td_cascade", "qd_cascade"})
 _WORD = {1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.uint64}
 
@@ -70,6 +81,43 @@ def universal_name(dtype) -> str | None:
     return dtype.type.__name__
 
 
+def _major_minor(version) -> tuple[int, int] | None:
+    """(major, minor) from '5.18.0', 'v5.11.0' or '5.11.0 (found package)';
+    None when the version is unknown."""
+    m = re.match(r"v?(\d+)\.(\d+)\.", str(version))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _universal_releases():
+    """The Universal releases this build and universal_dtypes were built on,
+    as (major, minor) or None when unknown."""
+    import universal_dtypes
+
+    ours = _major_minor(_core.build_info().get("universal"))
+    info = universal_dtypes.build_info() if hasattr(universal_dtypes, "build_info") else {}
+    theirs = _major_minor(info.get("universal_version"))
+    return ours, theirs
+
+
+def check_encoding_compatible(name: str) -> None:
+    """Refuse to move ``name`` bits between builds whose Universal releases
+    straddle a change to its encoding. Unknown versions are not refused."""
+    at = _ENCODING_CHANGED_AT.get(name)
+    if at is None:
+        return
+    ours, theirs = _universal_releases()
+    if ours is None or theirs is None or (ours >= at) == (theirs >= at):
+        return
+    raise TypeError(
+        f"{name} bits cannot cross between this mtl5 build (Universal "
+        f"{ours[0]}.{ours[1]}) and universal_dtypes (Universal {theirs[0]}.{theirs[1]}): "
+        f"Universal {at[0]}.{at[1]} changed the {name} encoding of +-inf and NaN, so the same "
+        "bits mean different values. Upgrade universal_dtypes to 3.0 or later "
+        "(pip install -U universal_dtypes), or move the values through float64 with "
+        f"mtl5.convert(a.astype(np.float64), '{name}')."
+    )
+
+
 def _storage_word(name: str, dtype):
     """The array type the bits travel as: the unsigned integer of the
     element's width, or float64 limbs for a cascade (2, 3 or 4 per element)."""
@@ -87,6 +135,7 @@ def from_universal(a: np.ndarray, kind: str):
             f"Supported: {', '.join(SUPPORTED)}. To round the values into one of "
             "those instead, use mtl5.convert(a.astype(np.float64), '<dtype>')."
         )
+    check_encoding_compatible(name)
     want = 1 if kind == "vector" else 2
     if a.ndim != want:
         raise TypeError(f"mtl5.{kind}() takes a {want}-D array; got {a.ndim}-D")
@@ -107,6 +156,7 @@ def to_universal(self):
         raise ImportError(
             "to_universal() needs the universal_dtypes package: pip install mtl5[universal]"
         ) from exc
+    check_encoding_compatible(self.dtype)
     return self._to_bits().view(getattr(universal_dtypes, self.dtype))
 
 

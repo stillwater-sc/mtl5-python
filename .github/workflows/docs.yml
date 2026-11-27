@@ -35,6 +35,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # GCC 12, the documented minimum (README, getting-started), not the
+      # runner's default GCC 11.4: Universal 5.13 and later use constexpr
+      # std::vector, which GCC 11's libstdc++ lacks.
+      - name: Use GCC 12
+        run: |
+          command -v g++-12 || { sudo apt-get update && sudo apt-get install -y g++-12; }
+          echo "CC=gcc-12" >> $GITHUB_ENV
+          echo "CXX=g++-12" >> $GITHUB_ENV
       - name: Install with the docs extra
         run: pip install ".[docs]" -v
       # The sphinx-build script, not `python -m sphinx`: -m puts the working

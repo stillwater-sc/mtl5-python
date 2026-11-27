@@ -833,13 +833,18 @@ void register_native_dense_ops(nb::module_& m) {
 // dense_vector<posit16>. The way back is the same copy in reverse.
 //
 // WHY A COPY OF THE BITS, and not a reinterpreting view of NumPy's buffer.
-// The two packages need not be built on the same Universal. Both pin v5.11.0
-// today (universal_dtypes from 2.5.1; 2.5.0 and earlier are on 4.7.9), but each
-// pin moves on its own schedule, and a build that finds an installed Universal
-// uses that one instead. What two Universal versions agree on is the ENCODING --
-// the posit standard, the lns and takum formats -- not the C++ object layout,
-// and the encoding is what crosses here. The copy is one pass over the data,
-// which is nothing next to emulated arithmetic.
+// The two packages need not be built on the same Universal: each pin moves on
+// its own schedule, and a build that finds an installed Universal uses that one
+// instead. Both pin v5.18.0 today (universal_dtypes from 3.0.0). What two
+// Universal versions agree on is the ENCODING -- the posit standard, the lns
+// and takum formats -- not the C++ object layout, and the encoding is what
+// crosses here. The copy is one pass over the data, which is nothing next to
+// emulated arithmetic.
+//
+// One encoding did change: Universal v5.15.0 gave cfloat IEEE-754's +-inf
+// (universal#1895), so fp16's 0x7c00 is NaN before it and +inf after. The
+// Python side (mtl5/_universal_interop.py) refuses fp16 transport between
+// builds on opposite sides of v5.15.0.
 //
 // The bits go in by memcpy into the object representation, which is only the
 // encoding if the type is trivially copyable, exactly as wide as its word(s),
@@ -1727,6 +1732,13 @@ NB_MODULE(_core, m) {
         d["highway_simd"]     = has_highway;
         d["kpu"]              = has_kpu;
         d["zlib"]             = has_zlib;
+        // The Universal release this build used, found or fetched. Its
+        // headers carry no version macro, so CMake passes it in.
+#ifdef MTL5PY_UNIVERSAL_VERSION
+        d["universal"]        = MTL5PY_UNIVERSAL_VERSION;
+#else
+        d["universal"]        = "unknown";
+#endif
         // The ISA this binary was actually COMPILED for, read from the
         // compiler's own predefined macros (MTL5 #443).
         //

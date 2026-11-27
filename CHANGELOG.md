@@ -715,6 +715,61 @@ against, and semantic-release manages only the **patch** component.
 
 ### Changed
 
+- **Universal pinned to v5.18.0** (was v5.11.0). The `find_package` floor stays
+  at 5.8.0. With universal_dtypes 3.0.0 built locally, also on v5.18.0, the
+  suite gives 2329 passed and 5 skipped. That is the 2254 from before, plus the
+  `build_info` test, plus the 74 universal_dtypes interop tests (61 that the
+  local venv had skipped, and 13 new ones). gcc and clang both build.
+  - **Results: 4 of 915 change, all fixes.** The comparison covers 15 Universal
+    dtypes: edge-value conversion, plus 10 trials each of conversion, `norm`
+    (1 and 2), `dot`, `matmul` and `solve`.
+    - `convert(-0.0)` to td_cascade and qd_cascade now gives −0, as dd_cascade
+      and IEEE do: a cascade's zero now converts from its leading component
+      (universal#2114).
+    - Two posit64 2-norms moved by one float64 ulp. Each now equals the exact
+      norm rounded to float64, where before it was one ulp off: posit sqrt is
+      correctly rounded natively for nbits ≤ 64 (universal#1856).
+  - **Emulated arithmetic is faster.** On a 64×64 multiply-add loop, posit32 is
+    6.9x faster and takum32 2.4x faster than on v5.11.0, with identical
+    results. On `gemm` at n = 64, posit32/takum32 goes from 9.2–10.1 to
+    1.94–1.98.
+  - **The benchmark guard picks its band from the Universal release.**
+    `find_package` still accepts an installed 5.8.0 or later, where the old
+    ratio holds.
+    - On v5.18.0 and later, the band is 0.65–6x, the same 3x margin either side
+      as before.
+    - Older or unknown builds get 0.65–30x, the union with the v5.11.0 band.
+      Releases 5.12–5.17 were not measured.
+    - The test is renamed `test_posit32_costs_about_twice_takum32`.
+  - **GCC 12 is now enforced, as documented.** GCC 11 cannot compile
+    Universal 5.13 and later, whose constexpr code constructs a `std::vector`.
+    The bound headers were compiled per release in gcc:11, gcc:12 and gcc:13
+    containers: GCC 11 fails from v5.13.0 on, and GCC 12 and 13 build every
+    release through v5.18.0.
+    - The README and getting-started guide already said GCC 12+, but CI built
+      with ubuntu-22.04's default GCC 11.4. Every Linux gcc job (build-and-test,
+      ecosystem, zlib, applications, docs) now uses `g++-12`.
+    - CMake stops with that reason on GCC < 12, rather than with pages of errors
+      from Universal's headers.
+    - Wheels are unaffected: cibuildwheel builds them in manylinux_2_28.
+  - **fp16's ±inf encoding changed, and interop with older universal_dtypes is
+    refused.** Universal v5.15.0 gave cfloat IEEE-754's `±inf` (universal#1895):
+    fp16 `0x7c00` was NaN and is now +inf, and +inf was `0x7ffe`. Values are
+    unchanged, and so is the mixed-precision arithmetic, but the bits mean
+    different things on either side of v5.15.0.
+    - `mtl5.vector()`/`mtl5.matrix()` of a universal_dtypes fp16 array, and
+      `.to_universal()` on fp16, raise `TypeError` when this build and
+      universal_dtypes were built on opposite sides of v5.15.0. When either
+      version is unknown, they proceed as before.
+    - The `universal` and `all` extras now require `universal_dtypes>=3.0`, the
+      first release on Universal v5.18.0. Before it, CI's ecosystem job, against
+      universal_dtypes 2.5.1, failed `test_every_pattern_decodes_alike[fp16]`.
+  - **`mtl5.build_info()["universal"]`** reports the Universal release the
+    build used, found or fetched, as major.minor.patch, or `"unknown"`.
+    Universal's headers carry no version macro, so CMake passes it in.
+
+### Changed
+
 - **MTL5 pinned to v5.22.0** (was v5.20.0), and the package version set to
   5.22.0, since its minor tracks MTL5's. The `find_package` floor moves from
   5.19.0 to 5.22.0, because the tests now pin two results that 5.21.0 and
