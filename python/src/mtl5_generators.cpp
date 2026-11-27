@@ -21,6 +21,7 @@
 
 #include "mtl5_types.hpp"
 
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
@@ -196,12 +197,20 @@ void register_generators(nb::module_& m) {
     }, "nodes"_a, "Vandermonde matrix on the given nodes — ill-conditioned for clustered nodes");
 
     // ----- random with prescribed structure ----------------------------------
-    g.def("randorth", [](std::size_t n) {
+    // Each takes an optional keyword `seed` (#154). With None, MTL5's unseeded
+    // overload draws from its non-deterministic engine, as before. With an int,
+    // the seeded overload gives the same matrix on every call; MTL5 draws its
+    // seeded matrices portably (operation/random.hpp, MTL5 #844).
+    g.def("randorth", [](std::size_t n, std::optional<std::uint64_t> seed) {
         require_positive(n, "randorth");
-        nogil guard; return wrap(gen::randorth<double>(n));
-    }, "n"_a, "Random orthogonal matrix (Q from a QR of a random matrix)");
+        nogil guard;
+        return wrap(seed ? gen::randorth<double>(n, *seed) : gen::randorth<double>(n));
+    }, "n"_a, nb::kw_only(), "seed"_a = nb::none(),
+       "Random orthogonal matrix (Q from a QR of a random matrix). seed: an int "
+       "for a reproducible matrix, None (default) for a fresh one");
 
-    g.def("randspd", [](std::size_t n, const std::vector<double>& eigenvalues) {
+    g.def("randspd", [](std::size_t n, const std::vector<double>& eigenvalues,
+                        std::optional<std::uint64_t> seed) {
         // Before the size check: n = 0 with an empty spectrum would otherwise
         // reach randorth(0), which hands a zero leading dimension to LAPACK's
         // geqrf on a MTL5_WITH_LAPACK build.
@@ -211,29 +220,42 @@ void register_generators(nb::module_& m) {
         for (double e : eigenvalues)
             if (e <= 0.0)
                 throw std::invalid_argument("randspd: all eigenvalues must be positive");
-        nogil guard; return wrap(gen::randspd<double>(n, eigenvalues));
-    }, "n"_a, "eigenvalues"_a,
+        nogil guard;
+        return wrap(seed ? gen::randspd<double>(n, eigenvalues, *seed)
+                         : gen::randspd<double>(n, eigenvalues));
+    }, "n"_a, "eigenvalues"_a, nb::kw_only(), "seed"_a = nb::none(),
        "Symmetric positive definite with exactly the prescribed spectrum — the "
-       "way to build a matrix of a chosen condition number");
+       "way to build a matrix of a chosen condition number. seed: an int for a "
+       "reproducible matrix, None (default) for a fresh one");
 
-    g.def("randsym", [](std::size_t n, const std::vector<double>& eigenvalues) {
+    g.def("randsym", [](std::size_t n, const std::vector<double>& eigenvalues,
+                        std::optional<std::uint64_t> seed) {
         require_positive(n, "randsym");
         if (eigenvalues.size() != n)
             throw std::invalid_argument("randsym: need exactly n eigenvalues");
-        nogil guard; return wrap(gen::randsym<double>(n, eigenvalues));
-    }, "n"_a, "eigenvalues"_a,
+        nogil guard;
+        return wrap(seed ? gen::randsym<double>(n, eigenvalues, *seed)
+                         : gen::randsym<double>(n, eigenvalues));
+    }, "n"_a, "eigenvalues"_a, nb::kw_only(), "seed"_a = nb::none(),
        "Symmetric with the prescribed spectrum; negative eigenvalues are allowed, "
-       "so this is how to build a controlled indefinite matrix");
+       "so this is how to build a controlled indefinite matrix. seed: an int for "
+       "a reproducible matrix, None (default) for a fresh one");
 
-    g.def("randsvd", [](std::size_t rows, std::size_t cols, double kappa, int mode) {
+    g.def("randsvd", [](std::size_t rows, std::size_t cols, double kappa, int mode,
+                        std::optional<std::uint64_t> seed) {
         require_positive(rows, "randsvd");
         require_positive(cols, "randsvd");
         if (!(kappa >= 1.0))
             throw std::invalid_argument("randsvd: kappa must be >= 1");
-        nogil guard; return wrap(gen::randsvd<double>(rows, cols, kappa, mode));
-    }, "m"_a, "n"_a, "kappa"_a, "mode"_a = 3,
+        nogil guard;
+        // The rectangular form, also for m == n: randsvd(n, n, kappa, mode, seed)
+        // is MTL5's square seeded matrix too.
+        return wrap(seed ? gen::randsvd<double>(rows, cols, kappa, mode, *seed)
+                         : gen::randsvd<double>(rows, cols, kappa, mode));
+    }, "m"_a, "n"_a, "kappa"_a, "mode"_a = 3, nb::kw_only(), "seed"_a = nb::none(),
        "Random matrix with condition number exactly kappa; mode selects how the "
-       "singular values are distributed between 1 and 1/kappa");
+       "singular values are distributed between 1 and 1/kappa. seed: an int for "
+       "a reproducible matrix, None (default) for a fresh one");
 
     // ----- sparse ------------------------------------------------------------
     // These return CSR, not dense — they are the structured sparse systems the

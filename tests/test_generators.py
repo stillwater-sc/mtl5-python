@@ -254,3 +254,76 @@ class TestCatalog:
     def test_by_name_is_not_exposed(self):
         """It reads .mtx files from the MTL5 source tree, which a wheel lacks."""
         assert not hasattr(g, "by_name")
+
+
+class TestSeededRandomGenerators:
+    """randorth, randspd, randsym and randsvd take an optional keyword seed
+    (#154). The same seed gives the same matrix, bit for bit; without one,
+    every call still draws a fresh matrix."""
+
+    CALLS = {
+        "randorth": lambda **kw: g.randorth(6, **kw),
+        "randspd": lambda **kw: g.randspd(4, [1.0, 2.0, 3.0, 4.0], **kw),
+        "randsym": lambda **kw: g.randsym(4, [1.0, 2.0, 3.0, -4.0], **kw),
+        "randsvd": lambda **kw: g.randsvd(5, 3, 10.0, **kw),
+        "randsvd-square": lambda **kw: g.randsvd(4, 4, 1e3, 2, **kw),
+    }
+
+    @pytest.fixture(params=list(CALLS))
+    def call(self, request):
+        return self.CALLS[request.param]
+
+    def test_the_same_seed_gives_the_same_matrix(self, call):
+        a, b = call(seed=42).to_numpy(), call(seed=42).to_numpy()
+        assert a.tobytes() == b.tobytes()
+
+    def test_different_seeds_give_different_matrices(self, call):
+        assert not np.array_equal(call(seed=1).to_numpy(), call(seed=2).to_numpy())
+
+    def test_no_seed_still_draws_a_fresh_matrix(self, call):
+        assert not np.array_equal(call().to_numpy(), call().to_numpy())
+        assert not np.array_equal(call(seed=None).to_numpy(), call(seed=None).to_numpy())
+
+    def test_seed_zero_and_the_largest_seed(self, call):
+        for seed in (0, 2**64 - 1):
+            assert call(seed=seed).to_numpy().tobytes() == call(seed=seed).to_numpy().tobytes()
+
+    def test_the_issue_example(self):
+        """#154's report: two randsym calls differed; with a seed they agree."""
+        ev = [1.0, 2.0, 3.0, -4.0]
+        a, b = g.randsym(4, ev, seed=7), g.randsym(4, ev, seed=7)
+        assert np.array_equal(a.to_numpy(), b.to_numpy())
+
+    def test_a_seeded_matrix_keeps_its_structure(self):
+        Q = g.randorth(8, seed=3).to_numpy()
+        assert np.linalg.norm(Q.T @ Q - np.eye(8)) < 1e-12
+        target = [-5.0, -1.0, 2.0, 7.0]
+        A = g.randsym(4, target, seed=3).to_numpy()
+        np.testing.assert_allclose(np.sort(np.linalg.eigvalsh(A)), target, rtol=1e-9)
+        S = g.randspd(4, [1.0, 10.0, 100.0, 1000.0], seed=3).to_numpy()
+        np.testing.assert_allclose(np.linalg.eigvalsh(S), [1.0, 10.0, 100.0, 1000.0], rtol=1e-9)
+        for kappa in (1e3, 1e9):
+            assert np.linalg.cond(g.randsvd(20, 12, kappa, seed=3).to_numpy()) == pytest.approx(
+                kappa, rel=1e-6
+            )
+
+    def test_seed_is_keyword_only(self):
+        with pytest.raises(TypeError):
+            g.randorth(4, 42)
+        with pytest.raises(TypeError):
+            g.randsvd(4, 4, 10.0, 3, 42)
+
+    @pytest.mark.parametrize("seed", [-1, 2**64, 1.5, "42"])
+    def test_a_seed_outside_uint64_is_refused(self, seed):
+        with pytest.raises(TypeError):
+            g.randorth(4, seed=seed)
+
+    def test_dtype_rounds_the_seeded_matrix(self):
+        """mtl5.generators' dtype= wrapper passes seed through."""
+        a = mtl5.generators.randsym(4, [1.0, 2.0, 3.0, -4.0], seed=5, dtype="f32")
+        b = mtl5.generators.randsym(4, [1.0, 2.0, 3.0, -4.0], seed=5)
+        np.testing.assert_array_equal(a.to_numpy(), b.to_numpy().astype(np.float32))
+
+    def test_the_docstring_mentions_seed(self, call):
+        for name in ("randorth", "randspd", "randsym", "randsvd"):
+            assert "seed" in getattr(g, name).__doc__
