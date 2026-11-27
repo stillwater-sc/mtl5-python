@@ -19,7 +19,8 @@ against, and semantic-release manages only the **patch** component.
   third matrix-property notebook.
   - The same eigenvalues 1..8 at three degrees of non-normality, built from
     `randorth(seed=)` and a triangular factor. Perturbed-eigenvalue clouds show
-    eigenvalues moving up to 225 times the perturbation, within Bauer–Fike.
+    eigenvalues moving up to about 220 times the perturbation, within
+    Bauer–Fike.
   - Pseudospectra, the contours of σ_min(zI − A), for that matrix, `kahan(12)`
     and `frank(8)`. They use NumPy's SVD, since MTL5 has no complex SVD.
   - The field of values, through `mtl5.eigh` on a real 2n×2n embedding, and
