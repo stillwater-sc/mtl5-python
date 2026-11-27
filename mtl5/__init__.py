@@ -526,11 +526,26 @@ def _promote_pair(vals, names):
 
 def _refusing_narrowing(fn, *names):
     """fn, with its NumPy arguments checked and made contiguous first, and a
-    float32/float64 pair of operands, `names`, taken to float64."""
+    float32/float64 pair of operands, `names`, taken to float64.
+
+    A call with no NumPy argument, which is every call on mtl5 containers,
+    goes straight to fn: the benchmark guard's per-call floor
+    (tests/test_benchmark_regression.py) is a 1x1 matmul, and the full path
+    costs about 1.5 us."""
     import functools
+
+    import numpy as _np
+
+    ndarray = _np.ndarray
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        for a in args:
+            if isinstance(a, ndarray):
+                break
+        else:
+            if not kwargs:
+                return fn(*args)
         vals, kwargs = _operands(names, args, kwargs)
         vals = [_dense_array(fn.__name__, a) for a in vals]
         kwargs = {k: _dense_array(fn.__name__, v) for k, v in kwargs.items()}
@@ -559,8 +574,16 @@ def _contiguous_floats(fn, *names):
             return _np.ascontiguousarray(a)
         return a
 
+    ndarray = _np.ndarray
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        for a in args:
+            if isinstance(a, ndarray):
+                break
+        else:
+            if not kwargs:
+                return fn(*args)
         vals, kwargs = _operands(names, args, kwargs)
         vals = [fix(a) for a in vals]
         return fn(*_promote_pair(vals, names), **{k: fix(v) for k, v in kwargs.items()})
