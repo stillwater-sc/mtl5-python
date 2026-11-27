@@ -105,10 +105,12 @@ using lns32 = sw::universal::lns<32, 16>;
 // number-system benchmarks (#69).
 using cfloat32 = sw::universal::fp32;
 
-// Takum — a tapered logarithmic format. rbits=3 is the value the takum
-// reference uses, and a block type as wide as the format keeps the value in a
-// single limb instead of the several the uint8_t default would take. These are
-// universal_dtypes' takum16 and takum32 exactly, so the bits interoperate.
+// Takum — the LINEAR takum, a tapered format. Universal's bare `takum` is the
+// linear variant (base 2); the logarithmic one is `takum_log`, not bound here.
+// rbits=3 is the value the takum reference uses, and a block type as wide as
+// the format keeps the value in a single limb instead of the several the
+// uint8_t default would take. These are universal_dtypes' takum16 and takum32
+// exactly, so the bits interoperate.
 using takum16 = sw::universal::takum<16, 3, uint16_t>;
 using takum32 = sw::universal::takum<32, 3, uint32_t>;
 

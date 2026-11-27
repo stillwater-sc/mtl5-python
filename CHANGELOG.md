@@ -17,7 +17,8 @@ against, and semantic-release manages only the **patch** component.
 
 - **`takum16` element type** (for #166). The 16-bit takum,
   `takum<16,3,uint16_t>`, joins `takum32`. Number-system comparisons at 16 bits
-  can then set the tapered logarithmic format beside `posit16` and `fp16`.
+  can then set the takum beside `posit16` and `fp16`. It is the linear takum,
+  Universal's bare `takum`; the logarithmic `takum_log` is not bound.
   - It gets the full set every Universal type has:
     - `DenseVector_takum16` / `DenseMatrix_takum16` and the `vector_takum16` /
       `matrix_takum16` factories;

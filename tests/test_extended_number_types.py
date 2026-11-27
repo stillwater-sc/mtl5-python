@@ -6,7 +6,7 @@ wider spread of formats than posit/fixpnt/lns gave us:
   cfloat32    IEEE binary32 through the emulation layer. The control: paired
               against hardware `float` it isolates emulation overhead from the
               cost of any particular format.
-  takum32     tapered logarithmic, a different taper from posit's.
+  takum32     the linear takum: tapered, with a different taper from posit's.
   takum16     the 16-bit takum, added later to compare against posit16 and
               fp16 at the same width.
   dd/td/qd    cascades of 2/3/4 doubles — the only bound formats carrying MORE

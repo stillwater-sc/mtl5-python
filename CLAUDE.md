@@ -77,7 +77,7 @@ Every element type has its own `DenseVector_<suffix>` / `DenseMatrix_<suffix>` c
 | `posit8/16/32/64` | `posit<N,2>` | es=2 for every width |
 | `fixpnt8`, `fixpnt16` | `fixpnt<8,4,Saturate>`, `fixpnt<16,8,Saturate>` | saturating |
 | `lns16`, `lns32` | `lns<16,8>`, `lns<32,16>` | logarithmic number system |
-| `takum16`, `takum32` | `takum<16,3,uint16_t>`, `takum<32,3,uint32_t>` | tapered logarithmic |
+| `takum16`, `takum32` | `takum<16,3,uint16_t>`, `takum<32,3,uint32_t>` | linear takum (Universal's bare `takum`; `takum_log` is not bound) |
 | `dd_cascade`, `td_cascade`, `qd_cascade` | Universal float cascades | about 32/48/64 decimal digits |
 
 Coverage differs by entry point:
