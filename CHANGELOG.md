@@ -502,6 +502,21 @@ against, and semantic-release manages only the **patch** component.
     input, and with Fortran-order and strided float64. 52 of the 62 fail
     before the fix.
 
+- **`frobenius_norm` and the matrix `norm` take real matrices** (#151). They
+  were bound only for `DenseMatrix_c64` and `DenseMatrix_c128`, so a float32
+  or float64 matrix raised `TypeError`. The only route for a real matrix was
+  `mtl5.mixed.frobenius_norm`.
+  - Both now take `DenseMatrix_f32` and `DenseMatrix_f64`, with the complex
+    overloads' semantics: `ord` 1 is the largest column sum, 2 the Frobenius
+    norm, and −1 the largest row sum.
+  - `ord=2` stays the Frobenius norm, as MTL5's matrix `two_norm` is. That
+    is not NumPy's: `np.linalg.norm(A, 2)` is the spectral norm, which is
+    `mtl5.svdvals(A)[0]`. Both docstrings say so.
+  - The PCA notebook uses `mtl5.frobenius_norm` in place of
+    `np.linalg.norm(·, "fro")`.
+  - Tests compare against `np.linalg.norm` for each `ord`, in both
+    precisions, and pin the difference from the spectral norm.
+
 - **Threshold pivoting works under a fill-reducing ordering** (MTL5 pin
   v5.24.0 → v5.24.1, MTL5 #917). `splu`, `supernodal_lu` and `klu` preferred
   the wrong row when keeping a pivot on the diagonal. Column `k` of the
@@ -720,6 +735,61 @@ against, and semantic-release manages only the **patch** component.
   key-files list now reflects that the bindings are split across
   `python/src/mtl5_*.cpp`, and that `applications/` holds C++ experiments
   that build only with `MTL5_BUILD_APPLICATIONS=ON`.
+
+### Changed
+
+- **Universal pinned to v5.18.0** (was v5.11.0). The `find_package` floor stays
+  at 5.8.0. With universal_dtypes 3.0.0 built locally, also on v5.18.0, the
+  suite gives 2329 passed and 5 skipped. That is the 2254 from before, plus the
+  `build_info` test, plus the 74 universal_dtypes interop tests (61 that the
+  local venv had skipped, and 13 new ones). gcc and clang both build.
+  - **Results: 4 of 915 change, all fixes.** The comparison covers 15 Universal
+    dtypes: edge-value conversion, plus 10 trials each of conversion, `norm`
+    (1 and 2), `dot`, `matmul` and `solve`.
+    - `convert(-0.0)` to td_cascade and qd_cascade now gives −0, as dd_cascade
+      and IEEE do: a cascade's zero now converts from its leading component
+      (universal#2114).
+    - Two posit64 2-norms moved by one float64 ulp. Each now equals the exact
+      norm rounded to float64, where before it was one ulp off: posit sqrt is
+      correctly rounded natively for nbits ≤ 64 (universal#1856).
+  - **Emulated arithmetic is faster.** On a 64×64 multiply-add loop, posit32 is
+    6.9x faster and takum32 2.4x faster than on v5.11.0, with identical
+    results. On `gemm` at n = 64, posit32/takum32 goes from 9.2–10.1 to
+    1.94–1.98.
+  - **The benchmark guard picks its band from the Universal release.**
+    `find_package` still accepts an installed 5.8.0 or later, where the old
+    ratio holds.
+    - On v5.18.0 and later, the band is 0.65–6x, the same 3x margin either side
+      as before.
+    - Older or unknown builds get 0.65–30x, the union with the v5.11.0 band.
+      Releases 5.12–5.17 were not measured.
+    - The test is renamed `test_posit32_costs_about_twice_takum32`.
+  - **GCC 12 is now enforced, as documented.** GCC 11 cannot compile
+    Universal 5.13 and later, whose constexpr code constructs a `std::vector`.
+    The bound headers were compiled per release in gcc:11, gcc:12 and gcc:13
+    containers: GCC 11 fails from v5.13.0 on, and GCC 12 and 13 build every
+    release through v5.18.0.
+    - The README and getting-started guide already said GCC 12+, but CI built
+      with ubuntu-22.04's default GCC 11.4. Every Linux gcc job (build-and-test,
+      ecosystem, zlib, applications, docs) now uses `g++-12`.
+    - CMake stops with that reason on GCC < 12, rather than with pages of errors
+      from Universal's headers.
+    - Wheels are unaffected: cibuildwheel builds them in manylinux_2_28.
+  - **fp16's ±inf encoding changed, and interop with older universal_dtypes is
+    refused.** Universal v5.15.0 gave cfloat IEEE-754's `±inf` (universal#1895):
+    fp16 `0x7c00` was NaN and is now +inf, and +inf was `0x7ffe`. Values are
+    unchanged, and so is the mixed-precision arithmetic, but the bits mean
+    different things on either side of v5.15.0.
+    - `mtl5.vector()`/`mtl5.matrix()` of a universal_dtypes fp16 array, and
+      `.to_universal()` on fp16, raise `TypeError` when this build and
+      universal_dtypes were built on opposite sides of v5.15.0. When either
+      version is unknown, they proceed as before.
+    - The `universal` and `all` extras now require `universal_dtypes>=3.0`, the
+      first release on Universal v5.18.0. Before it, CI's ecosystem job, against
+      universal_dtypes 2.5.1, failed `test_every_pattern_decodes_alike[fp16]`.
+  - **`mtl5.build_info()["universal"]`** reports the Universal release the
+    build used, found or fetched, as major.minor.patch, or `"unknown"`.
+    Universal's headers carry no version macro, so CMake passes it in.
 
 ### Changed
 
@@ -1618,6 +1688,39 @@ policy (minor follows the MTL5 release built against), not new surface.
   ([#57](https://github.com/stillwater-sc/mtl5-python/pull/57))
 
 <!-- version list -->
+
+## v5.25.9 (2026-11-27)
+
+### Bug Fixes
+
+- **build**: Require GCC 12, as documented, and build CI's gcc jobs with it
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **interop**: Refuse fp16 transport across Universal 5.15's encoding change
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **tests**: Build the refusal test's vector under a compatible simulated pair
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **tests**: Pick the posit32/takum32 band from the Universal release
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+### Chores
+
+- **deps**: Bump Universal to v5.18.0
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+### Documentation
+
+- Session log for 2026-11-26; CHANGELOG cross-reference to mtl5#953
+  ([#159](https://github.com/stillwater-sc/mtl5-python/pull/159),
+  [`d428f29`](https://github.com/stillwater-sc/mtl5-python/commit/d428f29e2735cd61c447428182a2bf11870bafab))
+
 
 ## v5.25.8 (2026-11-27)
 

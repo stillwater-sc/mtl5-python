@@ -8,6 +8,7 @@ interpreter has fixed the pool and would make the assertions order-dependent.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -69,6 +70,11 @@ class TestBuildInfo:
         assert ("blas" in backends) == info["blas"]
         assert ("native" in backends) == info["native_fast_gemm"]
         assert "reference" in backends, "reference is always the fallback"
+
+    def test_universal_version_is_reported(self):
+        # The Universal release the build used: "unknown", or major.minor.patch.
+        v = mtl5.build_info()["universal"]
+        assert v == "unknown" or re.fullmatch(r"\d+\.\d+\.\d+", v), v
 
     def test_build_isa_is_reported(self):
         isa = mtl5.build_info()["build_isa"]

@@ -122,3 +122,60 @@ class TestSolveErrors:
     def test_dimension_mismatch_raises(self):
         with pytest.raises(ValueError):
             mtl5.solve(np.eye(3), np.ones(4))
+
+
+class TestRealMatrixNorms:
+    """frobenius_norm and the matrix norm() take real f32/f64 matrices, with the
+    complex overloads' semantics (#151). A non-square, non-symmetric matrix, so
+    the column-sum and row-sum norms differ."""
+
+    A = np.array([[1.0, -7.0, 2.0], [-3.0, 4.0, 0.5]])
+
+    @pytest.fixture(params=[(np.float64, 1e-15), (np.float32, 1e-6)], ids=["f64", "f32"])
+    def real(self, request):
+        return request.param
+
+    def test_frobenius_norm(self, real):
+        dt, tol = real
+        a = self.A.astype(dt)
+        got = mtl5.frobenius_norm(mtl5.matrix(a))
+        assert isinstance(got, float)
+        assert got == pytest.approx(np.linalg.norm(a.astype(np.float64), "fro"), rel=tol)
+
+    @pytest.mark.parametrize("ord,np_ord", [(1, 1), (-1, np.inf), (2, "fro")])
+    def test_norm(self, real, ord, np_ord):
+        dt, tol = real
+        a = self.A.astype(dt)
+        got = mtl5.norm(mtl5.matrix(a), ord)
+        assert isinstance(got, float)
+        assert got == pytest.approx(np.linalg.norm(a.astype(np.float64), np_ord), rel=tol)
+
+    def test_default_ord_is_frobenius(self, real):
+        dt, tol = real
+        a = self.A.astype(dt)
+        assert mtl5.norm(mtl5.matrix(a)) == pytest.approx(np.linalg.norm(a, "fro"), rel=tol)
+
+    def test_owned_and_view_agree(self):
+        view = mtl5.matrix(self.A)
+        owned = mtl5.matrix_copy(self.A)
+        assert view.is_view and not owned.is_view
+        assert mtl5.frobenius_norm(view) == mtl5.frobenius_norm(owned)
+        assert mtl5.norm(view, 1) == mtl5.norm(owned, 1)
+
+    def test_ord_2_is_not_the_spectral_norm(self):
+        """The difference from np.linalg.norm(A, 2) is documented; the spectral
+        norm is mtl5.svdvals(A)[0]."""
+        M = mtl5.matrix(self.A)
+        spectral = np.linalg.norm(self.A, 2)
+        assert mtl5.norm(M, 2) > spectral * (1 + 1e-3)
+        assert mtl5.svdvals(M)[0] == pytest.approx(spectral, rel=1e-12)
+        assert "spectral" in mtl5.norm.__doc__
+
+    def test_bad_ord_raises(self):
+        with pytest.raises(ValueError, match="ord must be"):
+            mtl5.norm(mtl5.matrix(self.A), 3)
+
+    def test_vector_norms_are_unchanged(self):
+        x = np.array([3.0, -4.0])
+        assert mtl5.norm(mtl5.vector(x)) == 5.0
+        assert mtl5.norm(x, 1) == 7.0

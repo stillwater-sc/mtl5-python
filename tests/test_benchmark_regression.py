@@ -44,10 +44,13 @@ tying up a worker for minutes.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
 import pytest
+
+import mtl5
 
 BENCH = Path(__file__).resolve().parent.parent / "benchmarks" / "bench_blas.py"
 
@@ -99,7 +102,8 @@ def sweep(bench):
         # this first carried would have allowed ~100s on a CI worker while the
         # docstring promised six.
         #
-        # 5s is ~4.5x the healthy posit32 time, so it will not false-trip. And
+        # 5s is far above the healthy posit32 time (about 0.06s on Universal
+        # v5.18.0), so it will not false-trip. And
         # a regression bigger than that makes the row `too_slow`, which drops
         # the dtype and fails test_the_guard_is_not_vacuous — a large
         # regression therefore fails FAST rather than slowly, which is the
@@ -134,13 +138,34 @@ def test_the_baseline_escaped_per_call_overhead(sweep):
     )
 
 
-def test_posit32_is_several_times_costlier_than_takum32(sweep):
+def _universal_at_least(major, minor):
+    v = mtl5.build_info().get("universal", "unknown")
+    m = re.fullmatch(r"(\d+)\.(\d+)\.\d+", v)
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (major, minor)
+
+
+def test_posit32_costs_about_twice_takum32(sweep):
     """The tightest guard, because both operands are emulated: they pay the
     same per-call overhead and run the same generic kernel, so only the number
-    systems' arithmetic differs. Measured 9.2-10.1 across every run."""
+    systems' arithmetic differs.
+
+    The ratio depends on the Universal release, which an installed Universal
+    (find_package accepts 5.8.0 and later) can make older than the pin:
+    - v5.18.0: measured 1.94-1.98 across four runs, and the band is about 3x
+      either side of that. v5.18.0 made posit32 arithmetic about 6.9x faster
+      and takum32 about 2.4x faster than v5.11.0 (a 64x64 multiply-add loop
+      against each tag), with identical results.
+    - v5.11.0: measured 9.2-10.1, guarded by 3-30x.
+    - Releases 5.12-5.17 were not measured, so builds before v5.18.0, or of
+      unknown version, get the union of the two bands.
+    A Universal bump that moves the ratio out of its band needs that kind of
+    check before the band moves."""
     r = _seconds(sweep, "posit32") / _seconds(sweep, "takum32")
-    assert 3.0 < r < 30.0, (
-        f"posit32/takum32 = {r:.1f} on {KERNEL}, outside the 3-30x band. "
+    lo, hi = (0.65, 6.0) if _universal_at_least(5, 18) else (0.65, 30.0)
+    universal = mtl5.build_info().get("universal", "unknown")
+    assert lo < r < hi, (
+        f"posit32/takum32 = {r:.2f} on {KERNEL} with Universal {universal}, "
+        f"outside the {lo}-{hi}x band. "
         "Either a format changed cost class or one of them stopped using the "
         "path it used to."
     )
@@ -151,7 +176,8 @@ def test_emulation_cost_stays_within_an_order_of_magnitude_band(sweep):
 
     Wider than the emulated-vs-emulated band on purpose: this ratio moved
     between 2900x and 6600x across builds during #69-#73 without anything being
-    wrong, because it also tracks how well the NATIVE side is vectorised.
+    wrong, because it also tracks how well the NATIVE side is vectorised. On
+    Universal v5.18.0, with faster posit arithmetic, it is 1200-1350x.
     """
     if "posit32" not in sweep:
         pytest.skip("posit32 produced no measurement")
