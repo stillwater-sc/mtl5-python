@@ -473,10 +473,132 @@ LUFactor = LUFactor_f64
 CholeskyFactor = CholeskyFactor_f64
 
 
+# ---------------------------------------------------------------------------
+# NumPy input to the dense solvers (#152)
+#
+# solve, inv, lu, cholesky, matmul and det take a float32 or float64 NumPy
+# array, or a complex one where a complex overload exists, as the
+# factorizations above do. Their C++ ndarray arguments are `noconvert`:
+# nanobind's converting pass would otherwise hand an integer, float16 or
+# non-contiguous array to the first overload that accepts a cast, the float32
+# one, so a float64 array in Fortran order came back in single precision. Here
+# any layout is made C-contiguous with the dtype kept; any other dtype is
+# refused, with the cast to make; and a float32/float64 pair goes to the wider
+# type, which is exact.
+# ---------------------------------------------------------------------------
+def _dense_array(name: str, a):
+    """a, C-contiguous, if it is a NumPy array of a dtype the C++ overloads
+    take; a TypeError naming the cast to make for any other NumPy dtype.
+    Anything that is not a NumPy array is returned as it is."""
+    import numpy as _np
+
+    if not isinstance(a, _np.ndarray):
+        return a
+    if a.dtype.name not in _NUMPY_TO_MTL5:
+        if a.dtype.kind in "biuf":
+            hint = " Cast it first, e.g. a.astype(np.float64)."
+        else:
+            hint = " For a universal_dtypes array, wrap it first: mtl5.matrix(a) or mtl5.vector(a)."
+        raise TypeError(
+            f"{name}: NumPy arrays must be float32 or float64 (or complex64/complex128), "
+            f"got {a.dtype.name}.{hint}"
+        )
+    return _np.ascontiguousarray(a)
+
+
+def _operands(names, args, kwargs):
+    """The leading operands, positional or by keyword, in parameter order, and
+    the keywords that remain. A keyword whose earlier operands are missing is
+    left where it is, for the binding to report."""
+    vals, kwargs = list(args), dict(kwargs)
+    for n in names[len(vals) :]:
+        if n not in kwargs:
+            break
+        vals.append(kwargs.pop(n))
+    return vals, kwargs
+
+
+def _promote_pair(vals, names):
+    if len(names) == 2 and len(vals) >= 2:
+        vals[:2] = _common_float(vals[0], vals[1])
+    return vals
+
+
+def _refusing_narrowing(fn, *names):
+    """fn, with its NumPy arguments checked and made contiguous first, and a
+    float32/float64 pair of operands, `names`, taken to float64.
+
+    A call with no NumPy argument, which is every call on mtl5 containers,
+    goes straight to fn: the benchmark guard's per-call floor
+    (tests/test_benchmark_regression.py) is a 1x1 matmul, and the full path
+    costs about 1.5 us."""
+    import functools
+
+    import numpy as _np
+
+    ndarray = _np.ndarray
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        for a in args:
+            if isinstance(a, ndarray):
+                break
+        else:
+            if not kwargs:
+                return fn(*args)
+        vals, kwargs = _operands(names, args, kwargs)
+        vals = [_dense_array(fn.__name__, a) for a in vals]
+        kwargs = {k: _dense_array(fn.__name__, v) for k, v in kwargs.items()}
+        return fn(*_promote_pair(vals, names), **kwargs)
+
+    return wrapper
+
+
+solve = _refusing_narrowing(solve, "A", "b")
+inv = _refusing_narrowing(inv, "A")
+lu = _refusing_narrowing(lu, "A")
+matmul = _refusing_narrowing(matmul, "A", "B")
+
+
+def _contiguous_floats(fn, *names):
+    """fn, with its floating and complex NumPy arguments made C-contiguous,
+    dtype kept, and a float32/float64 pair taken to the wider type. norm and
+    dot have integer overloads too (widening dot), so other dtypes pass
+    through to them unchanged."""
+    import functools
+
+    import numpy as _np
+
+    def fix(a):
+        if isinstance(a, _np.ndarray) and a.dtype.name in _NUMPY_TO_MTL5:
+            return _np.ascontiguousarray(a)
+        return a
+
+    ndarray = _np.ndarray
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        for a in args:
+            if isinstance(a, ndarray):
+                break
+        else:
+            if not kwargs:
+                return fn(*args)
+        vals, kwargs = _operands(names, args, kwargs)
+        vals = [fix(a) for a in vals]
+        return fn(*_promote_pair(vals, names), **{k: fix(v) for k, v in kwargs.items()})
+
+    return wrapper
+
+
+norm = _contiguous_floats(norm, "x")
+dot = _contiguous_floats(dot, "a", "b")
+
+
 # Re-export det (avoids shadowing the builtin namespace)
 def det(A):
     """Compute the determinant of a matrix via LU factorization."""
-    return _det(A)
+    return _det(_dense_array("det", A))
 
 
 _native_cholesky = cholesky
@@ -491,6 +613,7 @@ def cholesky(A):  # noqa: F811
     new matrix. For complex input the factorization is A = L L^H, so
     reconstruct with `L @ L.conj().T`.
     """
+    A = _dense_array("cholesky", A)
     dt = getattr(A, "dtype", None)
     if isinstance(dt, str) and dt in _UNIVERSAL_DTYPES:
         return getattr(_core, f"CholeskyFactor_{dt}")(A)

@@ -156,7 +156,11 @@ def _wrap_nanobind_functions() -> None:
     for module in (mtl5, mtl5.sparse, mtl5.io, mtl5.mixed):
         for name in dir(module):
             obj = getattr(module, name)
-            if name.startswith("_") or type(obj).__name__ != "nb_func":
+            # A Python wrapper of an nb_func (mtl5.solve, #152) is documented
+            # as the nb_func it wraps, from the docstring functools.wraps kept.
+            nanobind = type(obj).__name__ == "nb_func"
+            nanobind = nanobind or type(getattr(obj, "__wrapped__", None)).__name__ == "nb_func"
+            if name.startswith("_") or not nanobind:
                 continue
 
             def wrapper(*args, _f=obj, **kwargs):
