@@ -18,8 +18,9 @@ against, and semantic-release manages only the **patch** component.
 - **Stability of factorizations notebook** (`notebooks/stability.ipynb`, for
   #166), the fourth matrix-property notebook.
   - Backward against forward error. LU's normwise backward error stays at 2
-    to 4 times u in each of the eight formats across κ = 1..10¹⁶, while the
-    forward error follows κ·u.
+    to 4 times u in each of the seven formats a float64 residual can resolve
+    (all but `dd_cascade`), across κ = 1..10¹⁶, while the forward error
+    follows κ·u.
   - The growth factor of partial pivoting, read from `mtl5.sparse.splu`'s U.
     On random matrices the median reaches 8.2 at n = 256. Wilkinson's matrix
     reaches 2ⁿ⁻¹: at n = 60, with κ = 27, LU's backward error is 3·10⁻², and
