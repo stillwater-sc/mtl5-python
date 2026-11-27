@@ -24,6 +24,7 @@ scipy-interop
 
 ../notebooks/generators
 ../notebooks/conditioning
+../notebooks/spectra_inertia
 ```
 
 ```{toctree}

@@ -15,6 +15,23 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Spectra and inertia notebook** (`notebooks/spectra_inertia.ipynb`, for
+  #166). The second matrix-property notebook, after the conditioning one.
+  - Strip plots of the eigenvalues, coloured by sign, beside the inertia, for
+    `randspd`, an indefinite `randsym`, `clement`, `wilkinson` and `rosser`.
+  - `randsym(n, eigenvalues, seed=)` as a controlled variable: two seeds give
+    the same spectrum in different matrices.
+  - Spectrum slicing: the negative pivots of `ldlt(A − σI)` count the
+    eigenvalues below σ. Bisection on that count splits `wilkinson(21)`'s top
+    pair, 7·10⁻¹⁴ apart. `eigvalsh` at its default tolerance merges the two.
+  - LDLᵀ inertia in each of the eight formats: a small eigenvalue's sign is
+    reliable only while it is above about the format's unit roundoff.
+  - Gershgorin discs: a tight bound on the spectral radius, but a
+    definiteness test only for nearly diagonal matrices.
+  - Every matrix is seeded, and the notebook runs in about three seconds. The
+    parametric indefinite `randsym` (stillwater-sc/mtl5#961) joins once the
+    MTL5 release that carries it is bound.
+
 - **Conditioning notebook** (`notebooks/conditioning.ipynb`, for #166). It is
   the first of the matrix-property visualizations planned in #166, on the site
   under "Test matrices". It compares eight number systems at three widths:
