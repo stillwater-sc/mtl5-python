@@ -1704,6 +1704,15 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.12 (2026-11-27)
+
+### Features
+
+- **generators**: Seed= on randorth, randspd, randsym and randsvd
+  ([#163](https://github.com/stillwater-sc/mtl5-python/pull/163),
+  [`8f03c6e`](https://github.com/stillwater-sc/mtl5-python/commit/8f03c6edf1eaf3275d84db6338b6973a18bbb345))
+
+
 ## v5.25.11 (2026-11-27)
 
 ### Bug Fixes
