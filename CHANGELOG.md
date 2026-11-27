@@ -479,6 +479,29 @@ against, and semantic-release manages only the **patch** component.
 
 ### Fixed
 
+- **NumPy input to the dense solvers no longer drops to float32** (#152).
+  When an array's dtype or layout matched no overload exactly, nanobind's
+  converting pass gave it to the first overload that accepts a cast, the
+  float32 one. An int64 matrix came back in float32. So did a float64 matrix
+  in Fortran order, a transposed or strided one, or one paired with a
+  float32 `b`. None of these warned.
+  - **Layout:** `solve`, `inv`, `lu`, `cholesky`, `matmul` and `det` make
+    any layout C-contiguous with the dtype kept, so float64 stays float64.
+  - **Mixed pair:** a float32/float64 pair goes to float64, which is exact.
+  - **`norm` and `dot`:** a strided float vector keeps its dtype the same
+    way. Their integer overloads (widening dot) are unchanged.
+  - **Behaviour change:** an integer, bool or float16 array is now refused
+    with a `TypeError` that names the cast (`a.astype(np.float64)`). That is
+    how `qr`, `lq`, `ldlt` and `bunch_kaufman` already treat such arrays.
+    `cholesky` used to differ, accepting an int64 array silently in float32;
+    it now follows the same rule. A universal_dtypes array is pointed at
+    `mtl5.matrix(a)`.
+  - **C++:** the ndarray parameters of these six are `noconvert`, so a direct
+    `_core` call raises instead of narrowing.
+  - Tests cover every entry point with int64, int32, uint8, bool and float16
+    input, and with Fortran-order and strided float64. 52 of the 62 fail
+    before the fix.
+
 - **Threshold pivoting works under a fill-reducing ordering** (MTL5 pin
   v5.24.0 → v5.24.1, MTL5 #917). `splu`, `supernodal_lu` and `klu` preferred
   the wrong row when keeping a pivot on the diagonal. Column `k` of the

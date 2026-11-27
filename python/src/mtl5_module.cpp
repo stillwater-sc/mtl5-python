@@ -409,6 +409,14 @@ void register_native_dot_overload(nb::module_& m) {
 
 // ---------------------------------------------------------------------------
 // Solve for native types — accepts both ndarray and VectorView/MatrixView
+//
+// The ndarray arguments of solve, matmul, det, inv, lu and cholesky are
+// `noconvert` (#152). Otherwise nanobind's second, converting pass hands an
+// integer, float16 or non-contiguous array to the first overload that accepts
+// a cast, the float32 one, and a float64 array came back in single precision.
+// mtl5/__init__.py checks the input first: any layout goes to C order with
+// the dtype kept, and an integer or float16 array is refused with the cast to
+// make, as the factorizations refuse it.
 // ---------------------------------------------------------------------------
 template <typename T>
     requires std::is_floating_point_v<T>
@@ -453,7 +461,7 @@ void register_native_solve(nb::module_& m) {
         std::size_t shape[1] = { n };
         nb::capsule owner(buf, [](void* p) noexcept { delete[] static_cast<T*>(p); });
         return nb::ndarray<nb::numpy, T, nb::ndim<1>>(buf, 1, shape, owner);
-    }, "A"_a, "b"_a);
+    }, nb::arg("A").noconvert(), nb::arg("b").noconvert());
 
     // VectorView/MatrixView overload
     m.def("solve", [](const MatrixView<T>& A_mv, const VectorView<T>& b_vv) {
@@ -600,7 +608,7 @@ void register_native_dense_ops(nb::module_& m) {
             mtl::mult(A, B, C);
         }
         return MV(std::move(C));
-    }, "A"_a, "B"_a);
+    }, nb::arg("A").noconvert(), nb::arg("B").noconvert());
 
     // matrix-vector multiplication
     m.def("matvec", [](const MV& A_mv, const VV& x_vv) {
@@ -662,7 +670,7 @@ void register_native_dense_ops(nb::module_& m) {
             throw std::invalid_argument("det: A must be square");
         nogil guard;
         return compute_det(copy_ndarray_to_dense<T>(A_np));
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 
     // -- inv (matrix inverse) ---------------------------------------------
     m.def("inv", [](const MV& A_mv) {
@@ -688,7 +696,7 @@ void register_native_dense_ops(nb::module_& m) {
             Ainv = mtl::inv(A);
         }
         return MV(std::move(Ainv));
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 
     // -- LU factorization object ------------------------------------------
     using LUF = LUFactor<T>;
@@ -741,7 +749,7 @@ void register_native_dense_ops(nb::module_& m) {
         nogil guard;
         Mat A = copy_ndarray_to_dense<T>(A_np);
         return LUF(A);
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 
     // -- Cholesky factorization object ------------------------------------
     using CF = CholeskyFactor<T>;
@@ -797,7 +805,7 @@ void register_native_dense_ops(nb::module_& m) {
         nogil guard;
         Mat A = copy_ndarray_to_dense<T>(A_np);
         return CF(A);
-    }, "A"_a);
+    }, nb::arg("A").noconvert());
 }
 
 // ===========================================================================
