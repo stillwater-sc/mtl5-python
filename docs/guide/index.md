@@ -23,6 +23,7 @@ scipy-interop
 :caption: Test matrices
 
 ../notebooks/generators
+../notebooks/conditioning
 ```
 
 ```{toctree}
