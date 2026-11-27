@@ -435,7 +435,7 @@ void for_each_universal(nb::module_& m) {
      Reg<posit8>{}(m), Reg<posit16>{}(m), Reg<posit32>{}(m), Reg<posit64>{}(m),
      Reg<fixpnt8>{}(m), Reg<fixpnt16>{}(m),
      Reg<lns16>{}(m), Reg<lns32>{}(m),
-     Reg<cfloat32>{}(m), Reg<takum32>{}(m),
+     Reg<cfloat32>{}(m), Reg<takum16>{}(m), Reg<takum32>{}(m),
      Reg<dd_cascade>{}(m), Reg<td_cascade>{}(m), Reg<qd_cascade>{}(m));
 }
 

@@ -10,7 +10,7 @@ Target ecosystem: NumPy, SciPy, JAX, PyTorch, pandas, scikit-learn.
 
 Key capabilities:
 - Zero-copy array interop via `nb::ndarray` (NumPy, PyTorch, JAX)
-- 25 element types: native IEEE/complex/integer plus Universal number systems (posit, fixpnt, lns, cfloat, takum, float cascades). See "Element types" below
+- 26 element types: native IEEE/complex/integer plus Universal number systems (posit, fixpnt, lns, cfloat, takum, float cascades). See "Element types" below
 - Dense/sparse linear algebra solvers exposed to Python with hardware accelerator dispatch
 - SciPy sparse matrix interop and LinearOperator protocol
 
@@ -77,12 +77,12 @@ Every element type has its own `DenseVector_<suffix>` / `DenseMatrix_<suffix>` c
 | `posit8/16/32/64` | `posit<N,2>` | es=2 for every width |
 | `fixpnt8`, `fixpnt16` | `fixpnt<8,4,Saturate>`, `fixpnt<16,8,Saturate>` | saturating |
 | `lns16`, `lns32` | `lns<16,8>`, `lns<32,16>` | logarithmic number system |
-| `takum32` | `takum<32,3,uint32_t>` | tapered logarithmic |
+| `takum16`, `takum32` | `takum<16,3,uint16_t>`, `takum<32,3,uint32_t>` | linear takum (Universal's bare `takum`; `takum_log` is not bound) |
 | `dd_cascade`, `td_cascade`, `qd_cascade` | Universal float cascades | about 32/48/64 decimal digits |
 
 Coverage differs by entry point:
-- `mtl5.dtypes()` / `convert()` cover the 17 non-complex, non-integer types. Integer types are deliberately excluded, because converting reals to i8 is a quantization scheme, not a cast.
-- `universal_dtypes` interop (`_universal_interop.SUPPORTED`) covers 13 types: posit*, fixpnt*, lns*, takum32, fp16, and the cascades. `fp8` and `cfloat32` are not covered.
+- `mtl5.dtypes()` / `convert()` cover the 18 non-complex, non-integer types. Integer types are deliberately excluded, because converting reals to i8 is a quantization scheme, not a cast.
+- `universal_dtypes` interop (`_universal_interop.SUPPORTED`) covers 14 types: posit*, fixpnt*, lns*, takum16/32, fp16, and the cascades. `fp8` and `cfloat32` are not covered.
 - pandas registers only `posit16` as an extension dtype.
 - No custom dtypes are registered with PyTorch or JAX. Those frameworks get zero-copy only for the native types.
 

@@ -268,8 +268,8 @@ v.to_universal()  # ndarray[posit16] again; to_numpy() still gives float64
 ```
 
 `mtl5.matrix()` and the `_copy` forms work the same way. Supported: `posit8`,
-`posit16`, `posit32`, `posit64`, `fixpnt8`, `fixpnt16`, `lns16`, `lns32`, `takum32`,
-`fp16` and the `dd`/`td`/`qd` cascades. These are the formats whose encoding
+`posit16`, `posit32`, `posit64`, `fixpnt8`, `fixpnt16`, `lns16`, `lns32`, `takum16`,
+`takum32`, `fp16` and the `dd`/`td`/`qd` cascades. These are the formats whose encoding
 matches this build. The test suite checks that every 8- and 16-bit pattern
 decodes the same in both libraries. Two dtypes are refused with a `TypeError`
 rather than misread:

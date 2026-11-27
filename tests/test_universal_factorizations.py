@@ -52,6 +52,7 @@ TIERS = [
     ("qd_cascade", 1e-14, 1e-14, 1e-14),
     ("lns32", 1e-3, 1e-3, 1e-3),
     ("posit16", 1e-1, 1e-1, 1e-2),
+    ("takum16", 1e-1, 1e-1, 1e-2),
     ("fp16", 1e-1, 1e-1, 1e-2),
     ("lns16", 1e-1, 1e-1, 1e-1),
 ]
@@ -70,6 +71,7 @@ ALL_UNIVERSAL = [
     "lns16",
     "lns32",
     "cfloat32",
+    "takum16",
     "takum32",
     "dd_cascade",
     "td_cascade",
@@ -259,6 +261,7 @@ LQ_TIERS = [
     ("qd_cascade", 1e-14, 1e-14),
     ("lns32", 1e-3, 1e-3),
     ("posit16", 1e-1, 1e-1),
+    ("takum16", 1e-1, 1e-1),
     ("fp16", 1e-1, 1e-1),
     ("lns16", 1e-1, 1e-1),
 ]
@@ -275,6 +278,7 @@ SOLVE_TIERS = [
     ("qd_cascade", 1e-14),
     ("lns32", 1e-4),
     ("posit16", 1e-2),
+    ("takum16", 1e-2),
     ("fp16", 1e-2),
     ("lns16", 1e-2),
     ("fixpnt16", 1e-1),

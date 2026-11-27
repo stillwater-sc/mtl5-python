@@ -1,4 +1,4 @@
-"""Tests for the extended number types — cfloat32, takum32, and the cascades.
+"""Tests for the extended number types — cfloat32, the takums, and the cascades.
 
 These five were bound for the number-system benchmarks (#69), which needed a
 wider spread of formats than posit/fixpnt/lns gave us:
@@ -6,7 +6,9 @@ wider spread of formats than posit/fixpnt/lns gave us:
   cfloat32    IEEE binary32 through the emulation layer. The control: paired
               against hardware `float` it isolates emulation overhead from the
               cost of any particular format.
-  takum32     tapered logarithmic, a different taper from posit's.
+  takum32     the linear takum: tapered, with a different taper from posit's.
+  takum16     the 16-bit takum, added later to compare against posit16 and
+              fp16 at the same width.
   dd/td/qd    cascades of 2/3/4 doubles — the only bound formats carrying MORE
               precision than float64.
 
@@ -30,6 +32,7 @@ import mtl5
 # because that is what the boundary carries (see the module docstring).
 EXTENDED = [
     ("cfloat32", 1e-6),
+    ("takum16", 1e-2),  # ~11 bits near 1; a 48-term gemv loses 2e-3
     ("takum32", 1e-6),
     ("dd_cascade", 1e-14),
     ("td_cascade", 1e-14),

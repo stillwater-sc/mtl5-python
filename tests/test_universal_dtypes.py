@@ -21,7 +21,7 @@ import mtl5
 ud = pytest.importorskip("universal_dtypes")
 
 WORD = {1: np.uint8, 2: np.uint16, 4: np.uint32, 8: np.uint64}
-NARROW = ["posit8", "posit16", "fixpnt8", "fixpnt16", "lns16", "fp16"]
+NARROW = ["posit8", "posit16", "fixpnt8", "fixpnt16", "lns16", "takum16", "fp16"]
 WIDE = ["posit32", "posit64", "lns32", "takum32"]
 CASCADES = {"dd_cascade": 2, "td_cascade": 3, "qd_cascade": 4}
 
@@ -196,7 +196,7 @@ class TestUnsupportedDtypesAreRefused:
         with pytest.raises(TypeError, match="e2m5"):
             mtl5.vector(np.array([1.0], dtype=ud.fp8e5m2))
 
-    @pytest.mark.parametrize("name", ["posit12", "posit8e0", "q15", "bfloat16", "takum16"])
+    @pytest.mark.parametrize("name", ["posit12", "posit8e0", "q15", "bfloat16", "takum8"])
     def test_no_mtl5_counterpart(self, name):
         with pytest.raises(TypeError, match="not supported"):
             mtl5.vector(np.array([0.5], dtype=getattr(ud, name)))
