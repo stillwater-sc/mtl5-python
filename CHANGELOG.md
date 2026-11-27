@@ -1651,6 +1651,39 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.9 (2026-11-27)
+
+### Bug Fixes
+
+- **build**: Require GCC 12, as documented, and build CI's gcc jobs with it
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **interop**: Refuse fp16 transport across Universal 5.15's encoding change
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **tests**: Build the refusal test's vector under a compatible simulated pair
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+- **tests**: Pick the posit32/takum32 band from the Universal release
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+### Chores
+
+- **deps**: Bump Universal to v5.18.0
+  ([#160](https://github.com/stillwater-sc/mtl5-python/pull/160),
+  [`b0ca9f1`](https://github.com/stillwater-sc/mtl5-python/commit/b0ca9f14621541575f3a4083231273e976f16c46))
+
+### Documentation
+
+- Session log for 2026-11-26; CHANGELOG cross-reference to mtl5#953
+  ([#159](https://github.com/stillwater-sc/mtl5-python/pull/159),
+  [`d428f29`](https://github.com/stillwater-sc/mtl5-python/commit/d428f29e2735cd61c447428182a2bf11870bafab))
+
+
 ## v5.25.8 (2026-11-27)
 
 ### Bug Fixes
