@@ -37,14 +37,13 @@ against, and semantic-release manages only the **patch** component.
       reports the inertia.
     - Both examples' filters give the same estimates with either
       factorization.
-    - In float32, the bearing-only filter breaks with both factorizations.
-      The C++ run fails at the same step with each, and here the two drift to
-      unrelated estimates. The cause is the UKF weights at alpha = 1e-3:
-      W₀ ≈ −10⁶, so the weighted means cancel and rounding decides the
-      result. With alpha = 1, both float32 filters match float64.
-    - The bearing is wrapped at the `atan2` branch cut in the sigma points,
-      not only in the innovation as in the C++. Both examples' targets start
-      near the cut.
+    - The float32 bearing-only filter fails at the same step with both
+      factorizations. The cause is the UKF weights at alpha = 1e-3: W₀ ≈ −10⁶,
+      so the weighted means and covariances cancel. With alpha = 1, both
+      float32 filters run and match float64.
+    - A sigma point's bearing more than π from the central one's is moved by
+      2π before the sums, not only the innovation as in the C++. Both
+      examples' targets start near the `atan2` branch cut.
   - **Zero copy.**
     - The rules of a view over NumPy memory, each checked: write-through, a
       `TypeError` instead of a hidden copy, explicit copies, aliasing, strided
