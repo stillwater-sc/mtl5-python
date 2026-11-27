@@ -44,6 +44,11 @@ against, and semantic-release manages only the **patch** component.
     - A sigma point's bearing more than π from the central one's is moved by
       2π before the sums, not only the innovation as in the C++. Both
       examples' targets start near the `atan2` branch cut.
+    - H₁₃ is where Cholesky stops on Linux x86-64. Its last pivot is rounding
+      noise, −6e-17 there and +2e-14 on macOS arm64, where both
+      factorizations complete. The notebook checks only what holds on both.
+    - The examples' conclusions, which their own output contradicts, are
+      reported upstream as stillwater-sc/mtl5#953.
   - **Zero copy.**
     - The rules of a view over NumPy memory, each checked: write-through, a
       `TypeError` instead of a hidden copy, explicit copies, aliasing, strided
