@@ -1666,6 +1666,21 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.10 (2026-11-27)
+
+### Bug Fixes
+
+- **norms**: Bind frobenius_norm and the matrix norm for real matrices
+  ([#161](https://github.com/stillwater-sc/mtl5-python/pull/161),
+  [`f1fff32`](https://github.com/stillwater-sc/mtl5-python/commit/f1fff32bb7cf02395b2d8e6bae11882a46bbfe7e))
+
+### Documentation
+
+- **pca**: The From C++ row passes mtl5.matrix(Xc), as the cell does
+  ([#161](https://github.com/stillwater-sc/mtl5-python/pull/161),
+  [`f1fff32`](https://github.com/stillwater-sc/mtl5-python/commit/f1fff32bb7cf02395b2d8e6bae11882a46bbfe7e))
+
+
 ## v5.25.9 (2026-11-27)
 
 ### Bug Fixes
