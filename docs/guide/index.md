@@ -26,6 +26,7 @@ scipy-interop
 ../notebooks/conditioning
 ../notebooks/spectra_inertia
 ../notebooks/nonnormality
+../notebooks/stability
 ```
 
 ```{toctree}
