@@ -28,6 +28,7 @@ scipy-interop
 ../notebooks/nonnormality
 ../notebooks/stability
 ../notebooks/convergence
+../notebooks/structure_range
 ```
 
 ```{toctree}

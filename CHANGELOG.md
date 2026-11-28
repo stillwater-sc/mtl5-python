@@ -15,6 +15,21 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Structure and dynamic range notebook** (`notebooks/structure_range.ipynb`,
+  for #166), the sixth matrix-property notebook.
+  - Correct digits against magnitude for seven formats. posit16 keeps at least
+    fp16's digits only from about 0.006 to 100 and takum16 from 0.2 to 3, but
+    takum16 keeps about two digits out to 10⁻⁵⁰ and 10⁵⁰, where fp16 and posit16 hold
+    nothing.
+  - Magnitude heatmaps of A, A⁻¹, L and U for `hilbert(8)`, `kahan(16, 0.5)`,
+    `pascal(10)` and tridiag(−1, 4, −1), and their entries and eigenvalues on
+    the 16-bit precision curves.
+  - Rounding each matrix and its inverse to each format: fp16 overflows on
+    Hilbert's and Kahan's inverses and flushes the tridiagonal inverse's tail
+    to zero; posit16 and takum16 hold every entry.
+  - Scaling an orthogonal matrix by 2ᵏ leaves IEEE precision flat inside the
+    range and moves posit and takum precision, which peaks where the entries
+    are near 1.
 - **Krylov convergence notebook** (`notebooks/convergence.ipynb`, for #166),
   the fifth matrix-property notebook.
   - CG on five `randspd` matrices with κ = 10⁴ and different spectra takes 2
