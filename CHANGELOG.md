@@ -24,7 +24,7 @@ against, and semantic-release manages only the **patch** component.
     componentwise backward error of LU from up to 11.8u to below u.
   - Column scaling changes only the units of x: each component's relative
     error is the same, bit for bit, at every scaling.
-  - The same row scaling in seven formats: fp16 flushes rows to zero, posit16
+  - The same row scaling in seven formats: fp16 rounds whole rows to zero, posit16
     loses every digit by 2⁻³⁶, and takum32 stays close to f32.
 - **Krylov convergence notebook** (`notebooks/convergence.ipynb`, for #166),
   the fifth matrix-property notebook.
