@@ -15,6 +15,17 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Componentwise conditioning notebook** (`notebooks/componentwise.ipynb`,
+  for #166), the seventh matrix-property notebook.
+  - Row scaling a `randsvd` matrix with κ₂ = 10 by up to 2⁻⁶⁰ takes κ∞ to
+    3·10¹⁸, while Skeel's cond(A) stays at 47 and LU's float64 forward error
+    stays below 30u.
+  - One step of fixed-precision iterative refinement brings the Oettli–Prager
+    componentwise backward error of LU from up to 11.8u to below u.
+  - Column scaling changes only the units of x: each component's relative
+    error is the same, bit for bit, at every scaling.
+  - The same row scaling in seven formats: fp16 flushes rows to zero, posit16
+    loses every digit by 2⁻³⁶, and takum32 stays close to f32.
 - **Krylov convergence notebook** (`notebooks/convergence.ipynb`, for #166),
   the fifth matrix-property notebook.
   - CG on five `randspd` matrices with κ = 10⁴ and different spectra takes 2
