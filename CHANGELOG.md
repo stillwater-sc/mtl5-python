@@ -1788,6 +1788,109 @@ policy (minor follows the MTL5 release built against), not new surface.
 
 <!-- version list -->
 
+## v5.25.14 (2026-11-28)
+
+### Bug Fixes
+
+- **notebooks**: Conditioning computes f32's rounded spectra in float64
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+### Documentation
+
+- **notebooks**: Conditioning and accuracy across number systems
+  ([#168](https://github.com/stillwater-sc/mtl5-python/pull/168),
+  [`10ceed9`](https://github.com/stillwater-sc/mtl5-python/commit/10ceed9969d830d46a98560346952e57a7d7c6c5))
+
+- **notebooks**: Conditioning: say what each measurement is
+  ([#168](https://github.com/stillwater-sc/mtl5-python/pull/168),
+  [`10ceed9`](https://github.com/stillwater-sc/mtl5-python/commit/10ceed9969d830d46a98560346952e57a7d7c6c5))
+
+- **notebooks**: Non-normality, when eigenvalues mislead
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: compute the f32 row's eigenvalues in float64
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: five more statements qualified
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: four statements made exact
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: LAPACK as the independent reference
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: measure displacement as Bauer-Fike does
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: propagate the pair error, soften two claims
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: seven local review findings
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Non-normality: tight tolerance for the frank(12) solves
+  ([#170](https://github.com/stillwater-sc/mtl5-python/pull/170),
+  [`22602fb`](https://github.com/stillwater-sc/mtl5-python/commit/22602fbbcab57e5c970f2b0747055e27db28dae0))
+
+- **notebooks**: Spectra and inertia of symmetric matrices
+  ([#169](https://github.com/stillwater-sc/mtl5-python/pull/169),
+  [`317a58b`](https://github.com/stillwater-sc/mtl5-python/commit/317a58b8d280a17f6d1b1adac2650df1533e3499))
+
+- **notebooks**: Spectra: bisection survives a midpoint on an eigenvalue
+  ([#169](https://github.com/stillwater-sc/mtl5-python/pull/169),
+  [`317a58b`](https://github.com/stillwater-sc/mtl5-python/commit/317a58b8d280a17f6d1b1adac2650df1533e3499))
+
+- **notebooks**: Spectra: count_below survives an exactly zero pivot
+  ([#169](https://github.com/stillwater-sc/mtl5-python/pull/169),
+  [`317a58b`](https://github.com/stillwater-sc/mtl5-python/commit/317a58b8d280a17f6d1b1adac2650df1533e3499))
+
+- **notebooks**: Spectra: eight local review findings
+  ([#169](https://github.com/stillwater-sc/mtl5-python/pull/169),
+  [`317a58b`](https://github.com/stillwater-sc/mtl5-python/commit/317a58b8d280a17f6d1b1adac2650df1533e3499))
+
+- **notebooks**: Spectra: keep the shift fixed on a zero pivot
+  ([#169](https://github.com/stillwater-sc/mtl5-python/pull/169),
+  [`317a58b`](https://github.com/stillwater-sc/mtl5-python/commit/317a58b8d280a17f6d1b1adac2650df1533e3499))
+
+- **notebooks**: Spectra: the Weyl argument needs a small backward error
+  ([#169](https://github.com/stillwater-sc/mtl5-python/pull/169),
+  [`317a58b`](https://github.com/stillwater-sc/mtl5-python/commit/317a58b8d280a17f6d1b1adac2650df1533e3499))
+
+- **notebooks**: Stability: exact residuals and nine scoped statements
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+- **notebooks**: Stability: kappa*u is an error scale; dd_cascade unresolved
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+- **notebooks**: Stability: report BK's pivots; plot only resolvable forward error
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+- **notebooks**: Stability: six more statements scoped to what is measured
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+- **notebooks**: Stability: the measured growth is final-U growth
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+- **notebooks**: The stability of factorizations
+  ([#171](https://github.com/stillwater-sc/mtl5-python/pull/171),
+  [`8cf1222`](https://github.com/stillwater-sc/mtl5-python/commit/8cf12227bd73fd2a3ea25e0c592240beb6a8f7fc))
+
+
 ## v5.25.13 (2026-11-27)
 
 ### Documentation
