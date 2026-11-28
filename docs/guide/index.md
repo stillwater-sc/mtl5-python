@@ -27,6 +27,7 @@ scipy-interop
 ../notebooks/spectra_inertia
 ../notebooks/nonnormality
 ../notebooks/stability
+../notebooks/convergence
 ```
 
 ```{toctree}

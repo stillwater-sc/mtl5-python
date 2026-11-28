@@ -15,6 +15,20 @@ against, and semantic-release manages only the **patch** component.
 
 ### Added
 
+- **Krylov convergence notebook** (`notebooks/convergence.ipynb`, for #166),
+  the fifth matrix-property notebook.
+  - CG on five `randspd` matrices with κ = 10⁴ and different spectra takes 2
+    (two distinct eigenvalues), 14 (two clusters), 103 (arithmetic) and 692
+    (geometric) iterations, against 1417 for the κ-only bound.
+  - Iterations against κ = 10..10⁶ for three shapes: the clustered spectrum
+    stays under 20, the arithmetic one levels off near 100, and the geometric
+    one grows almost as fast as the bound.
+  - Finite precision: the geometric spectrum needs more than n iterations in
+    f64 and f32, and in f32 the recursively updated residual reaches 10⁻⁶
+    while the true residual stays near f32's rounding-error level.
+  - MINRES on an SPD and an indefinite matrix with the same eigenvalue
+    magnitudes (κ = 100): 103 against 785 iterations, the √κ-against-κ
+    difference of their bounds.
 - **Stability of factorizations notebook** (`notebooks/stability.ipynb`, for
   #166), the fourth matrix-property notebook.
   - Backward against forward error. LU's normwise backward error stays at 2
