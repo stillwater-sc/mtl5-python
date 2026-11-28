@@ -29,6 +29,7 @@ scipy-interop
 ../notebooks/stability
 ../notebooks/convergence
 ../notebooks/structure_range
+../notebooks/componentwise
 ```
 
 ```{toctree}
